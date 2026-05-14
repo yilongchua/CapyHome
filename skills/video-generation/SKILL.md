@@ -58,7 +58,7 @@ Run:
 python /mnt/skills/public/video-generation/scripts/generate.py \
   --prompt-file /mnt/user-data/workspace/prompt-file.txt \
   --reference-images /path/to/ref1.jpg \
-  --output-file /mnt/user-data/outputs/generated-video.mp4 \
+  --output-file /mnt/user-data/workspace/generated-video.mp4 \
   --aspect-ratio 16:9
 ```
 
@@ -112,7 +112,7 @@ Submit:
 ```bash
 python /mnt/skills/public/video-generation/scripts/generate.py \
   --prompt-file /mnt/user-data/workspace/winter-fox.txt \
-  --output-file /mnt/user-data/outputs/winter-fox-01.mp4 \
+  --output-file /mnt/user-data/workspace/winter-fox-01.mp4 \
   --aspect-ratio 16:9
 ```
 
@@ -135,7 +135,7 @@ Submit:
 python /mnt/skills/public/video-generation/scripts/generate.py \
   --prompt-file /mnt/user-data/workspace/street-run.json \
   --reference-images /mnt/user-data/uploads/ref-frame.jpg \
-  --output-file /mnt/user-data/outputs/street-run-01.mp4 \
+  --output-file /mnt/user-data/workspace/street-run-01.mp4 \
   --aspect-ratio 16:9
 ```
 
@@ -144,7 +144,7 @@ python /mnt/skills/public/video-generation/scripts/generate.py \
 After submission:
 
 - The script returns quickly with a `job_id`
-- Background poller completes generation and copies the final file into `/mnt/user-data/outputs/capybara/`
+- Background poller completes generation and copies the final file into `/mnt/user-data/workspace/capybara/`
 - Completion appears in chat automatically with output path
 - You can still iterate by submitting another job
 

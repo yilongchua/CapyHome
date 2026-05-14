@@ -31,7 +31,7 @@ def test_pretool_exit_code_2_blocks_tool_call():
 
 def test_filechanged_updates_observed_state():
     middleware = HooksMiddleware(HooksConfig(FileChanged=[HookCommandConfig(command="exit 0", matcher="*", timeout_seconds=2)]))
-    state = {"artifacts": ["/mnt/user-data/outputs/a.txt"], "handoff_artifacts": []}
+    state = {"artifacts": ["/mnt/user-data/workspace/a.txt"], "handoff_artifacts": []}
     update = middleware.after_model(state, _runtime())
     assert update is not None
-    assert update["hooks_state"]["observed_files"] == ["/mnt/user-data/outputs/a.txt"]
+    assert update["hooks_state"]["observed_files"] == ["/mnt/user-data/workspace/a.txt"]

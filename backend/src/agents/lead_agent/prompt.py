@@ -603,7 +603,7 @@ read_file /mnt/skills/dreamy-workflow/SKILL.md
   user's next substantive workflow request as workflow-design input even without a slash prefix.
 - If the user has not actually described the row-by-row job yet, ask what should happen per row
   before creating workflow.json.
-- Once workflow.json v2 exists at /mnt/user-data/outputs/workflow.json, it is your
+- Once workflow.json v2 exists at /mnt/user-data/workspace/workflow.json, it is your
   **executor contract**:
   - Read execution_state.current_row_index and current_step_id at the start of each turn.
   - Execute exactly the step at current_step_id for the row at current_row_index.

@@ -475,7 +475,7 @@ GET /api/threads/{thread_id}/artifacts/{path}
 ```
 
 **Path Examples:**
-- `/api/threads/abc123/artifacts/mnt/user-data/outputs/result.txt`
+- `/api/threads/abc123/artifacts/mnt/user-data/workspace/result.txt`
 - `/api/threads/abc123/artifacts/mnt/user-data/uploads/document.pdf`
 
 **Query Parameters:**

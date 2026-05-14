@@ -24,7 +24,7 @@ Use this skill when the user asks to:
 ```bash
 python /mnt/skills/public/pdf-pro/scripts/extract_text_tables.py \
   --input /mnt/user-data/uploads/document.pdf \
-  --output /mnt/user-data/outputs/document-extract.json
+  --output /mnt/user-data/workspace/document-extract.json
 ```
 
 ### Step 2: OCR scanned PDFs (if needed)
@@ -32,7 +32,7 @@ python /mnt/skills/public/pdf-pro/scripts/extract_text_tables.py \
 ```bash
 python /mnt/skills/public/pdf-pro/scripts/ocr_pdf.py \
   --input /mnt/user-data/uploads/scanned.pdf \
-  --output /mnt/user-data/outputs/scanned-ocr.md
+  --output /mnt/user-data/workspace/scanned-ocr.md
 ```
 
 ### Step 3: Merge or split PDFs
@@ -42,7 +42,7 @@ python /mnt/skills/public/pdf-pro/scripts/ocr_pdf.py \
 python /mnt/skills/public/pdf-pro/scripts/merge_split_pdf.py \
   --mode merge \
   --inputs /mnt/user-data/uploads/a.pdf /mnt/user-data/uploads/b.pdf \
-  --output /mnt/user-data/outputs/merged.pdf
+  --output /mnt/user-data/workspace/merged.pdf
 
 # Split pages 1-3
 python /mnt/skills/public/pdf-pro/scripts/merge_split_pdf.py \
@@ -50,7 +50,7 @@ python /mnt/skills/public/pdf-pro/scripts/merge_split_pdf.py \
   --input /mnt/user-data/uploads/long.pdf \
   --start-page 1 \
   --end-page 3 \
-  --output /mnt/user-data/outputs/split.pdf
+  --output /mnt/user-data/workspace/split.pdf
 ```
 
 ### Step 4: Fill AcroForm fields
@@ -59,7 +59,7 @@ python /mnt/skills/public/pdf-pro/scripts/merge_split_pdf.py \
 python /mnt/skills/public/pdf-pro/scripts/fill_forms.py \
   --input /mnt/user-data/uploads/form.pdf \
   --field-values /mnt/skills/public/pdf-pro/assets/form-field-values.example.json \
-  --output /mnt/user-data/outputs/form-filled.pdf
+  --output /mnt/user-data/workspace/form-filled.pdf
 ```
 
 ## Environment Requirements

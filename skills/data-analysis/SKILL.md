@@ -77,7 +77,7 @@ python /mnt/skills/public/data-analysis/scripts/analyze.py \
   --files /mnt/user-data/uploads/data.xlsx \
   --action query \
   --sql "SELECT * FROM Sheet1 WHERE amount > 1000" \
-  --output-file /mnt/user-data/outputs/filtered-results.csv
+  --output-file /mnt/user-data/workspace/filtered-results.csv
 ```
 
 Supported output formats (auto-detected from extension):
@@ -194,7 +194,7 @@ python /mnt/skills/public/data-analysis/scripts/analyze.py \
   --files /mnt/user-data/uploads/sales_2024.xlsx \
   --action query \
   --sql "SELECT DATE_TRUNC('month', order_date) as month, SUM(quantity * unit_price) as revenue FROM Orders GROUP BY month ORDER BY month" \
-  --output-file /mnt/user-data/outputs/monthly-trends.csv
+  --output-file /mnt/user-data/workspace/monthly-trends.csv
 ```
 
 ### Step 4: Statistical summary

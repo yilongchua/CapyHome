@@ -30,7 +30,7 @@ class TestResolvedAttachment:
         f.write_bytes(b"PDF content")
 
         att = ResolvedAttachment(
-            virtual_path="/mnt/user-data/outputs/test.pdf",
+            virtual_path="/mnt/user-data/workspace/test.pdf",
             actual_path=f,
             filename="test.pdf",
             mime_type="application/pdf",
@@ -46,7 +46,7 @@ class TestResolvedAttachment:
         f.write_bytes(b"\x89PNG")
 
         att = ResolvedAttachment(
-            virtual_path="/mnt/user-data/outputs/photo.png",
+            virtual_path="/mnt/user-data/workspace/photo.png",
             actual_path=f,
             filename="photo.png",
             mime_type="image/png",
@@ -76,7 +76,7 @@ class TestOutboundMessageAttachments:
         f.write_text("content")
 
         att = ResolvedAttachment(
-            virtual_path="/mnt/user-data/outputs/file.txt",
+            virtual_path="/mnt/user-data/workspace/file.txt",
             actual_path=f,
             filename="file.txt",
             mime_type="text/plain",
@@ -116,7 +116,7 @@ class TestResolveAttachments:
         mock_paths.sandbox_outputs_dir.return_value = outputs_dir
 
         with patch("src.config.paths.get_paths", return_value=mock_paths):
-            result = _resolve_attachments(thread_id, ["/mnt/user-data/outputs/report.pdf"])
+            result = _resolve_attachments(thread_id, ["/mnt/user-data/workspace/report.pdf"])
 
         assert len(result) == 1
         assert result[0].filename == "report.pdf"
@@ -139,7 +139,7 @@ class TestResolveAttachments:
         mock_paths.sandbox_outputs_dir.return_value = outputs_dir
 
         with patch("src.config.paths.get_paths", return_value=mock_paths):
-            result = _resolve_attachments(thread_id, ["/mnt/user-data/outputs/chart.png"])
+            result = _resolve_attachments(thread_id, ["/mnt/user-data/workspace/chart.png"])
 
         assert len(result) == 1
         assert result[0].is_image is True
@@ -157,7 +157,7 @@ class TestResolveAttachments:
         mock_paths.sandbox_outputs_dir.return_value = outputs_dir
 
         with patch("src.config.paths.get_paths", return_value=mock_paths):
-            result = _resolve_attachments("t1", ["/mnt/user-data/outputs/nonexistent.txt"])
+            result = _resolve_attachments("t1", ["/mnt/user-data/workspace/nonexistent.txt"])
 
         assert result == []
 
@@ -214,7 +214,7 @@ class TestResolveAttachments:
         mock_paths.sandbox_outputs_dir.return_value = outputs_dir
 
         with patch("src.config.paths.get_paths", return_value=mock_paths):
-            result = _resolve_attachments(thread_id, ["/mnt/user-data/outputs/../uploads/stolen.txt"])
+            result = _resolve_attachments(thread_id, ["/mnt/user-data/workspace/../uploads/stolen.txt"])
 
         assert result == []
 
@@ -241,7 +241,7 @@ class TestResolveAttachments:
         with patch("src.config.paths.get_paths", return_value=mock_paths):
             result = _resolve_attachments(
                 thread_id,
-                ["/mnt/user-data/outputs/data.csv", "/mnt/user-data/outputs/missing.txt"],
+                ["/mnt/user-data/workspace/data.csv", "/mnt/user-data/workspace/missing.txt"],
             )
 
         assert len(result) == 1
@@ -286,8 +286,8 @@ class TestBaseChannelOnOutbound:
         f2 = tmp_path / "b.png"
         f2.write_bytes(b"\x89PNG")
 
-        att1 = ResolvedAttachment("/mnt/user-data/outputs/a.txt", f1, "a.txt", "text/plain", 3, False)
-        att2 = ResolvedAttachment("/mnt/user-data/outputs/b.png", f2, "b.png", "image/png", 4, True)
+        att1 = ResolvedAttachment("/mnt/user-data/workspace/a.txt", f1, "a.txt", "text/plain", 3, False)
+        att2 = ResolvedAttachment("/mnt/user-data/workspace/b.png", f2, "b.png", "image/png", 4, True)
 
         msg = OutboundMessage(
             channel_name="dummy",
@@ -344,8 +344,8 @@ class TestBaseChannelOnOutbound:
         f2 = tmp_path / "ok.txt"
         f2.write_text("y")
 
-        att1 = ResolvedAttachment("/mnt/user-data/outputs/fail.txt", f1, "fail.txt", "text/plain", 1, False)
-        att2 = ResolvedAttachment("/mnt/user-data/outputs/ok.txt", f2, "ok.txt", "text/plain", 1, False)
+        att1 = ResolvedAttachment("/mnt/user-data/workspace/fail.txt", f1, "fail.txt", "text/plain", 1, False)
+        att2 = ResolvedAttachment("/mnt/user-data/workspace/ok.txt", f2, "ok.txt", "text/plain", 1, False)
 
         msg = OutboundMessage(
             channel_name="dummy",
@@ -373,7 +373,7 @@ class TestBaseChannelOnOutbound:
 
         f = tmp_path / "a.pdf"
         f.write_bytes(b"%PDF")
-        att = ResolvedAttachment("/mnt/user-data/outputs/a.pdf", f, "a.pdf", "application/pdf", 4, False)
+        att = ResolvedAttachment("/mnt/user-data/workspace/a.pdf", f, "a.pdf", "application/pdf", 4, False)
         msg = OutboundMessage(
             channel_name="dummy",
             chat_id="c1",
@@ -429,7 +429,7 @@ class TestManagerArtifactResolution:
         """_format_artifact_text produces expected output."""
         from src.channels.manager import _format_artifact_text
 
-        assert "report.pdf" in _format_artifact_text(["/mnt/user-data/outputs/report.pdf"])
-        result = _format_artifact_text(["/mnt/user-data/outputs/a.txt", "/mnt/user-data/outputs/b.txt"])
+        assert "report.pdf" in _format_artifact_text(["/mnt/user-data/workspace/report.pdf"])
+        result = _format_artifact_text(["/mnt/user-data/workspace/a.txt", "/mnt/user-data/workspace/b.txt"])
         assert "a.txt" in result
         assert "b.txt" in result

@@ -52,7 +52,7 @@ import {
   parseLeadingSlashCommand,
   type SlashCommandName,
 } from "@/core/threads/slash-commands";
-import { textOfMessage } from "@/core/threads/utils";
+import { pathOfThread, textOfMessage } from "@/core/threads/utils";
 import { sanitizeThreadId } from "@/core/utils/strings";
 import { cn } from "@/lib/utils";
 
@@ -128,8 +128,8 @@ const SLASH_COMMANDS: SlashCommandOption[] = [
   {
     name: "handoff",
     title: "Create handoff",
-    usage: "Generate summary markdown handoff",
-    description: "Create handoff files under mounted `.docs/handoffs/` and open a new chat draft.",
+    usage: "Fork into a new thread",
+    description: "Create a structured handoff package under `/mnt/user-data/workspace/.handoff` and open the forked thread.",
   },
   {
     name: "new",
@@ -284,7 +284,7 @@ export function InputBox({
   const { data: mountedFolder } = useMountedFolder(threadId);
   const renameThread = useRenameThread();
   const { pickFolder, isPicking } = useFolderPicker();
-  const launchPayloadAppliedRef = useRef(false);
+  const launchPayloadAppliedRef = useRef<string | null>(null);
   const stableThreadId = sanitizeThreadId(threadId);
   const attachmentMenuTriggerId = `input-attachment-menu-trigger-${stableThreadId}`;
   const privacyMenuTriggerId = `input-privacy-menu-trigger-${stableThreadId}`;
@@ -403,34 +403,19 @@ export function InputBox({
   }, [forkDraft, textInput]);
 
   useEffect(() => {
-    if (!isNewThread || launchPayloadAppliedRef.current) {
-      return;
-    }
     const payload = getPendingChatLaunchPayload();
-    if (!payload) {
+    if (payload?.targetThreadId !== threadId) {
       return;
     }
-    launchPayloadAppliedRef.current = true;
+    if (launchPayloadAppliedRef.current === threadId) {
+      return;
+    }
+    launchPayloadAppliedRef.current = threadId;
     clearPendingChatLaunchPayload();
-
-    const apply = async () => {
-      if (payload.mountedPath) {
-        try {
-          await saveMountedFolder.mutateAsync(payload.mountedPath);
-        } catch (error) {
-          const message =
-            error instanceof Error
-              ? error.message
-              : "Failed to mount handoff folder in new chat.";
-          toast.error(message);
-        }
-      }
-      if (payload.prefill?.trim()) {
-        textInput.setInput(payload.prefill);
-      }
-    };
-    void apply();
-  }, [isNewThread, saveMountedFolder, textInput]);
+    if (payload.prefill?.trim()) {
+      textInput.setInput(payload.prefill);
+    }
+  }, [textInput, threadId]);
 
   const selectedModel = useMemo(() => {
     if (models.length === 0) {
@@ -565,18 +550,6 @@ export function InputBox({
     }
     return "/workspace/chats/new";
   }, [newChatHref]);
-
-  const submitPromptText = useCallback(
-    (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed) return;
-      setFollowups([]);
-      setFollowupsHidden(false);
-      setFollowupsLoading(false);
-      onSubmit?.({ text: trimmed, files: [] }, { queued: true });
-    },
-    [onSubmit],
-  );
 
   const runCompact = useCallback(async () => {
     try {
@@ -863,32 +836,45 @@ export function InputBox({
       }
 
       if (commandName === "handoff") {
-        if (!mountedFolder) {
-          toast.error("Mount a folder first to run /handoff.");
+        if (isDreamyThread) {
+          toast.error("Exit Dreamy with /dreamy-exit before creating a handoff.");
           return;
         }
-        submitPromptText(
-          [
-            `Create a handoff package in markdown under /mnt/user-data/mounted/.docs/handoffs.`,
-            `Requirements:`,
-            `1. Create a new timestamped folder.`,
-            `2. Summarize the last 10 user messages into individual markdown files.`,
-            `3. Create index.md that links each summary file and provides a compact project status overview.`,
-            `4. Keep content concise but implementation-useful, with clear assumptions and open items.`,
-            `5. Use markdown only.`,
-          ].join("\n"),
-        );
-        const prefill = [
-          `Continue from the latest handoff package in /mnt/user-data/mounted/.docs/handoffs.`,
-          `Please read index.md first, then proceed with implementation based on those summaries.`,
-        ].join("\n");
-        setPendingChatLaunchPayload({
-          source: "handoff",
-          mountedPath: mountedFolder,
-          prefill,
-          createdAt: Date.now(),
-        });
-        router.push(getNewChatHref());
+        try {
+          const response = await fetch(
+            `${getBackendBaseURL()}${api.threads.handoff(threadId)}`,
+            {
+              method: "POST",
+            },
+          );
+          if (!response.ok) {
+            throw new Error(await response.text());
+          }
+          const payload = (await response.json()) as {
+            new_thread_id: string;
+            handoff_root_virtual_path?: string;
+            prefill?: string;
+            copied_file_count?: number;
+          };
+          setPendingChatLaunchPayload({
+            source: "handoff",
+            targetThreadId: payload.new_thread_id,
+            handoffRootVirtualPath: payload.handoff_root_virtual_path,
+            prefill: payload.prefill,
+            createdAt: Date.now(),
+          });
+          router.push(pathOfThread(payload.new_thread_id));
+          if (typeof payload.copied_file_count === "number") {
+            toast.success(`Created handoff and copied ${payload.copied_file_count} file(s) into the new thread.`);
+          } else {
+            toast.success("Created handoff and opened the forked thread.");
+          }
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Failed to create handoff.";
+          toast.error(message);
+          return;
+        }
         textInput.setInput("");
       }
     },
@@ -896,7 +882,7 @@ export function InputBox({
       disabled,
       getNewChatHref,
       handleMountFolder,
-      mountedFolder,
+      isDreamyThread,
       router,
       runAutoresearch,
       runAnalyse,
@@ -904,9 +890,8 @@ export function InputBox({
       runCompact,
       runRename,
       status,
-      submitPromptText,
       textInput,
-      isDreamyThread,
+      threadId,
       onActivateDreamy,
       onDeactivateDreamy,
     ],

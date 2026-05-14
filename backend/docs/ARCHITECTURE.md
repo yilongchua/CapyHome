@@ -180,7 +180,6 @@ class ThreadState(AgentState):
 |-------------|---------------|
 | `/mnt/user-data/workspace` | `backend/.capybara-home/threads/{thread_id}/user-data/workspace` |
 | `/mnt/user-data/uploads` | `backend/.capybara-home/threads/{thread_id}/user-data/uploads` |
-| `/mnt/user-data/outputs` | `backend/.capybara-home/threads/{thread_id}/user-data/outputs` |
 | `/mnt/skills` | `capybara-home/skills/` |
 
 ### Tool System

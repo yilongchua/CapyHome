@@ -46,7 +46,7 @@ const ChatBox: React.FC<{
   extraDirectoryFiles = [],
   onSubmitPlanRevision,
 }) => {
-  const ARTIFACTS_POLL_INTERVAL_MS = 30_000;
+  const ARTIFACTS_POLL_INTERVAL_MS = 5 * 60_000;
   const { thread } = useThread();
   const threadIdRef = useRef(threadId);
   const panelRef = usePanelRef();

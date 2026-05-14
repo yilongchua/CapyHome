@@ -70,7 +70,7 @@ class DreamyPocMiddleware(AgentMiddleware[DreamyPocState]):
         current_step = es.get("current_step_id") or (data["steps"][0]["id"] if data.get("steps") else "step-1")
         src_filename = (data.get("data_source") or {}).get("filename", "")
         base_name = src_filename.rsplit(".", 1)[0] if "." in src_filename else src_filename
-        output_virtual = f"/mnt/user-data/outputs/{base_name}_results.csv"
+        output_virtual = f"/mnt/user-data/workspace/{base_name}_results.csv"
         row_marker = f"row {current_row + 1} of {total_rows}"
 
         # Inject once per row — skip if the last dreamy_anchor already covers this row

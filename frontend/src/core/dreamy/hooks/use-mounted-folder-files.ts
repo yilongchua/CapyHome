@@ -5,8 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { getBackendBaseURL } from "@/core/config";
 import { api } from "@/core/dreamy/api";
 import {
-  MOUNTED_FOLDER_REFRESH_EMPTY,
-  MOUNTED_FOLDER_REFRESH_HAS_DATA,
   MOUNTED_FOLDER_STALE_TIME,
 } from "@/core/dreamy/constants";
 
@@ -24,7 +22,9 @@ export interface MountedFolderFilesResult {
 }
 
 async function fetchMountedFolderFiles(threadId: string): Promise<MountedFolderFilesResult> {
-  const res = await fetch(`${getBackendBaseURL()}${api.threads.dreamy.mountFolderFiles(threadId)}`);
+  const res = await fetch(
+    `${getBackendBaseURL()}${api.threads.dreamy.mountFolderFiles(threadId)}?limit=2000`,
+  );
   if (!res.ok) throw new Error("Failed to list mounted folder files");
   return res.json() as Promise<MountedFolderFilesResult>;
 }
@@ -35,7 +35,7 @@ export function useMountedFolderFiles(threadId: string, enabled: boolean) {
     queryFn: () => fetchMountedFolderFiles(threadId),
     enabled: enabled && Boolean(threadId && threadId !== "new"),
     staleTime: MOUNTED_FOLDER_STALE_TIME,
-    refetchInterval: (query) => (query.state.data?.files?.length ? MOUNTED_FOLDER_REFRESH_HAS_DATA : MOUNTED_FOLDER_REFRESH_EMPTY),
+    refetchInterval: false,
     refetchIntervalInBackground: false,
   });
 }

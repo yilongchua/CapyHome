@@ -26,7 +26,7 @@ class Paths:
                 └── user-data/         <-- mounted as /mnt/user-data/ inside sandbox
                     ├── workspace/     <-- /mnt/user-data/workspace/
                     ├── uploads/       <-- /mnt/user-data/uploads/
-                    └── outputs/       <-- /mnt/user-data/outputs/
+                    └── outputs/       <-- /mnt/user-data/workspace/
 
     BaseDir resolution (in priority order):
         1. Constructor argument `base_dir`
@@ -126,7 +126,7 @@ class Paths:
         """
         Host path for agent-generated artifacts.
         Host: `{base_dir}/threads/{thread_id}/user-data/outputs/`
-        Sandbox: `/mnt/user-data/outputs/`
+        Sandbox: `/mnt/user-data/workspace/`
         """
         return self.thread_dir(thread_id) / "user-data" / "outputs"
 
@@ -161,7 +161,7 @@ class Paths:
         Args:
             thread_id: The thread ID.
             virtual_path: Virtual path as seen inside the sandbox, e.g.
-                          ``/mnt/user-data/outputs/report.pdf``.
+                          ``/mnt/user-data/workspace/report.pdf``.
                           Leading slashes are stripped before matching.
 
         Returns:

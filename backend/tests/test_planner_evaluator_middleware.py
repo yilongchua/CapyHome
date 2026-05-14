@@ -65,7 +65,12 @@ def test_planner_creates_plan_todos_and_handoffs(monkeypatch, tmp_path: Path):
     )
     state = {
         "messages": [HumanMessage(content="Please build this feature.")],
-        "thread_data": {"workspace_path": str(tmp_path)},
+        "thread_data": {
+            "workspace_path": str(tmp_path / "workspace"),
+            "outputs_path": str(tmp_path / "outputs"),
+            "uploads_path": str(tmp_path / "uploads"),
+            "mounted_path": None,
+        },
     }
     update = middleware.before_model(state, _runtime())
     assert update is not None
@@ -73,8 +78,9 @@ def test_planner_creates_plan_todos_and_handoffs(monkeypatch, tmp_path: Path):
     assert len(update["todo_graph"]["nodes"]) == 2
     assert update["complexity_tier"] in {"moderate", "complex"}
     assert update["plan_evaluated"] is False
-    assert (tmp_path / ".handoffs" / "plan.md").exists()
-    assert (tmp_path / ".handoffs" / "sprint_contract.md").exists()
+    assert (tmp_path / "workspace" / "plan.md").exists()
+    versioned = list((tmp_path / "workspace" / "plans").glob("plan-*.md"))
+    assert versioned
     assert update["plan"]["status"] == "draft"
     assert isinstance(update["plan"].get("plan_id"), str)
 
@@ -91,7 +97,6 @@ def test_planner_writes_versioned_plan_and_latest_alias(monkeypatch, tmp_path: P
             )
 
     monkeypatch.setattr("src.agents.middlewares.planner_middleware.create_chat_model", lambda **kwargs: _Model())
-    outputs = tmp_path / "outputs"
     workspace = tmp_path / "workspace"
     middleware = PlannerMiddleware(
         router=_router(),
@@ -105,17 +110,17 @@ def test_planner_writes_versioned_plan_and_latest_alias(monkeypatch, tmp_path: P
         "messages": [HumanMessage(content="Please audit this workflow.")],
         "thread_data": {
             "workspace_path": str(workspace),
-            "outputs_path": str(outputs),
+            "outputs_path": str(tmp_path / "outputs"),
             "uploads_path": str(tmp_path / "uploads"),
             "mounted_path": None,
         },
     }
     update = middleware.before_model(state, _runtime())
     assert update is not None
-    assert "/outputs/plans/plan-" in str(update["plan"]["plan_path"])
-    assert str(update["plan"]["latest_alias_path"]).endswith("/outputs/plan.md")
-    assert (outputs / "plan.md").exists()
-    versioned = list((outputs / "plans").glob("plan-*.md"))
+    assert "/workspace/plans/plan-" in str(update["plan"]["plan_path"])
+    assert str(update["plan"]["latest_alias_path"]).endswith("/workspace/plan.md")
+    assert (workspace / "plan.md").exists()
+    versioned = list((workspace / "plans").glob("plan-*.md"))
     assert versioned, "versioned plan file must be written"
 
 
@@ -235,9 +240,9 @@ def test_evaluator_resolves_virtual_plan_path(monkeypatch, tmp_path: Path):
             return SimpleNamespace(content="VERDICT: PASS\nCRITIQUE: Looks good.")
 
     monkeypatch.setattr("src.agents.middlewares.evaluator_middleware.create_chat_model", lambda **kwargs: _Model())
-    outputs = tmp_path / "outputs"
-    outputs.mkdir(parents=True, exist_ok=True)
-    (outputs / "plan.md").write_text("# Plan", encoding="utf-8")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "plan.md").write_text("# Plan", encoding="utf-8")
     middleware = EvaluatorMiddleware(
         router=_router(),
         requested_model="primary",
@@ -245,13 +250,13 @@ def test_evaluator_resolves_virtual_plan_path(monkeypatch, tmp_path: Path):
         handoffs_config=HandoffsConfig(enabled=True, dir=".handoffs"),
     )
     state = {
-        "plan": {"title": "Plan", "summary": "Summary", "plan_path": "/mnt/user-data/outputs/plan.md"},
+        "plan": {"title": "Plan", "summary": "Summary", "plan_path": "/mnt/user-data/workspace/plan.md"},
         "eval_attempts": 0,
         "todo_graph": {"nodes": [{"id": "todo-1", "status": "completed"}]},
         "messages": [AIMessage(content="Final answer")],
         "thread_data": {
-            "workspace_path": str(tmp_path),
-            "outputs_path": str(outputs),
+            "workspace_path": str(workspace),
+            "outputs_path": str(tmp_path / "outputs"),
             "uploads_path": str(tmp_path / "uploads"),
             "mounted_path": None,
         },

@@ -362,7 +362,7 @@ class TestExtractResponseText:
                 {
                     "type": "ai",
                     "content": "",
-                    "tool_calls": [{"name": "present_files", "args": {"filepaths": ["/mnt/user-data/outputs/data.csv"]}}],
+                    "tool_calls": [{"name": "present_files", "args": {"filepaths": ["/mnt/user-data/workspace/data.csv"]}}],
                 },
                 {"type": "tool", "name": "present_files", "content": "ok"},
             ]
@@ -781,13 +781,13 @@ class TestExtractArtifacts:
                     "type": "ai",
                     "content": "Here is your report.",
                     "tool_calls": [
-                        {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/outputs/report.md"]}},
+                        {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/workspace/report.md"]}},
                     ],
                 },
                 {"type": "tool", "name": "present_files", "content": "Successfully presented files"},
             ]
         }
-        assert _extract_artifacts(result) == ["/mnt/user-data/outputs/report.md"]
+        assert _extract_artifacts(result) == ["/mnt/user-data/workspace/report.md"]
 
     def test_empty_when_no_present_files(self):
         from src.channels.manager import _extract_artifacts
@@ -817,7 +817,7 @@ class TestExtractArtifacts:
                     "type": "ai",
                     "content": "Created report.",
                     "tool_calls": [
-                        {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/outputs/report.md"]}},
+                        {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/workspace/report.md"]}},
                     ],
                 },
                 {"type": "tool", "name": "present_files", "content": "ok"},
@@ -826,14 +826,14 @@ class TestExtractArtifacts:
                     "type": "ai",
                     "content": "Created chart.",
                     "tool_calls": [
-                        {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/outputs/chart.png"]}},
+                        {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/workspace/chart.png"]}},
                     ],
                 },
                 {"type": "tool", "name": "present_files", "content": "ok"},
             ]
         }
         # Should only return chart.png (from the last turn)
-        assert _extract_artifacts(result) == ["/mnt/user-data/outputs/chart.png"]
+        assert _extract_artifacts(result) == ["/mnt/user-data/workspace/chart.png"]
 
     def test_multiple_files_in_single_call(self):
         from src.channels.manager import _extract_artifacts
@@ -845,26 +845,26 @@ class TestExtractArtifacts:
                     "type": "ai",
                     "content": "Done.",
                     "tool_calls": [
-                        {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/outputs/a.txt", "/mnt/user-data/outputs/b.csv"]}},
+                        {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/workspace/a.txt", "/mnt/user-data/workspace/b.csv"]}},
                     ],
                 },
             ]
         }
-        assert _extract_artifacts(result) == ["/mnt/user-data/outputs/a.txt", "/mnt/user-data/outputs/b.csv"]
+        assert _extract_artifacts(result) == ["/mnt/user-data/workspace/a.txt", "/mnt/user-data/workspace/b.csv"]
 
 
 class TestFormatArtifactText:
     def test_single_artifact(self):
         from src.channels.manager import _format_artifact_text
 
-        text = _format_artifact_text(["/mnt/user-data/outputs/report.md"])
+        text = _format_artifact_text(["/mnt/user-data/workspace/report.md"])
         assert text == "Created File: 📎 report.md"
 
     def test_multiple_artifacts(self):
         from src.channels.manager import _format_artifact_text
 
         text = _format_artifact_text(
-            ["/mnt/user-data/outputs/a.txt", "/mnt/user-data/outputs/b.csv"],
+            ["/mnt/user-data/workspace/a.txt", "/mnt/user-data/workspace/b.csv"],
         )
         assert text == "Created Files: 📎 a.txt、b.csv"
 
@@ -885,7 +885,7 @@ class TestHandleChatWithArtifacts:
                         "type": "ai",
                         "content": "Here is your report.",
                         "tool_calls": [
-                            {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/outputs/report.md"]}},
+                            {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/workspace/report.md"]}},
                         ],
                     },
                     {"type": "tool", "name": "present_files", "content": "ok"},
@@ -912,7 +912,7 @@ class TestHandleChatWithArtifacts:
             assert len(outbound_received) == 1
             assert "Here is your report." in outbound_received[0].text
             assert "report.md" in outbound_received[0].text
-            assert outbound_received[0].artifacts == ["/mnt/user-data/outputs/report.md"]
+            assert outbound_received[0].artifacts == ["/mnt/user-data/workspace/report.md"]
 
         _run(go())
 
@@ -932,7 +932,7 @@ class TestHandleChatWithArtifacts:
                         "type": "ai",
                         "content": "",
                         "tool_calls": [
-                            {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/outputs/output.csv"]}},
+                            {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/workspace/output.csv"]}},
                         ],
                     },
                     {"type": "tool", "name": "present_files", "content": "ok"},
@@ -960,7 +960,7 @@ class TestHandleChatWithArtifacts:
             # Should NOT be the "(No response from agent)" fallback
             assert outbound_received[0].text != "(No response from agent)"
             assert "output.csv" in outbound_received[0].text
-            assert outbound_received[0].artifacts == ["/mnt/user-data/outputs/output.csv"]
+            assert outbound_received[0].artifacts == ["/mnt/user-data/workspace/output.csv"]
 
         _run(go())
 
@@ -981,7 +981,7 @@ class TestHandleChatWithArtifacts:
                         "type": "ai",
                         "content": "Created report.",
                         "tool_calls": [
-                            {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/outputs/report.md"]}},
+                            {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/workspace/report.md"]}},
                         ],
                     },
                     {"type": "tool", "name": "present_files", "content": "ok"},
@@ -995,7 +995,7 @@ class TestHandleChatWithArtifacts:
                         "type": "ai",
                         "content": "Created report.",
                         "tool_calls": [
-                            {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/outputs/report.md"]}},
+                            {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/workspace/report.md"]}},
                         ],
                     },
                     {"type": "tool", "name": "present_files", "content": "ok"},
@@ -1004,7 +1004,7 @@ class TestHandleChatWithArtifacts:
                         "type": "ai",
                         "content": "Created chart.",
                         "tool_calls": [
-                            {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/outputs/chart.png"]}},
+                            {"name": "present_files", "args": {"filepaths": ["/mnt/user-data/workspace/chart.png"]}},
                         ],
                     },
                     {"type": "tool", "name": "present_files", "content": "ok"},
@@ -1037,12 +1037,12 @@ class TestHandleChatWithArtifacts:
 
             # Turn 1: should include report.md
             assert "report.md" in outbound_received[0].text
-            assert outbound_received[0].artifacts == ["/mnt/user-data/outputs/report.md"]
+            assert outbound_received[0].artifacts == ["/mnt/user-data/workspace/report.md"]
 
             # Turn 2: should include ONLY chart.png (report.md is from previous turn)
             assert "chart.png" in outbound_received[1].text
             assert "report.md" not in outbound_received[1].text
-            assert outbound_received[1].artifacts == ["/mnt/user-data/outputs/chart.png"]
+            assert outbound_received[1].artifacts == ["/mnt/user-data/workspace/chart.png"]
 
         _run(go())
 

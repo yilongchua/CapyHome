@@ -9,7 +9,7 @@ class ScratchpadConfig(BaseModel):
     enabled: bool = Field(default=False, description="Enable scratchpad note capture.")
     max_entries: int = Field(default=40, ge=1, le=500, description="Maximum scratchpad entries retained in state.")
     max_chars_per_entry: int = Field(default=600, ge=64, le=4000, description="Maximum characters retained per entry.")
-    artifact_file: str = Field(default="scratchpad.md", description="Scratchpad artifact filename under handoff directory.")
+    artifact_file: str = Field(default="scratchpad.md", description="Scratchpad artifact filename under the runtime artifact directory.")
 
 
 _scratchpad_config: ScratchpadConfig = ScratchpadConfig()

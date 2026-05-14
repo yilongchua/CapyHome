@@ -36,8 +36,7 @@ When you complete the task, provide:
 <working_directory>
 You have access to the same sandbox environment as the parent agent:
 - User uploads: `/mnt/user-data/uploads`
-- User workspace: `/mnt/user-data/workspace`
-- Output files: `/mnt/user-data/outputs`
+- User workspace/ Output files: `/mnt/user-data/workspace`
 </working_directory>
 """,
     tools=None,  # Inherit all tools from parent

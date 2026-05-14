@@ -48,7 +48,7 @@ Call the Python script:
 python /mnt/skills/public/image-generation/scripts/generate.py \
   --prompt-file /mnt/user-data/workspace/prompt-file.json \
   --reference-images /path/to/ref1.jpg /path/to/ref2.png \
-  --output-file /mnt/user-data/outputs/generated-image.jpg \
+  --output-file /mnt/user-data/workspace/generated-image.jpg \
   --aspect-ratio 16:9
 ```
 
@@ -91,7 +91,7 @@ Execute generation:
 ```bash
 python /mnt/skills/public/image-generation/scripts/generate.py \
   --prompt-file /mnt/user-data/workspace/asian-woman.json \
-  --output-file /mnt/user-data/outputs/asian-woman-01.jpg \
+  --output-file /mnt/user-data/workspace/asian-woman-01.jpg \
   --aspect-ratio 2:3
 ```
 
@@ -129,7 +129,7 @@ Read the following template file only when matching the user request.
 After submission:
 
 - The script returns quickly with a `job_id`
-- Background poller completes generation and copies the final file into `/mnt/user-data/outputs/capybara/` (or thread output location)
+- Background poller completes generation and copies the final file into `/mnt/user-data/workspace/capybara/` (or thread output location)
 - Completion appears in chat automatically with output path
 - You can still iterate by submitting another job
 

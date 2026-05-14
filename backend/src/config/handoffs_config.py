@@ -4,15 +4,15 @@ from pydantic import BaseModel, Field
 
 
 class HandoffsConfig(BaseModel):
-    """Handoff artifact configuration."""
+    """Runtime artifact configuration."""
 
     enabled: bool = Field(
         default=True,
-        description="Enable writing handoff artifacts for planner/evaluator stages.",
+        description="Enable writing runtime artifacts for planner/evaluator/scratchpad stages.",
     )
     dir: str = Field(
-        default=".handoffs",
-        description="Relative directory under thread workspace for handoff artifacts.",
+        default=".runtime",
+        description="Relative directory under thread workspace for runtime artifacts.",
     )
 
 

@@ -49,8 +49,8 @@ Call the Python script:
 ```bash
 python /mnt/skills/public/podcast-generation/scripts/generate.py \
   --script-file /mnt/user-data/workspace/script-file.json \
-  --output-file /mnt/user-data/outputs/generated-podcast.mp3 \
-  --transcript-file /mnt/user-data/outputs/generated-podcast-transcript.md
+  --output-file /mnt/user-data/workspace/generated-podcast.mp3 \
+  --transcript-file /mnt/user-data/workspace/generated-podcast-transcript.md
 ```
 
 Parameters:
@@ -137,8 +137,8 @@ Step 2: Execute generation:
 ```bash
 python /mnt/skills/public/podcast-generation/scripts/generate.py \
   --script-file /mnt/user-data/workspace/ai-history-script.json \
-  --output-file /mnt/user-data/outputs/ai-history-podcast.mp3 \
-  --transcript-file /mnt/user-data/outputs/ai-history-transcript.md
+  --output-file /mnt/user-data/workspace/ai-history-podcast.mp3 \
+  --transcript-file /mnt/user-data/workspace/ai-history-transcript.md
 ```
 
 This will generate:
@@ -164,7 +164,7 @@ The generated podcast follows the "Hello Deer" format:
 
 After generation:
 
-- Podcasts and transcripts are saved in `/mnt/user-data/outputs/`
+- Podcasts and transcripts are saved in `/mnt/user-data/workspace/`
 - Share both the podcast MP3 and transcript MD with user using `present_files` tool
 - Provide brief description of the generation result (topic, duration, hosts)
 - Offer to regenerate if adjustments needed

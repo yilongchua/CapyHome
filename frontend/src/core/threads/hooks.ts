@@ -852,6 +852,7 @@ export function useThreadStream({
           (("title" in update && update.title) ||
             "dreamy_mode" in update ||
             "dreamy_intent" in update ||
+            "handoff_meta" in update ||
             "phase_execution" in update ||
             "work_mode" in update ||
             "plan" in update)
@@ -872,6 +873,9 @@ export function useThreadStream({
                       ...("dreamy_mode" in update ? { dreamy_mode: Boolean(update.dreamy_mode) } : {}),
                       ...("dreamy_intent" in update
                         ? { dreamy_intent: update.dreamy_intent }
+                        : {}),
+                      ...("handoff_meta" in update
+                        ? { handoff_meta: update.handoff_meta }
                         : {}),
                       ...("phase_execution" in update
                         ? { phase_execution: update.phase_execution }

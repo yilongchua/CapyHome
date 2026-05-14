@@ -23,7 +23,7 @@ More content.
 ## 4. Outlook
 More content.
 """.strip()
-    result = check_report_quality("/mnt/user-data/outputs/report.md", content)
+    result = check_report_quality("/mnt/user-data/workspace/report.md", content)
     assert not result.ok
     assert "duplicate_table_rows" in result.reasons
 
@@ -47,6 +47,6 @@ Detailed paragraph about risks and constraints in deployment, governance, and op
 ## 4. Outlook
 Detailed paragraph about expected future developments and assumptions.
 """.strip()
-    result = check_report_quality("/mnt/user-data/outputs/report.md", content)
+    result = check_report_quality("/mnt/user-data/workspace/report.md", content)
     assert result.ok
     assert result.reasons == []

@@ -48,7 +48,7 @@ def test_bootstrap_creates_workflow_for_minimal_prompt(tmp_path):
         module.get_paths = original_get_paths
 
     assert result is not None
-    assert "/mnt/user-data/outputs/workflow.json" in result.get("artifacts", [])
+    assert "/mnt/user-data/workspace/workflow.json" in result.get("artifacts", [])
     workflow_path = paths.sandbox_outputs_dir(thread_id) / "workflow.json"
     assert workflow_path.exists()
     workflow = json.loads(workflow_path.read_text(encoding="utf-8"))

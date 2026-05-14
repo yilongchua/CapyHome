@@ -416,7 +416,7 @@ async def install_skill(request: SkillInstallRequest) -> SkillInstallResponse:
         ```json
         {
             "thread_id": "abc123-def456",
-            "path": "/mnt/user-data/outputs/my-skill.skill"
+            "path": "/mnt/user-data/workspace/my-skill.skill"
         }
         ```
 

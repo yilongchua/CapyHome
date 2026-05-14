@@ -81,7 +81,8 @@ export function ArtifactFileDetail({
   }, [filepath]);
   const isPlanFile = useMemo(() => {
     return (
-      (filepath.endsWith("plan.md") && (filepath.includes("/workspace/") || filepath.includes("/.handoffs/"))) ||
+      (filepath.endsWith("plan.md") &&
+        (filepath.includes("/workspace/") || filepath.includes("/.handoff/") || filepath.includes("/.handoffs/"))) ||
       (filepath.includes("/workspace/plans/") && filepath.endsWith(".md") && filepath.includes("/plan-"))
     );
   }, [filepath]);

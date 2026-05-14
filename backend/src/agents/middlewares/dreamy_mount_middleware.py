@@ -18,6 +18,7 @@ from src.config.paths import get_paths
 logger = logging.getLogger(__name__)
 
 VIRTUAL_MOUNT_PATH = "/mnt/user-data/mounted"
+MAX_MOUNT_FILE_LIST = 100
 
 
 class DreamyMountState(AgentState):
@@ -63,7 +64,11 @@ class DreamyMountMiddleware(AgentMiddleware[DreamyMountState]):
             return None
 
         try:
-            files = sorted(p.name for p in folder.iterdir() if p.is_file())
+            files = sorted(
+                p.name
+                for p in folder.iterdir()
+                if p.is_file() and not p.name.startswith(".")
+            )
         except Exception as exc:
             logger.warning("Failed to list mounted folder %s: %s", mounted_path_str, exc)
             files = []
@@ -90,8 +95,12 @@ class DreamyMountMiddleware(AgentMiddleware[DreamyMountState]):
         ]
         if files:
             lines.append("Files in this folder:")
-            for f in files:
+            for f in files[:MAX_MOUNT_FILE_LIST]:
                 lines.append(f"  - {VIRTUAL_MOUNT_PATH}/{f}")
+            if len(files) > MAX_MOUNT_FILE_LIST:
+                lines.append(
+                    f"  - ... and {len(files) - MAX_MOUNT_FILE_LIST} more files (truncated)."
+                )
         else:
             lines.append("(folder is empty or contains no readable files)")
         lines += [

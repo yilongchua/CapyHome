@@ -11,7 +11,7 @@ from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 from langgraph.typing import ContextT
 
-from src.agents.middlewares.handoff_sync import sync_handoff_files_from_state
+from src.agents.middlewares.handoff_sync import ensure_plan_state, sync_handoff_files_from_state
 
 
 class TodoNodeInput(TypedDict, total=False):
@@ -26,6 +26,8 @@ class TodoNodeInput(TypedDict, total=False):
 
 
 class _TodoToolState(TypedDict, total=False):
+    plan: NotRequired[dict | None]
+    plan_history: NotRequired[list[dict[str, Any]] | None]
     todo_graph: NotRequired[dict | None]
     todos: NotRequired[list[dict[str, str]] | None]
 
@@ -197,6 +199,21 @@ def write_todos_tool(
                 "todos": update_payload["todos"],
             }
         )
+        ensured_plan = ensure_plan_state(merged_state)
+        if ensured_plan is not None:
+            update_payload["plan"] = ensured_plan
+            existing_history = [item for item in (merged_state.get("plan_history") or []) if isinstance(item, dict)]
+            plan_id = str(ensured_plan.get("plan_id") or "").strip()
+            if plan_id and not any(str(item.get("plan_id") or "").strip() == plan_id for item in existing_history):
+                update_payload["plan_history"] = [
+                    *existing_history,
+                    {
+                        "plan_id": plan_id,
+                        "title": ensured_plan.get("title"),
+                        "path": ensured_plan.get("plan_path"),
+                        "created_at": ensured_plan.get("created_at"),
+                        "status": ensured_plan.get("status"),
+                    },
+                ][-40:]
         sync_handoff_files_from_state(merged_state)
     return Command(update=update_payload)
-

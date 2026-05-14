@@ -31,6 +31,7 @@ from src.agents.middlewares.model_timeout_middleware import ModelTimeoutMiddlewa
 from src.agents.middlewares.permission_middleware import PermissionMiddleware
 from src.agents.middlewares.plan_evaluator_middleware import PlanEvaluatorMiddleware
 from src.agents.middlewares.plan_execution_gate_middleware import PlanExecutionGateMiddleware
+from src.agents.middlewares.plan_file_sync_middleware import PlanFileSyncMiddleware
 from src.agents.middlewares.planner_middleware import PlannerMiddleware
 from src.agents.middlewares.pro_followup_middleware import PlanFollowupMiddleware
 from src.agents.middlewares.progress_guard_middleware import ProgressGuardMiddleware
@@ -535,7 +536,8 @@ def _build_middleware_registry(
         MiddlewareSpec("subagent_limit", bind(_create_subagent_limit), after={"retry", "model_timeout", "tool_result_truncation"}),
         MiddlewareSpec("evaluator", bind(_create_evaluator), after={"subagent_limit"}),
         MiddlewareSpec("scratchpad_task_memory", bind(_create_scratchpad_task_memory), after={"evaluator"}),
-        MiddlewareSpec("resume_state", bind(_create_resume_state), after={"scratchpad_task_memory"}),
+        MiddlewareSpec("plan_file_sync", lambda: PlanFileSyncMiddleware(), after={"scratchpad_task_memory"}),
+        MiddlewareSpec("resume_state", bind(_create_resume_state), after={"plan_file_sync"}),
         MiddlewareSpec("progress_guard", lambda: ProgressGuardMiddleware(), after={"resume_state"}),
         MiddlewareSpec("plan_followup", lambda: PlanFollowupMiddleware(), after={"progress_guard", "evaluator"}),
         # LoopDetectionMiddleware complements ProgressGuard: ProgressGuard detects stalls by

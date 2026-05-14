@@ -72,7 +72,7 @@ those 3 rows, updates the workbook, and prints a JSON summary.
 ```bash
 python /mnt/skills/public/excel-bulk-enrichment/scripts/batch_update_excel.py \
   --input /mnt/user-data/uploads/vessels.xlsx \
-  --output /mnt/user-data/outputs/vessels_enriched.xlsx \
+  --output /mnt/user-data/workspace/vessels_enriched.xlsx \
   --username <user> --password <pass> \
   --imo-column A \
   --start-row 5 --end-row 580

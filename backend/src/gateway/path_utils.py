@@ -13,7 +13,7 @@ def resolve_thread_virtual_path(thread_id: str, virtual_path: str) -> Path:
     Args:
         thread_id: The thread ID.
         virtual_path: The virtual path as seen inside the sandbox
-                      (e.g., /mnt/user-data/outputs/file.txt).
+                      (e.g., /mnt/user-data/workspace/file.txt).
 
     Returns:
         The resolved filesystem path.

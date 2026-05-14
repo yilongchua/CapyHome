@@ -8,6 +8,7 @@ import mimetypes
 import shutil
 import sys
 import tempfile
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["dreamy"])
 
 _REPO_OVERVIEW_PROMPT = """Conduct an indepth analysis of the mounted folder at /mnt/user-data/mounted and write a complete report on all critical files and main features of the mounted folder.
-for specific files, there is a mirror repo created within "mnt/user-data/outputs/.docs/" as a identical mirrored(markdownfiles) of the mounted folder."""
+for specific files, there is a mirror repo created within "mnt/user-data/workspace/.docs/" as a identical mirrored(markdownfiles) of the mounted folder."""
 _REPO_OVERVIEW_MODEL_TIMEOUT_SECONDS = 45.0
 
 
@@ -48,6 +49,8 @@ class _RepoOverviewRefreshJob:
 _REPO_OVERVIEW_JOBS: dict[str, _RepoOverviewRefreshJob] = {}
 _REPO_OVERVIEW_JOB_BY_THREAD: dict[str, str] = {}
 _REPO_OVERVIEW_TASKS: dict[str, asyncio.Task[None]] = {}
+_ANALYSE_LOCKS: dict[str, threading.Lock] = {}
+_ANALYSE_LOCKS_GUARD = threading.Lock()
 
 _SKIP_DIR_NAMES = {
     ".git",
@@ -57,6 +60,7 @@ _SKIP_DIR_NAMES = {
     ".mypy_cache",
     ".pytest_cache",
     ".ruff_cache",
+    ".runtime",
     ".next",
     ".turbo",
     "node_modules",
@@ -102,6 +106,18 @@ _TEXT_EXTENSIONS = {
     ".cpp",
     ".hpp",
 }
+
+_MOUNT_LIST_DEFAULT_LIMIT = 2000
+_MOUNT_LIST_HARD_LIMIT = 10000
+
+
+def _analyse_lock_for_thread(thread_id: str) -> threading.Lock:
+    with _ANALYSE_LOCKS_GUARD:
+        lock = _ANALYSE_LOCKS.get(thread_id)
+        if lock is None:
+            lock = threading.Lock()
+            _ANALYSE_LOCKS[thread_id] = lock
+        return lock
 
 
 def _escape_md_cell(value: object) -> str:
@@ -281,7 +297,17 @@ def _guess_fence_language(path: Path) -> str:
 def _to_virtual_outputs(path: Path, thread_id: str) -> str:
     outputs_dir = get_paths().sandbox_outputs_dir(thread_id).resolve()
     rel = path.resolve().relative_to(outputs_dir).as_posix()
-    return f"/mnt/user-data/outputs/{rel}"
+    return f"/mnt/user-data/workspace/{rel}"
+
+
+def _docs_root(thread_id: str) -> Path:
+    return get_paths().sandbox_work_dir(thread_id).resolve() / ".docs"
+
+
+def _to_virtual_workspace(path: Path, thread_id: str) -> str:
+    workspace_dir = get_paths().sandbox_work_dir(thread_id).resolve()
+    rel = path.resolve().relative_to(workspace_dir).as_posix()
+    return f"/mnt/user-data/workspace/{rel}"
 
 
 def _summarize_markdown_corpus(docs_root: Path) -> dict[str, object]:
@@ -393,7 +419,7 @@ def _build_repo_overview_refresh_prompt(source_root: Path, docs_root: Path) -> s
         [
             _REPO_OVERVIEW_PROMPT,
             f"Mounted root (host path): {source_root}",
-            "Use the mirrored markdown docs under /mnt/user-data/outputs/.docs as your primary evidence base.",
+            "Use the mirrored markdown docs under /mnt/user-data/workspace/.docs as your primary evidence base.",
             "Output only valid markdown for repo_overview.md.",
             "Cover architecture, critical files, key features, execution flow, risks, and recommended next reading order.",
             "Be concrete and cite file paths from the mirror.",
@@ -487,7 +513,7 @@ async def _run_repo_overview_refresh_job(job_id: str, source_root: Path, docs_ro
         tmp = docs_root / f".repo_overview.{job_id}.tmp.md"
         tmp.write_text(content_text + "\n", encoding="utf-8")
         tmp.replace(target)
-        job.output_virtual_path = f"/mnt/user-data/outputs/.docs/{target.name}"
+        job.output_virtual_path = f"/mnt/user-data/workspace/.docs/{target.name}"
         job.status = "succeeded"
     except Exception as exc:
         logger.exception("Repo overview refresh failed for thread %s: %s", job.thread_id, exc)
@@ -614,6 +640,16 @@ class AnalyseResponse(BaseModel):
     repo_overview_refresh_job_id: str | None = None
 
 
+@dataclass
+class _AnalyseArtifacts:
+    source_root: Path
+    generated_docs: int
+    skipped_non_text: int
+    failed_files: list[dict[str, str]]
+    index_path: Path
+    failed_manifest_path: Path
+
+
 class AnalyseStatusResponse(BaseModel):
     staged_available: bool
     docs_root_virtual_path: str
@@ -648,15 +684,14 @@ class RepoOverviewRefreshStatusResponse(BaseModel):
 
 @router.get("/threads/{thread_id}/analyse/status", response_model=AnalyseStatusResponse)
 async def get_analyse_status(thread_id: str) -> AnalyseStatusResponse:
-    outputs_root = get_paths().sandbox_outputs_dir(thread_id).resolve()
-    docs_root = outputs_root / ".docs"
+    docs_root = _docs_root(thread_id)
     index_path = docs_root / "index.md"
     failed_manifest = docs_root / "failed_files.md"
     return AnalyseStatusResponse(
         staged_available=docs_root.exists() and docs_root.is_dir() and index_path.exists(),
-        docs_root_virtual_path="/mnt/user-data/outputs/.docs",
-        index_virtual_path=_to_virtual_outputs(index_path, thread_id) if index_path.exists() else None,
-        failed_manifest_virtual_path=_to_virtual_outputs(failed_manifest, thread_id) if failed_manifest.exists() else None,
+        docs_root_virtual_path="/mnt/user-data/workspace/.docs",
+        index_virtual_path=_to_virtual_workspace(index_path, thread_id) if index_path.exists() else None,
+        failed_manifest_virtual_path=_to_virtual_workspace(failed_manifest, thread_id) if failed_manifest.exists() else None,
     )
 
 
@@ -678,7 +713,7 @@ async def start_repo_overview_refresh(thread_id: str) -> RepoOverviewRefreshStar
     if not source_root.exists() or not source_root.is_dir():
         raise HTTPException(status_code=400, detail="Mounted folder does not exist or is not a directory.")
 
-    docs_root = get_paths().sandbox_outputs_dir(thread_id).resolve() / ".docs"
+    docs_root = _docs_root(thread_id)
     if not docs_root.exists() or not docs_root.is_dir() or not (docs_root / "index.md").exists():
         raise HTTPException(status_code=400, detail="Staged docs index not found. Run /analyse first.")
 
@@ -701,27 +736,8 @@ async def get_repo_overview_refresh_status(thread_id: str, job_id: str) -> RepoO
     return _job_to_response(job)
 
 
-@router.post("/threads/{thread_id}/analyse", response_model=AnalyseResponse)
-async def run_analyse(thread_id: str) -> AnalyseResponse:
-    """Deterministically mirror mounted repository files into /outputs/.docs as Markdown."""
-    config_path = _mount_config_path(thread_id)
-    if not config_path.exists():
-        raise HTTPException(status_code=400, detail="No mounted folder configured for this thread.")
-    try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-        mounted_path_str = (data.get("path") or "").strip()
-    except Exception as exc:
-        logger.error("Failed to read dreamy mount config for thread %s: %s", thread_id, exc)
-        raise HTTPException(status_code=500, detail="Failed to read mounted folder config") from exc
-    if not mounted_path_str:
-        raise HTTPException(status_code=400, detail="Mounted folder path is empty.")
-
-    source_root = Path(mounted_path_str).expanduser().resolve()
-    if not source_root.exists() or not source_root.is_dir():
-        raise HTTPException(status_code=400, detail="Mounted folder does not exist or is not a directory.")
-
-    outputs_root = get_paths().sandbox_outputs_dir(thread_id).resolve()
-    docs_root = outputs_root / ".docs"
+def _run_analyse_sync(thread_id: str, source_root: Path) -> _AnalyseArtifacts:
+    docs_root = _docs_root(thread_id)
     docs_root.mkdir(parents=True, exist_ok=True)
 
     generated_docs = 0
@@ -793,7 +809,7 @@ async def run_analyse(thread_id: str) -> AnalyseResponse:
                 {
                     "source_path": rel.as_posix(),
                     "source_kind": source_kind or "unknown",
-                    "doc_virtual_path": _to_virtual_outputs(target_path, thread_id),
+                    "doc_virtual_path": _to_virtual_workspace(target_path, thread_id),
                 }
             )
         except Exception as exc:
@@ -986,13 +1002,13 @@ async def run_analyse(thread_id: str) -> AnalyseResponse:
         [
             "",
             "### What Failed vs What Was Created",
-            f"- Created manifest: `{_to_virtual_outputs(created_manifest_path, thread_id)}`",
-            f"- Failed manifest: `{_to_virtual_outputs(failed_manifest_path, thread_id)}`",
+            f"- Created manifest: `{_to_virtual_workspace(created_manifest_path, thread_id)}`",
+            f"- Failed manifest: `{_to_virtual_workspace(failed_manifest_path, thread_id)}`",
             "- Use failed manifest first when investigating blind spots or missing behavior.",
             "",
             "### Recommended Prompting Instructions",
             "```text",
-            "Start with /mnt/user-data/outputs/.docs/index.md, repo_overview.md, and directory_tree.md.",
+            "Start with /mnt/user-data/workspace/.docs/index.md, repo_overview.md, and directory_tree.md.",
             "Then use file_catalog.md to jump to mirrored files for any area you investigate.",
             "When an answer depends on files listed in failed_files.md, explicitly state the uncertainty.",
             "```",
@@ -1042,18 +1058,18 @@ async def run_analyse(thread_id: str) -> AnalyseResponse:
             "Use these directly in chat for deeper analysis:",
             "",
             "```text",
-            "Using /mnt/user-data/outputs/.docs/index.md, /repo_overview.md, /directory_tree.md, and /file_catalog.md,",
+            "Using /mnt/user-data/workspace/.docs/index.md, /repo_overview.md, /directory_tree.md, and /file_catalog.md,",
             "give me an architecture-level summary of the repository with:",
             "1) core modules, 2) critical execution flow, 3) highest-risk areas, 4) suggested next code-reading order.",
             "```",
             "",
             "```text",
-            "From /mnt/user-data/outputs/.docs/failed_files.md and /created_files.md,",
+            "From /mnt/user-data/workspace/.docs/failed_files.md and /created_files.md,",
             "identify any analysis blind spots and propose how to close them.",
             "```",
             "",
             "```text",
-            "Use /mnt/user-data/outputs/.docs/file_catalog.md to locate files related to <topic>,",
+            "Use /mnt/user-data/workspace/.docs/file_catalog.md to locate files related to <topic>,",
             "then synthesize findings only from the mirrored markdown docs.",
             "```",
         ]
@@ -1065,7 +1081,7 @@ async def run_analyse(thread_id: str) -> AnalyseResponse:
         "# Repository Docs Mirror",
         "",
         f"- Source root: `{source_root}`",
-        "- Output root: `/mnt/user-data/outputs/.docs`",
+        "- Output root: `/mnt/user-data/workspace/.docs`",
         f"- Generated docs: **{generated_docs}**",
         f"- Skipped non-text files: **{skipped_non_text}**",
         f"- Failures: **{len(failed_files)}**",
@@ -1073,31 +1089,71 @@ async def run_analyse(thread_id: str) -> AnalyseResponse:
         "## Notes",
         "- This mirror is deterministic and generated by `/analyse` API.",
         "- Prefer consulting these `.docs` files first for follow-up queries in this thread.",
-        f"- Overview: `{_to_virtual_outputs(repo_overview_path, thread_id)}`",
-        f"- Directory tree: `{_to_virtual_outputs(directory_tree_path, thread_id)}`",
-        f"- Created files manifest: `{_to_virtual_outputs(created_manifest_path, thread_id)}`",
-        f"- File catalog: `{_to_virtual_outputs(file_catalog_path, thread_id)}`",
-        f"- Failure manifest: `{_to_virtual_outputs(failed_manifest_path, thread_id)}`",
+        f"- Overview: `{_to_virtual_workspace(repo_overview_path, thread_id)}`",
+        f"- Directory tree: `{_to_virtual_workspace(directory_tree_path, thread_id)}`",
+        f"- Created files manifest: `{_to_virtual_workspace(created_manifest_path, thread_id)}`",
+        f"- File catalog: `{_to_virtual_workspace(file_catalog_path, thread_id)}`",
+        f"- Failure manifest: `{_to_virtual_workspace(failed_manifest_path, thread_id)}`",
         "",
     ]
     index_path.write_text("\n".join(index_lines), encoding="utf-8")
 
+    return _AnalyseArtifacts(
+        source_root=source_root,
+        generated_docs=generated_docs,
+        skipped_non_text=skipped_non_text,
+        failed_files=failed_files,
+        index_path=index_path,
+        failed_manifest_path=failed_manifest_path,
+    )
+
+
+@router.post("/threads/{thread_id}/analyse", response_model=AnalyseResponse)
+async def run_analyse(thread_id: str) -> AnalyseResponse:
+    """Deterministically mirror mounted repository files into /workspace/.docs as Markdown."""
+    config_path = _mount_config_path(thread_id)
+    if not config_path.exists():
+        raise HTTPException(status_code=400, detail="No mounted folder configured for this thread.")
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        mounted_path_str = (data.get("path") or "").strip()
+    except Exception as exc:
+        logger.error("Failed to read dreamy mount config for thread %s: %s", thread_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to read mounted folder config") from exc
+    if not mounted_path_str:
+        raise HTTPException(status_code=400, detail="Mounted folder path is empty.")
+
+    source_root = Path(mounted_path_str).expanduser().resolve()
+    if not source_root.exists() or not source_root.is_dir():
+        raise HTTPException(status_code=400, detail="Mounted folder does not exist or is not a directory.")
+
+    analyse_lock = _analyse_lock_for_thread(thread_id)
+    if not analyse_lock.acquire(blocking=False):
+        raise HTTPException(
+            status_code=409,
+            detail="An /analyse job is already running for this thread. Please wait for it to finish.",
+        )
+    try:
+        result = await asyncio.to_thread(_run_analyse_sync, thread_id, source_root)
+    finally:
+        analyse_lock.release()
+
     refresh_job = await _enqueue_repo_overview_refresh(
         thread_id=thread_id,
-        source_root=source_root,
-        docs_root=docs_root,
+        source_root=result.source_root,
+        docs_root=result.index_path.parent,
         trigger="analyse",
     )
 
     return AnalyseResponse(
-        source_root=str(source_root),
-        output_root="/mnt/user-data/outputs/.docs",
-        generated_docs=generated_docs,
-        skipped_non_text=skipped_non_text,
-        failed=len(failed_files),
-        index_virtual_path=_to_virtual_outputs(index_path, thread_id),
-        failed_manifest_virtual_path=_to_virtual_outputs(failed_manifest_path, thread_id),
-        failed_files=failed_files[:200],
+        source_root=str(result.source_root),
+        output_root="/mnt/user-data/workspace/.docs",
+        generated_docs=result.generated_docs,
+        skipped_non_text=result.skipped_non_text,
+        failed=len(result.failed_files),
+        index_virtual_path=_to_virtual_workspace(result.index_path, thread_id),
+        failed_manifest_virtual_path=_to_virtual_workspace(result.failed_manifest_path, thread_id),
+        failed_files=result.failed_files[:200],
         repo_overview_refresh_job_id=refresh_job.job_id,
     )
 
@@ -1116,9 +1172,9 @@ async def publish_docs(thread_id: str) -> PublishDocsResponse:
     if not mounted_path_str:
         raise HTTPException(status_code=400, detail="Mounted folder path is empty.")
 
-    source_root = get_paths().sandbox_outputs_dir(thread_id).resolve() / ".docs"
+    source_root = _docs_root(thread_id)
     if not source_root.exists() or not source_root.is_dir():
-        raise HTTPException(status_code=400, detail="Staged docs not found at /mnt/user-data/outputs/.docs.")
+        raise HTTPException(status_code=400, detail="Staged docs not found at /mnt/user-data/workspace/.docs.")
     if not (source_root / "index.md").exists():
         raise HTTPException(status_code=400, detail="Staged docs index not found. Run /analyse first.")
 
@@ -1139,7 +1195,7 @@ async def publish_docs(thread_id: str) -> PublishDocsResponse:
         copied_files += 1
 
     return PublishDocsResponse(
-        source_root="/mnt/user-data/outputs/.docs",
+        source_root="/mnt/user-data/workspace/.docs",
         destination_root="/mnt/user-data/mounted/.docs",
         copied_files=copied_files,
         overwritten_files=overwritten_files,
@@ -1161,7 +1217,10 @@ async def get_mount_folder(thread_id: str) -> dict:
 
 
 @router.get("/threads/{thread_id}/dreamy/mount-folder/files")
-async def list_mount_folder_files(thread_id: str) -> dict:
+async def list_mount_folder_files(
+    thread_id: str,
+    limit: int = Query(default=_MOUNT_LIST_DEFAULT_LIMIT, ge=1, le=_MOUNT_LIST_HARD_LIMIT),
+) -> dict:
     """List files recursively inside the mounted folder for a thread."""
     config_path = _mount_config_path(thread_id)
     if not config_path.exists():
@@ -1182,16 +1241,12 @@ async def list_mount_folder_files(thread_id: str) -> dict:
 
     try:
         files = []
-        for p in sorted(folder.rglob("*")):
+        truncated = False
+        for p in folder.rglob("*"):
             rel = p.relative_to(folder).as_posix()
+            if any(part in _SKIP_DIR_NAMES for part in rel.split("/")):
+                continue
             if p.is_dir():
-                files.append({
-                    "name": f"{rel}/",
-                    "size": 0,
-                    "virtual_path": f"/mnt/user-data/mounted/{rel}",
-                    "full_path": str(p),
-                    "is_dir": True,
-                })
                 continue
             stat = p.stat()
             files.append({
@@ -1201,7 +1256,17 @@ async def list_mount_folder_files(thread_id: str) -> dict:
                 "full_path": str(p),
                 "is_dir": False,
             })
-        return {"files": files, "folder_path": folder_path_str}
+            if len(files) >= limit:
+                truncated = True
+                break
+        files.sort(key=lambda item: item["name"])
+        return {
+            "files": files,
+            "folder_path": folder_path_str,
+            "truncated": truncated,
+            "limit": limit,
+            "returned": len(files),
+        }
     except Exception as exc:
         logger.error("Failed to list mounted folder for thread %s: %s", thread_id, exc)
         raise HTTPException(status_code=500, detail="Failed to list mounted folder files") from exc

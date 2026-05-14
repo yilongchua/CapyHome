@@ -47,19 +47,19 @@ def _tool_call_request(path: str, *, tool_name: str = "write_file"):
 
 def test_write_file_artifact_middleware_promotes_outputs_path_on_ok():
     middleware = WriteFileArtifactMiddleware()
-    request = _tool_call_request("/mnt/user-data/outputs/report.md")
+    request = _tool_call_request("/mnt/user-data/workspace/report.md")
 
     async def handler(_request):
         return ToolMessage(content="OK", tool_call_id="tc-1", name="write_file")
 
     result = asyncio.run(middleware.awrap_tool_call(request, handler))
     assert isinstance(result, Command)
-    assert result.update["artifacts"] == ["/mnt/user-data/outputs/report.md"]
+    assert result.update["artifacts"] == ["/mnt/user-data/workspace/report.md"]
 
 
 def test_write_file_artifact_middleware_skips_non_ok_or_non_outputs_path():
     middleware = WriteFileArtifactMiddleware()
-    bad_request = _tool_call_request("/mnt/user-data/outputs/report.md")
+    bad_request = _tool_call_request("/mnt/user-data/workspace/report.md")
     external_request = _tool_call_request("/tmp/report.md")
 
     async def non_ok_handler(_request):

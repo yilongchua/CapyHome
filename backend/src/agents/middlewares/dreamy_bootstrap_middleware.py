@@ -196,7 +196,7 @@ class DreamyBootstrapMiddleware(AgentMiddleware[DreamyBootstrapState]):
                 if fp.is_file() and fp.suffix.lower() in tabular_exts and fp.name != "workflow.json":
                     fields, samples, total = self._parse_tabular_file(fp)
                     if fields and samples:
-                        virtual = f"/mnt/user-data/outputs/{fp.name}"
+                        virtual = f"/mnt/user-data/workspace/{fp.name}"
                         return fields, samples, total, fp.name, virtual
 
         return [], [], 0, "", ""
@@ -335,7 +335,7 @@ class DreamyBootstrapMiddleware(AgentMiddleware[DreamyBootstrapState]):
                             samples[:3],
                             count,
                             fp.name,
-                            f"/mnt/user-data/outputs/{fp.name}",
+                            f"/mnt/user-data/workspace/{fp.name}",
                             "file",
                         )
 
@@ -414,7 +414,7 @@ class DreamyBootstrapMiddleware(AgentMiddleware[DreamyBootstrapState]):
 
     @staticmethod
     def _workflow_virtual_path() -> str:
-        return "/mnt/user-data/outputs/workflow.json"
+        return "/mnt/user-data/workspace/workflow.json"
 
     @staticmethod
     def _now_iso() -> str:
@@ -667,13 +667,13 @@ class DreamyBootstrapMiddleware(AgentMiddleware[DreamyBootstrapState]):
 
         # Output file: derive from source filename, never write back to source
         base_name = filename.rsplit(".", 1)[0] if "." in filename else filename
-        output_virtual = f"/mnt/user-data/outputs/{base_name}_results.csv"
+        output_virtual = f"/mnt/user-data/workspace/{base_name}_results.csv"
 
         reminder = HumanMessage(
             name="dreamy_bootstrap",
             content=(
                 "<system_reminder>\n"
-                f"workflow.json v2 initialized at /mnt/user-data/outputs/workflow.json. "
+                f"workflow.json v2 initialized at /mnt/user-data/workspace/workflow.json. "
                 f"{data_hint} "
                 f"Total rows: {total_rows}. "
                 f"Write all results to {output_virtual} — do NOT modify or overwrite the source file. "

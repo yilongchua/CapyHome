@@ -929,7 +929,7 @@ class TestScenarioToolChain:
             content="",
             id="ai-2",
             tool_calls=[
-                {"name": "write_file", "args": {"path": "/mnt/user-data/outputs/listing.txt", "content": "README.md\nsrc/"}, "id": "tc-2"},
+                {"name": "write_file", "args": {"path": "/mnt/user-data/workspace/listing.txt", "content": "README.md\nsrc/"}, "id": "tc-2"},
             ],
         )
         write_result = ToolMessage(content="File written successfully.", id="tm-2", tool_call_id="tc-2", name="write_file")

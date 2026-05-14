@@ -1,10 +1,12 @@
 "use client";
 
+import { ArrowUpRightIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { type PromptInputMessage } from "@/components/ai-elements/prompt-input";
+import { Badge } from "@/components/ui/badge";
 import { AdaptationNotice } from "@/components/workspace/adaptation-notice";
 import { MountFolderBadge } from "@/components/workspace/chat-ui/mount-folder-badge";
 import {
@@ -22,6 +24,7 @@ import { ThreadContext } from "@/components/workspace/messages/context";
 import { QueuedMessageList } from "@/components/workspace/queued-message-list";
 import { ThreadTitle } from "@/components/workspace/thread-title";
 import { Welcome } from "@/components/workspace/welcome";
+import { urlOfArtifact } from "@/core/artifacts/utils";
 import { getBackendBaseURL } from "@/core/config";
 import { api } from "@/core/dreamy/api";
 import { useMountedFolder } from "@/core/dreamy/hooks/use-mounted-folder";
@@ -361,6 +364,28 @@ function ChatPageContent({
     [thread.values.context_metrics],
   );
 
+  const handoffBanner = useMemo(() => {
+    const meta = thread.values.handoff_meta;
+    if (!meta || typeof meta !== "object") {
+      return null;
+    }
+    const handoffRoot = typeof meta.handoff_root_virtual_path === "string"
+      ? meta.handoff_root_virtual_path
+      : "";
+    if (!handoffRoot) {
+      return null;
+    }
+    const normalizedRoot = handoffRoot.replace(/\/$/, "");
+    const handoffIndexPath = `${normalizedRoot}/index.md`;
+    const sourceThreadId = typeof meta.source_thread_id === "string" ? meta.source_thread_id : "";
+    return {
+      handoffRoot,
+      handoffIndexPath,
+      sourceThreadId,
+      href: urlOfArtifact({ filepath: handoffIndexPath, threadId, isMock }),
+    };
+  }, [isMock, thread.values.handoff_meta, threadId]);
+
   useEffect(() => {
     if (!latestPersistedContextTokens) {
       return;
@@ -403,13 +428,45 @@ function ChatPageContent({
           </header>
           <main className="flex min-h-0 max-w-full grow flex-col">
             <div className="flex size-full justify-center">
-              <MessageList
-                className={cn("size-full", !isNewThread && "pt-10")}
-                threadId={threadId}
-                thread={thread}
-                liveNotices={[...generationNotices, ...uiNotices]}
-                liveThinkingContent={liveThinkingContent}
-              />
+              <div className="flex size-full flex-col">
+                {handoffBanner && !isNewThread && (
+                  <div className="px-4 pt-14 pb-2">
+                    <div className="bg-background/80 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 backdrop-blur">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Badge variant="secondary" className="shrink-0">Handoff</Badge>
+                        <div className="min-w-0 text-sm">
+                          <div className="truncate font-medium">
+                            This thread was created from a handoff package.
+                          </div>
+                          <div className="text-muted-foreground truncate text-xs">
+                            {handoffBanner.sourceThreadId
+                              ? `Source thread: ${handoffBanner.sourceThreadId} · ${handoffBanner.handoffRoot}`
+                              : handoffBanner.handoffRoot}
+                          </div>
+                        </div>
+                      </div>
+                      <a
+                        href={handoffBanner.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-sm font-medium whitespace-nowrap underline underline-offset-4"
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          Open handoff
+                          <ArrowUpRightIcon className="size-3.5" />
+                        </span>
+                      </a>
+                    </div>
+                  </div>
+                )}
+                <MessageList
+                  className={cn("size-full", !isNewThread && "pt-10", handoffBanner && !isNewThread && "pt-0")}
+                  threadId={threadId}
+                  thread={thread}
+                  liveNotices={[...generationNotices, ...uiNotices]}
+                  liveThinkingContent={liveThinkingContent}
+                />
+              </div>
             </div>
             <div className="absolute right-0 bottom-0 left-0 z-30 flex justify-center px-4">
               <div

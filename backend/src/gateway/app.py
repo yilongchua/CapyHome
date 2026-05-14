@@ -19,6 +19,7 @@ from src.gateway.routers import (
     dreamy,
     feedback,
     generation,
+    handoff,
     harness,
     integrations,
     mcp,
@@ -355,6 +356,7 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
     app.include_router(feedback.router)
     app.include_router(integrations.router)
     app.include_router(generation.router)
+    app.include_router(handoff.router)
     app.include_router(runs.router)
     app.include_router(steering.router)
     app.include_router(vault.router)

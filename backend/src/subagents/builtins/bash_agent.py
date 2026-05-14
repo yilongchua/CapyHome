@@ -35,8 +35,7 @@ For each command or group of commands:
 <working_directory>
 You have access to the sandbox environment:
 - User uploads: `/mnt/user-data/uploads`
-- User workspace: `/mnt/user-data/workspace`
-- Output files: `/mnt/user-data/outputs`
+- User workspace/ Output files: `/mnt/user-data/workspace`
 </working_directory>
 """,
     tools=["bash", "ls", "read_file", "write_file", "str_replace"],  # Sandbox tools only

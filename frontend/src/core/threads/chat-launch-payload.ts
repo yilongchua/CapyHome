@@ -1,6 +1,7 @@
 export type PendingChatLaunchPayload = {
   source: "handoff";
-  mountedPath?: string;
+  targetThreadId: string;
+  handoffRootVirtualPath?: string;
   prefill?: string;
   createdAt: number;
 };
@@ -23,6 +24,7 @@ export function getPendingChatLaunchPayload(): PendingChatLaunchPayload | null {
   try {
     const parsed = JSON.parse(raw) as PendingChatLaunchPayload;
     if (parsed?.source !== "handoff") return null;
+    if (typeof parsed.targetThreadId !== "string" || !parsed.targetThreadId.trim()) return null;
     if (typeof parsed.createdAt !== "number") return null;
     return parsed;
   } catch {

@@ -63,7 +63,7 @@ class ResolvedAttachment:
     """A file attachment resolved to a host filesystem path, ready for upload.
 
     Attributes:
-        virtual_path: Original virtual path (e.g. /mnt/user-data/outputs/report.pdf).
+        virtual_path: Original virtual path (e.g. /mnt/user-data/workspace/report.pdf).
         actual_path: Resolved host filesystem path.
         filename: Basename of the file.
         mime_type: MIME type (e.g. "application/pdf").

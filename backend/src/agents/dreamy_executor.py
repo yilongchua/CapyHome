@@ -64,9 +64,9 @@ class DreamyExecutor:
         ds = workflow.get("data_source") or {}
         self._source_filename: str = ds.get("filename") or "tasks.txt"
         self._source_type: str = ds.get("type") or "file"
-        self._source_virtual: str = ds.get("virtual_path") or f"/mnt/user-data/outputs/{self._source_filename}"
+        self._source_virtual: str = ds.get("virtual_path") or f"/mnt/user-data/workspace/{self._source_filename}"
         base = self._source_filename.rsplit(".", 1)[0] if "." in self._source_filename else self._source_filename
-        self._output_virtual = f"/mnt/user-data/outputs/{base}_results.csv"
+        self._output_virtual = f"/mnt/user-data/workspace/{base}_results.csv"
 
         # Mutable counters
         self._done = 0
@@ -253,7 +253,7 @@ class DreamyExecutor:
             f"--output {self._output_virtual} --task-id {row_idx + 1} "
             f"--data '{{...}}' --status found\n"
             f"3. Call: python /mnt/skills/batch-workflow/scripts/checkpoint.py "
-            f"--file /mnt/user-data/outputs/checkpoint.json --mark-done {row_idx}\n"
+            f"--file /mnt/user-data/workspace/checkpoint.json --mark-done {row_idx}\n"
             f"4. Stop immediately after — do not continue to the next row.\n"
         )
 

@@ -9,6 +9,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from src.agents.middlewares.todo_dag_middleware import TodoDagMiddleware, normalize_todo_nodes
+from src.tools.builtins.write_todos_tool import write_todos_tool
 
 
 def _runtime(state: dict | None = None):
@@ -26,9 +27,7 @@ def test_normalize_todos_rejects_cycles():
 
 
 def test_write_todos_dual_writes_legacy_and_graph():
-    middleware = TodoDagMiddleware()
-    tool = middleware.tools[0]
-    result = tool.func(
+    result = write_todos_tool.func(
         runtime=_runtime(),
         todos=[
             {"id": "a", "content": "Plan", "status": "completed"},
@@ -44,8 +43,6 @@ def test_write_todos_dual_writes_legacy_and_graph():
 
 
 def test_write_todos_patches_by_id_and_preserves_untouched_nodes():
-    middleware = TodoDagMiddleware()
-    tool = middleware.tools[0]
     runtime = _runtime(
         {
             "todo_graph": {
@@ -59,7 +56,7 @@ def test_write_todos_patches_by_id_and_preserves_untouched_nodes():
             }
         }
     )
-    result = tool.func(
+    result = write_todos_tool.func(
         runtime=runtime,
         todos=[{"id": "todo-2", "status": "in_progress"}],
         tool_call_id="tc-1",
@@ -72,23 +69,19 @@ def test_write_todos_patches_by_id_and_preserves_untouched_nodes():
     assert by_id["todo-4"]["status"] == "pending"
 
 
-def test_write_todos_syncs_plan_and_sprint_contract(tmp_path):
-    middleware = TodoDagMiddleware()
-    tool = middleware.tools[0]
-    plan_path = tmp_path / ".handoffs" / "plan.md"
-    sprint_path = tmp_path / ".handoffs" / "sprint_contract.md"
+def test_write_todos_syncs_plan(tmp_path):
+    plan_path = tmp_path / ".runtime" / "plan.md"
     runtime = _runtime(
         {
             "plan": {
                 "title": "Plan Title",
                 "summary": "Plan Summary",
                 "plan_path": str(plan_path),
-                "sprint_contract_path": str(sprint_path),
             }
         }
     )
 
-    tool.func(
+    write_todos_tool.func(
         runtime=runtime,
         todos=[
             {"id": "a", "content": "Plan", "status": "completed"},
@@ -98,17 +91,14 @@ def test_write_todos_syncs_plan_and_sprint_contract(tmp_path):
     )
 
     plan_text = plan_path.read_text(encoding="utf-8")
-    sprint_text = sprint_path.read_text(encoding="utf-8")
     assert "- [x] **a**: Plan" in plan_text
     assert "- [ ] **b**: Execute" in plan_text
-    assert "## Todo Status" in sprint_text
-    assert "- [completed] Plan" in sprint_text
+    assert "## Todo Status Snapshot" in plan_text
+    assert "- [completed] a: Plan" in plan_text
 
 
 def test_write_todos_sync_idempotent(tmp_path):
-    middleware = TodoDagMiddleware()
-    tool = middleware.tools[0]
-    plan_path = tmp_path / ".handoffs" / "plan.md"
+    plan_path = tmp_path / ".runtime" / "plan.md"
     runtime = _runtime(
         {
             "plan": {
@@ -122,10 +112,10 @@ def test_write_todos_sync_idempotent(tmp_path):
         {"id": "a", "content": "Plan", "status": "completed"},
         {"id": "b", "content": "Execute", "status": "pending", "depends_on": ["a"]},
     ]
-    tool.func(runtime=runtime, todos=todos, tool_call_id="tc-1")
+    write_todos_tool.func(runtime=runtime, todos=todos, tool_call_id="tc-1")
     first_mtime = plan_path.stat().st_mtime_ns
     time.sleep(0.002)
-    tool.func(runtime=runtime, todos=todos, tool_call_id="tc-2")
+    write_todos_tool.func(runtime=runtime, todos=todos, tool_call_id="tc-2")
     second_mtime = plan_path.stat().st_mtime_ns
     assert second_mtime == first_mtime
 

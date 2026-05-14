@@ -468,27 +468,8 @@ def _write_file(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def _write_sprint_contract(path: Path, nodes: list[dict[str, Any]]) -> None:
-    scope_lines = []
-    status_lines = []
-    for node in nodes:
-        content = str(node.get("content") or "").strip()
-        if not content:
-            continue
-        status = str(node.get("status") or "pending")
-        scope_lines.append(f"- {content}")
-        status_lines.append(f"- [{status}] {content}")
-    scope_block = "\n".join(scope_lines) if scope_lines else "- Complete the user request end-to-end."
-    status_block = "\n".join(status_lines) if status_lines else "- [pending] Complete the user request end-to-end."
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        f"# Sprint Contract\n\n## Scope\n{scope_block}\n\n## Done Criteria\n- All todos marked completed\n- Final answer includes outcomes and artifacts\n\n## Todo Status\n{status_block}\n",
-        encoding="utf-8",
-    )
-
-
 class PlannerMiddleware(AgentMiddleware[PlannerState]):
-    """Builds a structured plan and optional sprint contract before execution."""
+    """Builds a structured plan before execution."""
 
     state_schema = PlannerState
 
@@ -611,12 +592,11 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
         # Resolve file paths
         thread_data = state.get("thread_data") or {}
         workspace_path = thread_data.get("workspace_path")
-        outputs_path = thread_data.get("outputs_path") or (str(Path(workspace_path).parent / "outputs") if workspace_path else None)
+        plan_root = workspace_path
 
         artifact_paths: list[str] = []
         plan_path: str | None = None
         latest_alias_path: str | None = None
-        sprint_contract_path: str | None = None
         plan_id = f"plan-{uuid4().hex[:10]}"
         plan_status = "draft"
         created_at_dt = datetime.now(UTC)
@@ -638,10 +618,10 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
         )
 
         # Write versioned plan file + latest alias.
-        if outputs_path:
-            plans_dir = Path(outputs_path) / "plans"
+        if plan_root:
+            plans_dir = Path(plan_root) / "plans"
             versioned_plan_file = plans_dir / _versioned_plan_filename(plan_output.title, created_at_dt)
-            latest_plan_alias_file = Path(outputs_path) / "plan.md"
+            latest_plan_alias_file = Path(plan_root) / "plan.md"
             try:
                 _write_file(versioned_plan_file, plan_md_content)
                 _write_file(latest_plan_alias_file, plan_md_content)
@@ -650,25 +630,6 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
                 artifact_paths.extend([plan_path, latest_alias_path])
             except Exception:
                 logger.exception("Failed to write versioned plan artifacts to outputs/")
-
-        # Also write plan.md to handoffs/ for internal agent reference.
-        if self._handoffs_config.enabled and workspace_path:
-            handoff_root = Path(workspace_path) / self._handoffs_config.dir
-            handoff_plan = handoff_root / "plan.md"
-            try:
-                _write_file(handoff_plan, plan_md_content)
-                if plan_path is None:
-                    plan_path = to_virtual_path(str(handoff_plan), thread_data) or str(handoff_plan)
-            except Exception:
-                logger.exception("Failed to write plan.md to handoffs/")
-
-            if self._sprint_contracts_config.enabled and len(nodes) >= self._sprint_contracts_config.min_todos_trigger:
-                handoff_sprint = handoff_root / "sprint_contract.md"
-                try:
-                    _write_sprint_contract(handoff_sprint, nodes)
-                    sprint_contract_path = to_virtual_path(str(handoff_sprint), thread_data) or str(handoff_sprint)
-                except Exception:
-                    logger.exception("Failed to write sprint_contract.md")
 
         # Research fan-out detection (opt-in). When enabled and the plan is a
         # research workload with N independent ready todos, surface them to the
@@ -781,7 +742,6 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
                 "todo_ids": [node["id"] for node in nodes],
                 "plan_path": plan_path,
                 "latest_alias_path": latest_alias_path,
-                "sprint_contract_path": sprint_contract_path,
                 "clarifications": [
                     {
                         "question": clarification.question,
@@ -803,7 +763,7 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
             "plan_history": plan_history,
             "todo_graph": {"nodes": nodes, "ready_ids": ready_ids, "updated_at": _utc_now_iso()},
             "todos": _legacy_todos(nodes),
-            "handoff_artifacts": [p for p in [plan_path, latest_alias_path, sprint_contract_path] if p],
+            "handoff_artifacts": [p for p in [plan_path, latest_alias_path] if p],
             "artifacts": artifact_paths,
             "complexity_tier": tier,
             "plan_evaluated": False,

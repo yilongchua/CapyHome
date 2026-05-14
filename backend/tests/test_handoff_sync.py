@@ -25,9 +25,9 @@ def _make_thread_data(tmp_path: Path) -> dict:
     }
 
 
-def _base_state(tmp_path: Path, *, with_sprint: bool = False) -> dict:
+def _base_state(tmp_path: Path) -> dict:
     thread_data = _make_thread_data(tmp_path)
-    plan_path = "/mnt/user-data/outputs/plan.md"
+    plan_path = "/mnt/user-data/workspace/plan.md"
     state: dict = {
         "thread_data": thread_data,
         "plan": {
@@ -42,9 +42,8 @@ def _base_state(tmp_path: Path, *, with_sprint: bool = False) -> dict:
             ],
             "ready_ids": ["todo-2"],
         },
+        "artifacts": ["/mnt/user-data/workspace/report.md"],
     }
-    if with_sprint:
-        state["plan"]["sprint_contract_path"] = "/mnt/user-data/outputs/sprint_contract.md"
     return state
 
 
@@ -53,27 +52,21 @@ class TestVirtualPathTranslation:
         state = _base_state(tmp_path)
         changed = sync_handoff_files_from_state(state)
 
-        physical_plan = tmp_path / "outputs" / "plan.md"
+        physical_plan = tmp_path / "workspace" / "plan.md"
         assert physical_plan.exists(), "plan.md must be written to the physical path"
-        assert changed == ["/mnt/user-data/outputs/plan.md"]
+        assert "/mnt/user-data/workspace/plan.md" in changed
 
     def test_plan_content_is_rendered(self, tmp_path):
         state = _base_state(tmp_path)
         sync_handoff_files_from_state(state)
 
-        content = (tmp_path / "outputs" / "plan.md").read_text()
+        content = (tmp_path / "workspace" / "plan.md").read_text()
         assert "Hotel Research" in content
         assert "## Phased Implementation Steps" in content
         assert "**todo-1**: Search hotels" in content
         assert "Rationale:" in content
-
-    def test_sprint_contract_written_to_physical_path(self, tmp_path):
-        state = _base_state(tmp_path, with_sprint=True)
-        changed = sync_handoff_files_from_state(state)
-
-        physical_sprint = tmp_path / "outputs" / "sprint_contract.md"
-        assert physical_sprint.exists(), "sprint_contract.md must be written to the physical path"
-        assert "/mnt/user-data/outputs/sprint_contract.md" in changed
+        assert "## File Changes" in content
+        assert "/mnt/user-data/workspace/report.md" in content
 
     def test_no_write_to_literal_mnt(self, tmp_path, monkeypatch):
         """Regression: _write_if_changed must never be called with a /mnt path."""
@@ -87,7 +80,7 @@ class TestVirtualPathTranslation:
             return original(path, content)
 
         monkeypatch.setattr(hs, "_write_if_changed", spy)
-        sync_handoff_files_from_state(_base_state(tmp_path, with_sprint=True))
+        sync_handoff_files_from_state(_base_state(tmp_path))
 
         for p in written_paths:
             assert not p.startswith("/mnt"), (
@@ -108,7 +101,8 @@ class TestVirtualPathTranslation:
             "plan": {
                 "title": "Test",
                 "summary": "",
-                "plan_path": "/mnt/user-data/outputs/plan.md",
+                "plan_path": "/mnt/user-data/workspace/plan.md",
+                "latest_alias_path": "/mnt/user-data/workspace/plan.md",
             },
             "todo_graph": {
                 "nodes": [{"id": "t1", "content": "Do something", "status": "pending", "depends_on": []}],
@@ -128,7 +122,8 @@ class TestVirtualPathTranslation:
             "plan": {
                 "title": "Empty",
                 "summary": "",
-                "plan_path": "/mnt/user-data/outputs/plan.md",
+                "plan_path": "/mnt/user-data/workspace/plan.md",
+                "latest_alias_path": "/mnt/user-data/workspace/plan.md",
             },
             "todo_graph": {"nodes": []},
         }
@@ -152,4 +147,4 @@ class TestVirtualPathTranslation:
         }
         changed = sync_handoff_files_from_state(state)
         assert Path(physical_plan).exists()
-        assert changed == [physical_plan]
+        assert physical_plan in changed

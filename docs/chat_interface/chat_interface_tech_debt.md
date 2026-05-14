@@ -95,7 +95,7 @@ This single hook handles: message submission, file uploads, optimistic UI, trace
 **Affected Files:**
 | File | Lines | Path Pattern |
 |------|-------|-------------|
-| `use-checkpoint.ts` | 17 | `/api/threads/${threadId}/artifacts/mnt/user-data/outputs/checkpoint.json` |
+| `use-checkpoint.ts` | 17 | `/api/threads/${threadId}/artifacts/mnt/user-data/workspace/checkpoint.json` |
 | `use-dreamy-as-long-running-task.ts` | 14 | `/api/threads/${threadId}/dreamy/workflow` |
 | `use-workflow-json.ts` | 15, 24 | Same `/dreamy/workflow` (duplicated) |
 | `use-mounted-folder.ts` | 8, 17, 31 | `/dreamy/mount-folder` (GET/PUT/DELETE) |

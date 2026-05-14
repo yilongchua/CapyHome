@@ -155,15 +155,24 @@ class EvaluatorMiddleware(AgentMiddleware[EvaluatorState]):
         if failures:
             critique = "Evaluator pre-verifier found issues:\n" + "\n".join(f"- {item}" for item in failures)
             report = f"# Evaluator Report\n\n- Timestamp: {_utc_now_iso()}\n- Verdict: FAIL (rule-based pre-verifier)\n\n## Findings\n" + "\n".join(f"- {item}" for item in failures) + "\n"
+            plan_update = {
+                **plan,
+                "evaluation_status": "failed",
+                "latest_evaluator_report": critique,
+                "latest_evaluator_verdict": "FAIL",
+            }
             if self._handoffs_config.enabled:
                 report_path = _write_report(workspace_path, self._handoffs_config.dir, report)
                 if report_path:
                     # Convert physical path to virtual so frontend artifact URL builder
                     # produces /mnt/user-data/... and the artifact router serves it.
-                    artifacts.append(to_virtual_path(report_path, thread_data) or report_path)
+                    virtual_report_path = to_virtual_path(report_path, thread_data) or report_path
+                    artifacts.append(virtual_report_path)
+                    plan_update["evaluator_report_path"] = virtual_report_path
             append_runtime_event(runtime, {"source": "evaluator_middleware", "decision": "rule_fail", "failures": failures})
             return {
                 "eval_attempts": attempts + 1,
+                "plan": plan_update,
                 "messages": [HumanMessage(name="evaluator_feedback", content=f"<evaluator_feedback>\n{critique}\n</evaluator_feedback>")],
                 "handoff_artifacts": artifacts,
             }
@@ -171,16 +180,24 @@ class EvaluatorMiddleware(AgentMiddleware[EvaluatorState]):
         passed, critique = self._evaluate_llm(state)
         verdict = "PASS" if passed else "FAIL"
         report = f"# Evaluator Report\n\n- Timestamp: {_utc_now_iso()}\n- Verdict: {verdict}\n\n## Critique\n{critique}\n"
+        plan_update = {
+            **plan,
+            "evaluation_status": "passed" if passed else "failed",
+            "latest_evaluator_report": critique,
+            "latest_evaluator_verdict": verdict,
+        }
         if self._handoffs_config.enabled:
             report_path = _write_report(workspace_path, self._handoffs_config.dir, report)
             if report_path:
-                artifacts.append(to_virtual_path(report_path, thread_data) or report_path)
+                virtual_report_path = to_virtual_path(report_path, thread_data) or report_path
+                artifacts.append(virtual_report_path)
+                plan_update["evaluator_report_path"] = virtual_report_path
         append_runtime_event(runtime, {"source": "evaluator_middleware", "decision": "llm_verdict", "verdict": verdict})
 
         if passed:
             return {
                 "eval_attempts": attempts + 1,
-                "plan": {**plan, "evaluation_status": "passed"},
+                "plan": plan_update,
                 "handoff_artifacts": artifacts,
             }
 
@@ -188,11 +205,12 @@ class EvaluatorMiddleware(AgentMiddleware[EvaluatorState]):
         if next_attempt >= self._max_attempts:
             return {
                 "eval_attempts": next_attempt,
-                "plan": {**plan, "evaluation_status": "max_attempts_reached"},
+                "plan": {**plan_update, "evaluation_status": "max_attempts_reached"},
                 "handoff_artifacts": artifacts,
             }
         return {
             "eval_attempts": next_attempt,
+            "plan": plan_update,
             "messages": [HumanMessage(name="evaluator_feedback", content=f"<evaluator_feedback>\n{critique}\n</evaluator_feedback>")],
             "handoff_artifacts": artifacts,
         }

@@ -58,9 +58,12 @@ class PlanState(TypedDict, total=False):
     risks: list[dict[str, str]]
     acceptance_criteria: list[str]
     todo_ids: list[str]
-    sprint_contract_path: str
     plan_path: str
     latest_alias_path: str
+    evaluation_status: str
+    latest_evaluator_report: str
+    latest_evaluator_verdict: str
+    evaluator_report_path: str
     clarifications: list[dict]
     clarification_pending: bool
     clarification_question: str
@@ -103,7 +106,6 @@ class RetryRuntimeState(TypedDict, total=False):
 
 class HandoffArtifactState(TypedDict, total=False):
     plan_path: str
-    sprint_contract_path: str
     report_path: str
 
 
@@ -205,6 +207,13 @@ class QualityGateState(TypedDict, total=False):
     checked_path: str
 
 
+class HandoffMetaState(TypedDict, total=False):
+    source_thread_id: str
+    handoff_root_virtual_path: str
+    package_manifest_virtual_path: str | None
+    created_at: str
+
+
 def merge_artifacts(existing: list[str] | None, new: list[str] | None) -> list[str]:
     """Reducer for artifacts list - merges and deduplicates artifacts."""
     if existing is None:
@@ -273,3 +282,4 @@ class ThreadState(AgentState):
     work_mode: NotRequired[WorkModeState | None]
     phase_execution: NotRequired[PhaseExecutionState | None]
     quality_gate: NotRequired[QualityGateState | None]
+    handoff_meta: NotRequired[HandoffMetaState | None]

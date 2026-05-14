@@ -124,7 +124,7 @@ class DreamyExecutionMiddleware(AgentMiddleware[DreamyExecutionMiddlewareState])
             ds = workflow.get("data_source") or {}
             source_fn = ds.get("filename") or "tasks.txt"
             base = source_fn.rsplit(".", 1)[0] if "." in source_fn else source_fn
-            output_virtual = f"/mnt/user-data/outputs/{base}_results.csv"
+            output_virtual = f"/mnt/user-data/workspace/{base}_results.csv"
             done = self._read_progress_done(progress_path)
             reminder = HumanMessage(
                 name="dreamy_executor",

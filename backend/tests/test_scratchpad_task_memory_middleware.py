@@ -18,7 +18,7 @@ def _runtime():
 def test_scratchpad_and_task_memory_updates_and_writes_artifact(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(
         "src.agents.middlewares.scratchpad_task_memory_middleware.get_handoffs_config",
-        lambda: HandoffsConfig(enabled=True, dir=".handoffs"),
+        lambda: HandoffsConfig(enabled=True, dir=".runtime"),
     )
     middleware = ScratchpadTaskMemoryMiddleware(
         scratchpad_config=ScratchpadConfig(enabled=True, max_entries=10, max_chars_per_entry=120, artifact_file="scratchpad.md"),
@@ -33,7 +33,7 @@ def test_scratchpad_and_task_memory_updates_and_writes_artifact(monkeypatch, tmp
     assert update is not None
     assert update["scratchpad"]
     assert "todo-1" in update["task_memory"]
-    artifact = tmp_path / ".handoffs" / "scratchpad.md"
+    artifact = tmp_path / ".runtime" / "scratchpad.md"
     assert artifact.exists()
     assert "todo-1" in artifact.read_text(encoding="utf-8")
 
@@ -41,7 +41,7 @@ def test_scratchpad_and_task_memory_updates_and_writes_artifact(monkeypatch, tmp
 def test_scratchpad_compacts_entries(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(
         "src.agents.middlewares.scratchpad_task_memory_middleware.get_handoffs_config",
-        lambda: HandoffsConfig(enabled=False, dir=".handoffs"),
+        lambda: HandoffsConfig(enabled=False, dir=".runtime"),
     )
     middleware = ScratchpadTaskMemoryMiddleware(
         scratchpad_config=ScratchpadConfig(enabled=True, max_entries=1, max_chars_per_entry=64, artifact_file="scratchpad.md"),

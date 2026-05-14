@@ -37,6 +37,13 @@ export interface PhaseExecutionState {
   adaptation_attempts?: number;
 }
 
+export interface HandoffMetaState {
+  source_thread_id?: string;
+  handoff_root_virtual_path?: string;
+  package_manifest_virtual_path?: string | null;
+  created_at?: string;
+}
+
 export interface PlanState {
   plan_id?: string;
   status?: "draft" | "approved" | "executing" | "completed" | string;
@@ -98,6 +105,7 @@ export interface AgentThreadState extends Record<string, unknown> {
   };
   work_mode?: WorkModeState | null;
   phase_execution?: PhaseExecutionState | null;
+  handoff_meta?: HandoffMetaState | null;
 }
 
 export type AgentThread = Thread<AgentThreadState>;

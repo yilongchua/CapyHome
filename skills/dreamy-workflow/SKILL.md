@@ -93,7 +93,7 @@ workflow: true
 The bootstrap middleware has already:
 - Detected the structured data from the message body or uploaded file
 - Called the LLM once to infer `steps` from the schema
-- Written `workflow.json` v2 to `/mnt/user-data/outputs/workflow.json`
+- Written `workflow.json` v2 to `/mnt/user-data/workspace/workflow.json`
 
 Your job: read `workflow.json` and present the steps to the user as a clear table:
 
@@ -125,7 +125,7 @@ Then proceed to Phase 2.
 Initialize checkpoint:
 ```bash
 python /mnt/skills/batch-workflow/scripts/checkpoint.py \
-  --file /mnt/user-data/outputs/checkpoint.json \
+  --file /mnt/user-data/workspace/checkpoint.json \
   --init --total <total_rows>
 ```
 
@@ -149,13 +149,13 @@ For each of rows 0, 1, 2 (or fewer if `total_rows < 3`):
 After all POC rows, write:
 ```python
 import json, statistics
-data = json.load(open('/mnt/user-data/outputs/workflow.json'))
+data = json.load(open('/mnt/user-data/workspace/workflow.json'))
 seconds_list = [r['seconds'] for r in data['execution_state']['poc_results'] if r.get('seconds')]
 avg = round(statistics.mean(seconds_list)) if seconds_list else 30
 data['execution_state']['phase'] = 'poc'          # middleware flips to awaiting_approval
 data['execution_state']['current_row_index'] = <completed_count>
 data['execution_state']['seconds_per_row_estimate'] = avg
-json.dump(data, open('/mnt/user-data/outputs/workflow.json', 'w'), indent=2)
+json.dump(data, open('/mnt/user-data/workspace/workflow.json', 'w'), indent=2)
 ```
 
 Present POC results as a table:
@@ -273,7 +273,7 @@ REPEAT until row_index == total_rows:
 python script.py --a "7" --op "+" --b "6"
 
 # ❌ WRONG — script reads the whole file and loops internally
-python script.py --input /mnt/user-data/outputs/starting_point.csv
+python script.py --input /mnt/user-data/workspace/starting_point.csv
 ```
 
 If using bash for computation, the command receives only THIS row's field values, not the file path. The file path is only valid in `load_tasks.py` at initialisation and `write_result.py` for output.
@@ -306,7 +306,7 @@ any stale row counts or file paths from earlier in the conversation history.
 <system_reminder>
 DREAMY EXECUTOR — phase=bulk, row 247 of 30000
 current_step_id: step-1
-Output file: /mnt/user-data/outputs/leads_results.csv (do NOT modify the source file)
+Output file: /mnt/user-data/workspace/leads_results.csv (do NOT modify the source file)
 RULES: (1) One tool/bash call = exactly ONE row's data ...
 </system_reminder>
 ```
@@ -327,7 +327,7 @@ If the run is interrupted, check the checkpoint:
 ```bash
 python /mnt/skills/batch-workflow/scripts/load_tasks.py \
   --input /mnt/user-data/uploads/tasks.txt \
-  --checkpoint /mnt/user-data/outputs/checkpoint.json
+  --checkpoint /mnt/user-data/workspace/checkpoint.json
 ```
 
 Read `resume_index` and restart row-by-row execution from that row.

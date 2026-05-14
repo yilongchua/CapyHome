@@ -26,7 +26,7 @@ For SQL exploration across Excel/CSV datasets, prefer `data-analysis`.
 ```bash
 python /mnt/skills/public/excel-modeling/scripts/inspect_workbook.py \
   --input /mnt/user-data/uploads/model.xlsx \
-  --output /mnt/user-data/outputs/model-inspection.json
+  --output /mnt/user-data/workspace/model-inspection.json
 ```
 
 ### Step 2: Validate formulas and error cells
@@ -34,7 +34,7 @@ python /mnt/skills/public/excel-modeling/scripts/inspect_workbook.py \
 ```bash
 python /mnt/skills/public/excel-modeling/scripts/validate_formulas.py \
   --input /mnt/user-data/uploads/model.xlsx \
-  --output /mnt/user-data/outputs/model-validation.json
+  --output /mnt/user-data/workspace/model-validation.json
 ```
 
 ### Step 3: Apply financial formatting conventions (optional)
@@ -42,15 +42,15 @@ python /mnt/skills/public/excel-modeling/scripts/validate_formulas.py \
 ```bash
 python /mnt/skills/public/excel-modeling/scripts/apply_financial_formatting.py \
   --input /mnt/user-data/uploads/model.xlsx \
-  --output /mnt/user-data/outputs/model-formatted.xlsx
+  --output /mnt/user-data/workspace/model-formatted.xlsx
 ```
 
 ### Step 4: Recalculate with LibreOffice (optional but recommended)
 
 ```bash
 python /mnt/skills/public/excel-modeling/scripts/recalc_libreoffice.py \
-  --input /mnt/user-data/outputs/model-formatted.xlsx \
-  --output /mnt/user-data/outputs/model-recalculated.xlsx
+  --input /mnt/user-data/workspace/model-formatted.xlsx \
+  --output /mnt/user-data/workspace/model-recalculated.xlsx
 ```
 
 ## Script Notes

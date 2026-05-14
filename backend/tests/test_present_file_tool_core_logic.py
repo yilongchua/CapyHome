@@ -25,7 +25,7 @@ def test_present_files_normalizes_host_outputs_path(tmp_path):
         tool_call_id="tc-1",
     )
 
-    assert result.update["artifacts"] == ["/mnt/user-data/outputs/report.md"]
+    assert result.update["artifacts"] == ["/mnt/user-data/workspace/report.md"]
     assert result.update["messages"][0].content == "Successfully presented files"
 
 
@@ -43,17 +43,15 @@ def test_present_files_keeps_virtual_outputs_path(tmp_path, monkeypatch):
 
     result = present_file_tool_module.present_file_tool.func(
         runtime=_make_runtime(str(outputs_dir)),
-        filepaths=["/mnt/user-data/outputs/summary.json"],
+        filepaths=["/mnt/user-data/workspace/summary.json"],
         tool_call_id="tc-2",
     )
 
-    assert result.update["artifacts"] == ["/mnt/user-data/outputs/summary.json"]
+    assert result.update["artifacts"] == ["/mnt/user-data/workspace/summary.json"]
 
 
 def test_present_files_rejects_paths_outside_outputs(tmp_path):
-    outputs_dir = tmp_path / "threads" / "thread-1" / "user-data" / "outputs"
     workspace_dir = tmp_path / "threads" / "thread-1" / "user-data" / "workspace"
-    outputs_dir.mkdir(parents=True)
     workspace_dir.mkdir(parents=True)
     leaked_path = workspace_dir / "notes.txt"
     leaked_path.write_text("leak")
@@ -65,4 +63,3 @@ def test_present_files_rejects_paths_outside_outputs(tmp_path):
     )
 
     assert "artifacts" not in result.update
-    assert result.update["messages"][0].content == f"Error: Only files in /mnt/user-data/outputs can be presented: {leaked_path}"

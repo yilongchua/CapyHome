@@ -132,13 +132,13 @@ Assign confidence based on source quality:
 
 For deep-research runs, always generate and present these artifacts:
 
-1. `/mnt/user-data/outputs/research_report.md`
-2. `/mnt/user-data/outputs/action_items.md`
-3. `/mnt/user-data/outputs/implementation_plan.md`
+1. `/mnt/user-data/workspace/research_report.md`
+2. `/mnt/user-data/workspace/action_items.md`
+3. `/mnt/user-data/workspace/implementation_plan.md`
 
 Optional (recommended):
 
-4. `/mnt/user-data/outputs/stubs/` for starter code and tests
+4. `/mnt/user-data/workspace/stubs/` for starter code and tests
 
 ### Formatting Rules
 
