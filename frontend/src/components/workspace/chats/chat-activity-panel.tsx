@@ -79,7 +79,49 @@ export function ChatActivityPanel({
     return items;
   }, [liveEvents, thread.values.activity_timeline]);
 
-  const hasInProgressPhase = (thread.values.phase_execution?.phase_results ?? []).some(
+  const todos = useMemo(() => thread.values.todos ?? [], [thread.values.todos]);
+  const phaseExecution = thread.values.phase_execution;
+  const effectivePhaseExecution = useMemo(() => {
+    if (todos.length === 0) {
+      return phaseExecution;
+    }
+
+    // Keep Phase Progress aligned with the latest todo list, which is the most
+    // up-to-date execution signal in some runs.
+    const derivedResults = todos.map((todo, index) => {
+      const existing = phaseExecution?.phase_results?.[index];
+      const status = todo.status ?? existing?.status ?? "pending";
+      return {
+        phase_index: existing?.phase_index ?? index + 1,
+        todo_id: existing?.todo_id ?? `todo-${index + 1}`,
+        content: todo.content ?? existing?.content ?? `Todo ${index + 1}`,
+        status,
+        subagent_type: existing?.subagent_type,
+        completed_at: existing?.completed_at,
+      };
+    });
+
+    const hasDrift =
+      !phaseExecution ||
+      (phaseExecution.phase_results?.length ?? 0) !== todos.length ||
+      derivedResults.some((result, index) => {
+        const existing = phaseExecution.phase_results?.[index];
+        if (!existing) return true;
+        return existing.status !== result.status || existing.content !== result.content;
+      });
+
+    if (!hasDrift) {
+      return phaseExecution;
+    }
+
+    return {
+      ...(phaseExecution ?? {}),
+      total_phases: todos.length,
+      phase_results: derivedResults,
+    };
+  }, [phaseExecution, todos]);
+
+  const hasInProgressPhase = (effectivePhaseExecution?.phase_results ?? []).some(
     (phase) => phase.status === "in_progress",
   );
   const runState: "run" | "idle" =
@@ -130,11 +172,11 @@ export function ChatActivityPanel({
     <div className={cn("flex h-full flex-col overflow-hidden", className)}>
       <div className="flex-1 overflow-y-auto">
         <div className="space-y-0 p-3">
-          <PhaseProgress phaseExecution={thread.values.phase_execution} runState={runState} />
+          <PhaseProgress phaseExecution={effectivePhaseExecution} runState={runState} />
           <TodoList
             className="my-2"
-            todos={thread.values.todos ?? []}
-            hidden={!thread.values.todos || thread.values.todos.length === 0}
+            todos={todos}
+            hidden={todos.length === 0}
             embedded
           />
           <section className="space-y-2 rounded-lg border p-3">

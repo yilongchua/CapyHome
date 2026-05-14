@@ -5,7 +5,7 @@ export const api = {
     executePlan: (threadId: string) => `/api/threads/${threadId}/plan/execute`,
     suggestions: (threadId: string) => `/api/threads/${threadId}/suggestions`,
     checkpoint: (threadId: string) =>
-      `/api/threads/${threadId}/artifacts/mnt/user-data/outputs/checkpoint.json`,
+      `/api/threads/${threadId}/artifacts/mnt/user-data/workspace/checkpoint.json`,
     artifacts: (threadId: string, path: string) =>
       `/api/threads/${threadId}/artifacts${path}`,
     uploads: (threadId: string, filename: string) =>

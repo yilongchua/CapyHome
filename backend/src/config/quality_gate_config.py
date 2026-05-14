@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class QualityGateConfig(BaseModel):
     enabled: bool = Field(default=True, description="Enable report artifact quality gate before successful write_file completion.")
-    max_repair_passes: int = Field(default=1, ge=0, le=3, description="Maximum focused repair passes before allowing write to proceed.")
+    max_repair_passes: int = Field(default=3, ge=0, le=5, description="Maximum focused repair passes before allowing write to proceed.")
 
 
 _quality_gate_config: QualityGateConfig = QualityGateConfig()

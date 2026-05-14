@@ -149,7 +149,11 @@ def _create_summarization_middleware(*, mode: str = "", dreamy_mode: bool = Fals
 
     normalized_mode = "dreamy" if dreamy_mode else mode
     legacy_mode_aliases = {"work": "fast", "plan": "pro"}
-    mode_override = config.modes.get(normalized_mode) or config.modes.get(legacy_mode_aliases.get(normalized_mode, normalized_mode))
+    mode_override = (
+        config.modes.get(normalized_mode)
+        or config.modes.get(legacy_mode_aliases.get(normalized_mode, normalized_mode))
+        or config.modes.get("default")
+    )
 
     # Prepare trigger parameter
     trigger = None

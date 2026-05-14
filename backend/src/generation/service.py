@@ -147,7 +147,7 @@ class GenerationService:
             raise ValueError("output_name is required")
 
         filename_prefix = f"{self._prefix_root()}/{output_name}"
-        expected_virtual_path = f"{VIRTUAL_PATH_PREFIX}/outputs/{filename_prefix}"
+        expected_virtual_path = f"{VIRTUAL_PATH_PREFIX}/workspace/{filename_prefix}"
         prompt_excerpt = prompt_text[:120]
         now = utcnow()
 
@@ -281,12 +281,12 @@ class GenerationService:
 
     def _copy_to_thread_outputs(self, thread_id: str, source_file: Path) -> str:
         source_file = source_file.resolve()
-        outputs_dir = get_paths().sandbox_outputs_dir(thread_id)
-        target_dir = outputs_dir / self._prefix_root()
+        workspace_dir = get_paths().sandbox_work_dir(thread_id)
+        target_dir = workspace_dir / self._prefix_root()
         target_dir.mkdir(parents=True, exist_ok=True)
         target_path = target_dir / source_file.name
         shutil.copy2(source_file, target_path)
-        return f"{VIRTUAL_PATH_PREFIX}/outputs/{self._prefix_root()}/{source_file.name}"
+        return f"{VIRTUAL_PATH_PREFIX}/workspace/{self._prefix_root()}/{source_file.name}"
 
     def poll_pending_jobs_once(self) -> int:
         cfg = self._config()

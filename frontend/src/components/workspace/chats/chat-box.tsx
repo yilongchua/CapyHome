@@ -1,4 +1,4 @@
-import { ChevronLeftIcon, ChevronRightIcon, FilesIcon, MapIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, FilesIcon, MapIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { usePanelRef } from "react-resizable-panels";
 
@@ -46,6 +46,7 @@ const ChatBox: React.FC<{
   extraDirectoryFiles = [],
   onSubmitPlanRevision,
 }) => {
+  const ARTIFACTS_POLL_INTERVAL_MS = 30_000;
   const { thread } = useThread();
   const threadIdRef = useRef(threadId);
   const panelRef = usePanelRef();
@@ -113,8 +114,13 @@ const ChatBox: React.FC<{
   useEffect(() => {
     let active = true;
     let timer: number | null = null;
+    let inFlight = false;
 
     const load = async () => {
+      if (inFlight || !active) {
+        return;
+      }
+      inFlight = true;
       try {
         const response = await fetch(
           `${getBackendBaseURL()}/api/threads/${threadId}/artifacts-list`,
@@ -128,18 +134,17 @@ const ChatBox: React.FC<{
         }
         setSandboxOutputFiles(
           (payload.files ?? []).filter((file) =>
-            file.startsWith("/mnt/user-data/outputs/"),
+            file.startsWith("/mnt/user-data/workspace/"),
           ),
         );
       } catch {
-        if (active) {
-          setSandboxOutputFiles([]);
-        }
+        // Keep current directory view on transient poll failures.
       } finally {
+        inFlight = false;
         if (active) {
           timer = window.setTimeout(() => {
             void load();
-          }, 5000);
+          }, ARTIFACTS_POLL_INTERVAL_MS);
         }
       }
     };
@@ -152,6 +157,25 @@ const ChatBox: React.FC<{
       }
     };
   }, [threadId]);
+
+  const handleArtifactsRefresh = async () => {
+    try {
+      const response = await fetch(
+        `${getBackendBaseURL()}/api/threads/${threadId}/artifacts-list`,
+      );
+      if (!response.ok) {
+        throw new Error("Failed to list thread directory files");
+      }
+      const payload = (await response.json()) as { files?: string[] };
+      setSandboxOutputFiles(
+        (payload.files ?? []).filter((file) =>
+          file.startsWith("/mnt/user-data/workspace/"),
+        ),
+      );
+    } catch {
+      // Keep current state if manual refresh fails.
+    }
+  };
 
 
   const handleCollapse = () => {
@@ -241,6 +265,16 @@ const ChatBox: React.FC<{
                   </TabsTrigger>
                 )}
               </TabsList>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => {
+                  void handleArtifactsRefresh();
+                }}
+                title="Refresh directories"
+              >
+                <RefreshCwIcon className="size-4" />
+              </Button>
               <Button size="icon-sm" variant="ghost" onClick={handleCollapse}>
                 <ChevronRightIcon className="size-4" />
               </Button>

@@ -162,9 +162,14 @@ class AppConfig(BaseModel):
         if "title" in config_data:
             load_title_config_from_dict(config_data["title"])
 
-        # Load summarization config if present
+        # Load summarization/compaction config.
+        # `compaction` is a supported alias for `summarization` to make the
+        # intent clearer in user-facing config. If both are present,
+        # `summarization` wins.
         if "summarization" in config_data:
             load_summarization_config_from_dict(config_data["summarization"])
+        elif "compaction" in config_data:
+            load_summarization_config_from_dict(config_data["compaction"])
 
         # Load memory config if present
         if "memory" in config_data:

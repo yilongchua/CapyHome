@@ -99,7 +99,7 @@ def _timeout_message(stage: str | None, timeout_s: int, request: ModelRequest | 
             "The previous tool batch returned ~"
             f"{tool_chars} characters of content that could not be summarized in one pass. "
             "Recover by writing the answer incrementally: call `write_file` to "
-            "save partial findings to `/mnt/user-data/outputs/<topic>.md`, then "
+            "save partial findings to `/mnt/user-data/workspace/<topic>.md`, then "
             "process the next chunk in your next turn. Do not re-issue the same "
             "tool calls."
         )

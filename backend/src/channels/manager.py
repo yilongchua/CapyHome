@@ -135,13 +135,13 @@ def _format_artifact_text(artifacts: list[str]) -> str:
     return "Created Files: 📎 " + "、".join(filenames)
 
 
-_OUTPUTS_VIRTUAL_PREFIX = "/mnt/user-data/outputs/"
+_WORKSPACE_VIRTUAL_PREFIX = "/mnt/user-data/workspace/"
 
 
 def _resolve_attachments(thread_id: str, artifacts: list[str]) -> list[ResolvedAttachment]:
     """Resolve virtual artifact paths to host filesystem paths with metadata.
 
-    Only paths under ``/mnt/user-data/outputs/`` are accepted; any other
+    Only paths under ``/mnt/user-data/workspace/`` are accepted; any other
     virtual path is rejected with a warning to prevent exfiltrating uploads
     or workspace files via IM channels.
 
@@ -152,20 +152,20 @@ def _resolve_attachments(thread_id: str, artifacts: list[str]) -> list[ResolvedA
 
     attachments: list[ResolvedAttachment] = []
     paths = get_paths()
-    outputs_dir = paths.sandbox_outputs_dir(thread_id).resolve()
+    workspace_dir = paths.sandbox_work_dir(thread_id).resolve()
     for virtual_path in artifacts:
-        # Security: only allow files from the agent outputs directory
-        if not virtual_path.startswith(_OUTPUTS_VIRTUAL_PREFIX):
-            logger.warning("[Manager] rejected non-outputs artifact path: %s", virtual_path)
+        # Security: only allow files from the agent workspace directory
+        if not virtual_path.startswith(_WORKSPACE_VIRTUAL_PREFIX):
+            logger.warning("[Manager] rejected non-workspace artifact path: %s", virtual_path)
             continue
         try:
             actual = paths.resolve_virtual_path(thread_id, virtual_path)
-            # Verify the resolved path is actually under the outputs directory
+            # Verify the resolved path is actually under the workspace directory
             # (guards against path-traversal even after prefix check)
             try:
-                actual.resolve().relative_to(outputs_dir)
+                actual.resolve().relative_to(workspace_dir)
             except ValueError:
-                logger.warning("[Manager] artifact path escapes outputs dir: %s -> %s", virtual_path, actual)
+                logger.warning("[Manager] artifact path escapes workspace dir: %s -> %s", virtual_path, actual)
                 continue
             if not actual.is_file():
                 logger.warning("[Manager] artifact not found on disk: %s -> %s", virtual_path, actual)

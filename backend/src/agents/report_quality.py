@@ -15,7 +15,7 @@ class QualityCheckResult:
 
 def _is_report_target(path: str) -> bool:
     lowered = path.lower()
-    return lowered.endswith(".md") and ("report" in lowered or "/outputs/" in lowered)
+    return lowered.endswith(".md") and ("report" in lowered or "/workspace/" in lowered)
 
 
 def _extract_heading_numbers(lines: list[str]) -> list[str]:

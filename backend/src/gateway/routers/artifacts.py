@@ -237,19 +237,19 @@ async def update_artifact(thread_id: str, path: str, payload: UpdateArtifactRequ
     "/threads/{thread_id}/artifacts-list",
     response_model=ListArtifactsResponse,
     summary="List Thread Artifacts",
-    description="List files under the thread sandbox outputs directory.",
+    description="List files under the thread sandbox workspace directory.",
 )
 async def list_artifacts(thread_id: str) -> ListArtifactsResponse:
-    outputs_dir = get_paths().sandbox_outputs_dir(thread_id)
-    if not outputs_dir.exists():
+    workspace_dir = get_paths().sandbox_work_dir(thread_id)
+    if not workspace_dir.exists():
         return ListArtifactsResponse(files=[])
 
     files: list[str] = []
-    for path in outputs_dir.rglob("*"):
+    for path in workspace_dir.rglob("*"):
         if not path.is_file():
             continue
-        relative = path.relative_to(outputs_dir).as_posix()
-        files.append(f"/mnt/user-data/outputs/{relative}")
+        relative = path.relative_to(workspace_dir).as_posix()
+        files.append(f"/mnt/user-data/workspace/{relative}")
 
     files.sort()
     return ListArtifactsResponse(files=files)

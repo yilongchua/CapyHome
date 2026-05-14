@@ -79,7 +79,7 @@ export function ArtifactFileList({
   );
 
   const createdIndex = useMemo(() => {
-    const root = "/mnt/user-data/outputs/";
+    const root = "/mnt/user-data/workspace/";
     const map = new Map<string, string>();
     for (const file of createdFiles) {
       if (!file.startsWith(root)) continue;
@@ -197,7 +197,7 @@ export function ArtifactFileList({
     (file: string, source: "created" | "mounted") => {
       const metadata = source === "mounted"
         ? `${getFileExtensionDisplayName(file)} file • ${mountedFolder ?? "/mnt/user-data/mounted"}`
-        : `${getFileExtensionDisplayName(file)} file • /mnt/user-data/outputs`;
+        : `${getFileExtensionDisplayName(file)} file • /mnt/user-data/workspace`;
 
       return (
         <li
@@ -330,11 +330,11 @@ export function ArtifactFileList({
         <div className="text-muted-foreground flex items-center gap-1.5 px-1 text-xs">
           <FolderOpenIcon className="size-3.5" />
           <span className="font-medium uppercase tracking-wide">Created Files</span>
-          <span className="font-mono">/mnt/user-data/outputs</span>
+          <span className="font-mono">/mnt/user-data/workspace</span>
         </div>
         {createdFiles.length > 0 ? (
           <div className="px-1">
-            {renderBreadcrumb("/mnt/user-data/outputs", createdPath, setCreatedPath)}
+            {renderBreadcrumb("/mnt/user-data/workspace", createdPath, setCreatedPath)}
           </div>
         ) : null}
         {createdFiles.length > 0 ? (
@@ -344,7 +344,7 @@ export function ArtifactFileList({
           </ul>
         ) : (
           <div className="text-muted-foreground rounded-md border px-3 py-2 text-xs">
-            No files found in /mnt/user-data/outputs.
+            No files found in /mnt/user-data/workspace.
           </div>
         )}
       </section>

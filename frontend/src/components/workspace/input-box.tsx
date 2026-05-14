@@ -147,13 +147,13 @@ const SLASH_COMMANDS: SlashCommandOption[] = [
     name: "analyse",
     title: "Analyse repo",
     usage: "Stage `.docs` mirror",
-    description: "Create full mirrored docs structure inside `/mnt/user-data/outputs/.docs` (no mounted writes).",
+    description: "Create full mirrored docs structure inside `/mnt/user-data/workspace/.docs` (no mounted writes).",
   },
   {
     name: "publishdocs",
     title: "Publish docs",
     usage: "Copy staged docs to mounted",
-    description: "Copy staged docs from `/mnt/user-data/outputs/.docs` to `/mnt/user-data/mounted/.docs` after review.",
+    description: "Copy staged docs from `/mnt/user-data/workspace/.docs` to `/mnt/user-data/mounted/.docs` after review.",
   },
   {
     name: "autoresearch",

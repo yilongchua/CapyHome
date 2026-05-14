@@ -9,26 +9,26 @@ from langgraph.typing import ContextT
 from src.agents.thread_state import ThreadState
 from src.config.paths import VIRTUAL_PATH_PREFIX, get_paths
 
-OUTPUTS_VIRTUAL_PREFIX = f"{VIRTUAL_PATH_PREFIX}/outputs"
+WORKSPACE_VIRTUAL_PREFIX = f"{VIRTUAL_PATH_PREFIX}/workspace"
 
 
 def _normalize_presented_filepath(
     runtime: ToolRuntime[ContextT, ThreadState],
     filepath: str,
 ) -> str:
-    """Normalize a presented file path to the `/mnt/user-data/outputs/*` contract.
+    """Normalize a presented file path to the `/mnt/user-data/workspace/*` contract.
 
     Accepts either:
-    - A virtual sandbox path such as `/mnt/user-data/outputs/report.md`
-    - A host-side thread outputs path such as
-      `/app/backend/.capybara-home/threads/<thread>/user-data/outputs/report.md`
+    - A virtual sandbox path such as `/mnt/user-data/workspace/report.md`
+    - A host-side thread workspace path such as
+      `/app/backend/.capybara-home/threads/<thread>/user-data/workspace/report.md`
 
     Returns:
         The normalized virtual path.
 
     Raises:
         ValueError: If runtime metadata is missing or the path is outside the
-            current thread's outputs directory.
+            current thread's workspace directory.
     """
     if runtime.state is None:
         raise ValueError("Thread runtime state is not available")
@@ -38,11 +38,11 @@ def _normalize_presented_filepath(
         raise ValueError("Thread ID is not available in runtime context")
 
     thread_data = runtime.state.get("thread_data") or {}
-    outputs_path = thread_data.get("outputs_path")
-    if not outputs_path:
-        raise ValueError("Thread outputs path is not available in runtime state")
+    workspace_path = thread_data.get("workspace_path")
+    if not workspace_path:
+        raise ValueError("Thread workspace path is not available in runtime state")
 
-    outputs_dir = Path(outputs_path).resolve()
+    workspace_dir = Path(workspace_path).resolve()
     stripped = filepath.lstrip("/")
     virtual_prefix = VIRTUAL_PATH_PREFIX.lstrip("/")
 
@@ -52,11 +52,11 @@ def _normalize_presented_filepath(
         actual_path = Path(filepath).expanduser().resolve()
 
     try:
-        relative_path = actual_path.relative_to(outputs_dir)
+        relative_path = actual_path.relative_to(workspace_dir)
     except ValueError as exc:
-        raise ValueError(f"Only files in {OUTPUTS_VIRTUAL_PREFIX} can be presented: {filepath}") from exc
+        raise ValueError(f"Only files in {WORKSPACE_VIRTUAL_PREFIX} can be presented: {filepath}") from exc
 
-    return f"{OUTPUTS_VIRTUAL_PREFIX}/{relative_path.as_posix()}"
+    return f"{WORKSPACE_VIRTUAL_PREFIX}/{relative_path.as_posix()}"
 
 
 @tool("present_files", parse_docstring=True)
@@ -78,11 +78,11 @@ def present_file_tool(
     - For temporary or intermediate files not meant for user viewing
 
     Notes:
-    - You should call this tool after creating files and moving them to the `/mnt/user-data/outputs` directory.
+    - You should call this tool after creating files in `/mnt/user-data/workspace`.
     - This tool can be safely called in parallel with other tools. State updates are handled by a reducer to prevent conflicts.
 
     Args:
-        filepaths: List of absolute file paths to present to the user. **Only** files in `/mnt/user-data/outputs` can be presented.
+        filepaths: List of absolute file paths to present to the user. **Only** files in `/mnt/user-data/workspace` can be presented.
     """
     try:
         normalized_paths = [_normalize_presented_filepath(runtime, filepath) for filepath in filepaths]

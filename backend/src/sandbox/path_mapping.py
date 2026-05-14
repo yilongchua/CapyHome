@@ -37,6 +37,11 @@ def replace_virtual_path(path: str, thread_data: ThreadDataLike | None) -> str:
     subdir = parts[0]
     rest = parts[1] if len(parts) > 1 else ""
 
+    # Canonicalize legacy outputs virtual paths to workspace.
+    # From this point forward, user-facing file operations are workspace-first.
+    if subdir == "outputs":
+        subdir = "workspace"
+
     actual_base = path_mapping.get(subdir)
     if actual_base is None:
         return path
@@ -67,8 +72,10 @@ def to_virtual_path(path: str | None, thread_data: ThreadDataLike | None) -> str
     for subdir, base in candidates_sorted:
         base_str = str(base)
         if path == base_str:
-            return f"{VIRTUAL_PATH_PREFIX}/{subdir}"
+            normalized_subdir = "workspace" if subdir == "outputs" else subdir
+            return f"{VIRTUAL_PATH_PREFIX}/{normalized_subdir}"
         if path.startswith(base_str + "/"):
             rest = path[len(base_str) + 1 :]
-            return f"{VIRTUAL_PATH_PREFIX}/{subdir}/{rest}"
+            normalized_subdir = "workspace" if subdir == "outputs" else subdir
+            return f"{VIRTUAL_PATH_PREFIX}/{normalized_subdir}/{rest}"
     return path

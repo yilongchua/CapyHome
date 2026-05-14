@@ -73,7 +73,7 @@ export function FileMentionDropdown({
       return;
     }
     let cancelled = false;
-    const loadOutputs = async () => {
+    const loadWorkspaceFiles = async () => {
       try {
         const res = await fetch(`${getBackendBaseURL()}/api/threads/${threadId}/artifacts-list`);
         if (!res.ok) {
@@ -84,7 +84,7 @@ export function FileMentionDropdown({
           return;
         }
         const mapped = (payload.files ?? [])
-          .filter((file) => file.startsWith("/mnt/user-data/outputs/"))
+          .filter((file) => file.startsWith("/mnt/user-data/workspace/"))
           .map((virtualPath) => {
             const name = virtualPath.split("/").pop() ?? virtualPath;
             return {
@@ -102,7 +102,7 @@ export function FileMentionDropdown({
         }
       }
     };
-    void loadOutputs();
+    void loadWorkspaceFiles();
     return () => {
       cancelled = true;
     };

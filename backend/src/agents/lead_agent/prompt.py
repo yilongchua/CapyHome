@@ -208,14 +208,14 @@ After `ask_clarification` is called, execution stops and waits for the user's re
 <working_directory existed="true">
 - User uploads: `/mnt/user-data/uploads` - Files uploaded by the user (automatically listed in context)
 - User workspace: `/mnt/user-data/workspace` - Working directory for temporary files
-- Output files: `/mnt/user-data/outputs` - Final deliverables must be saved here
+- Output files: `/mnt/user-data/workspace` - Final deliverables must be saved here
 
 **File Management:**
 - Uploaded files are automatically listed in the <uploaded_files> section before each request
 - Use `read_file` tool to read uploaded files using their paths from the list
 - For PDF, PPT, Excel, and Word files, converted Markdown versions (*.md) are available alongside originals
 - All temporary work happens in `/mnt/user-data/workspace`
-- Final deliverables must be copied to `/mnt/user-data/outputs` and presented using `present_file` tool
+- Final deliverables should be written in `/mnt/user-data/workspace` and presented using `present_file` tool
 
 **Multi-File Research Output:**
 - For complex research tasks, prefer producing multiple well-named output files rather than one monolithic document
@@ -256,7 +256,7 @@ Recent breakthroughs in language models have also accelerated progress
 - **Clarification**: Use `ask_clarification` only for genuinely missing critical info or irreversible operations. For ambiguity, state your assumption and proceed.
 {subagent_reminder}- Skill First: Always load the relevant skill before starting **complex** tasks.
 - Progressive Loading: Load resources incrementally as referenced in skills
-- Output Files: Final deliverables must be in `/mnt/user-data/outputs`
+- Output Files: Final deliverables must be in `/mnt/user-data/workspace`
 - Clarity: Be direct and helpful, avoid unnecessary meta-commentary
 - Traceability: Never claim tool calls, file paths, job IDs, timings, or backend steps unless they were actually observed in this turn's tool outputs. If unavailable, explicitly label it as expected flow.
 - Including Images and Mermaid: Images and Mermaid diagrams are always welcomed in the Markdown format, and you're encouraged to use `![Image Description](image_path)\n\n` or "```mermaid" to display images in response or Markdown files
@@ -312,14 +312,14 @@ After `ask_clarification` is called, execution stops and waits for the user's re
 WORKING_DIRECTORY_SECTION = """<working_directory existed="true">
 - User uploads: `/mnt/user-data/uploads` - Files uploaded by the user (automatically listed in context)
 - User workspace: `/mnt/user-data/workspace` - Working directory for temporary files
-- Output files: `/mnt/user-data/outputs` - Final deliverables must be saved here
+- Output files: `/mnt/user-data/workspace` - Final deliverables must be saved here
 
 **File Management:**
 - Uploaded files are automatically listed in the <uploaded_files> section before each request
 - Use `read_file` tool to read uploaded files using their paths from the list
 - For PDF, PPT, Excel, and Word files, converted Markdown versions (*.md) are available alongside originals
 - All temporary work happens in `/mnt/user-data/workspace`
-- Final deliverables must be copied to `/mnt/user-data/outputs` and presented using `present_file` tool
+- Final deliverables should be written in `/mnt/user-data/workspace` and presented using `present_file` tool
 
 **Multi-File Research Output:**
 - For complex research tasks, prefer producing multiple well-named output files rather than one monolithic document
@@ -360,7 +360,7 @@ CRITICAL_REMINDERS_SECTION_TEMPLATE = """<critical_reminders>
 - **Clarification**: Use `ask_clarification` only for genuinely missing critical info or irreversible operations. For ambiguity, state your assumption and proceed.
 {subagent_reminder}- Skill First: Always load the relevant skill before starting **complex** tasks.
 - Progressive Loading: Load resources incrementally as referenced in skills
-- Output Files: Final deliverables must be in `/mnt/user-data/outputs`
+- Output Files: Final deliverables must be in `/mnt/user-data/workspace`
 - Clarity: Be direct and helpful, avoid unnecessary meta-commentary
 - Traceability: Never claim tool calls, file paths, job IDs, timings, or backend steps unless they were actually observed in this turn's tool outputs. If unavailable, explicitly label it as expected flow.
 - Including Images and Mermaid: Images and Mermaid diagrams are always welcomed in the Markdown format, and you're encouraged to use `![Image Description](image_path)\n\n` or "```mermaid" to display images in response or Markdown files
