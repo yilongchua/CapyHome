@@ -18,21 +18,17 @@ import {
 import { useFileMention } from "@/hooks/use-file-mention";
 import { cn } from "@/lib/utils";
 
-const MAX_VISIBLE = 50;
+const MAX_VISIBLE = 120;
 export const FILE_MENTION_ACTIVITY_EVENT = "capybara:file-mention-activity";
-
-function formatSize(size: number): string {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 function fuzzyMatch(file: MountedFolderFile, query: string): boolean {
   if (!query) return true;
   const q = query.toLowerCase();
+  const normalizedName = file.name.replace(/\/$/, "").toLowerCase();
+  const normalizedPath = file.virtual_path.replace(/\/$/, "").toLowerCase();
   return (
-    file.name.toLowerCase().includes(q) ||
-    file.virtual_path.toLowerCase().includes(q)
+    normalizedName.includes(q) ||
+    normalizedPath.includes(q)
   );
 }
 
@@ -93,7 +89,7 @@ export function FileMentionDropdown({
         if (cancelled) {
           return;
         }
-        const mapped = (payload.files ?? [])
+        const rawWorkspaceFiles = (payload.files ?? [])
           .filter((file) => file.startsWith("/mnt/user-data/workspace/"))
           .map((virtualPath) => {
             const name = virtualPath.split("/").pop() ?? virtualPath;
@@ -105,7 +101,26 @@ export function FileMentionDropdown({
               is_dir: false,
             } satisfies MountedFolderFile;
           });
-        setOutputFiles(mapped);
+        const directoryMap = new Map<string, MountedFolderFile>();
+        for (const file of rawWorkspaceFiles) {
+          const rel = file.virtual_path.replace("/mnt/user-data/workspace/", "");
+          const parts = rel.split("/").filter(Boolean);
+          if (parts.length <= 1) continue;
+          let acc = "/mnt/user-data/workspace";
+          for (let i = 0; i < parts.length - 1; i += 1) {
+            acc += `/${parts[i]}`;
+            if (!directoryMap.has(acc)) {
+              directoryMap.set(acc, {
+                name: `${parts[i]}/`,
+                size: 0,
+                virtual_path: acc,
+                full_path: acc,
+                is_dir: true,
+              });
+            }
+          }
+        }
+        setOutputFiles([...directoryMap.values(), ...rawWorkspaceFiles]);
       } catch {
         if (!cancelled) {
           setOutputFiles([]);
@@ -137,7 +152,16 @@ export function FileMentionDropdown({
   const folderMounted = Boolean(data?.folder_path) || outputFiles.length > 0;
 
   const filtered = useMemo(
-    () => allFiles.filter((f) => fuzzyMatch(f, query)).slice(0, MAX_VISIBLE),
+    () =>
+      allFiles
+        .filter((f) => fuzzyMatch(f, query))
+        .sort((a, b) => {
+          const aDir = Boolean(a.is_dir);
+          const bDir = Boolean(b.is_dir);
+          if (aDir !== bDir) return aDir ? -1 : 1;
+          return a.virtual_path.localeCompare(b.virtual_path);
+        })
+        .slice(0, MAX_VISIBLE),
     [allFiles, query],
   );
 
@@ -223,7 +247,7 @@ export function FileMentionDropdown({
       <div ref={anchorRef} className="hidden" aria-hidden />
       <div
         className={cn(
-          "bg-background/95 text-popover-foreground absolute bottom-full left-0 z-50 mb-2 w-80 overflow-hidden rounded-lg border shadow-md backdrop-blur-sm",
+          "bg-background/95 text-popover-foreground absolute right-0 bottom-full left-0 z-50 mb-2 mx-2 overflow-hidden rounded-lg border shadow-md backdrop-blur-sm",
           className,
         )}
         role="listbox"
@@ -245,32 +269,24 @@ export function FileMentionDropdown({
                   key={valueOf(file)}
                   value={valueOf(file)}
                   onSelect={() => accept(file)}
-                  className="items-start gap-2 py-2"
+                  className="items-center gap-2 py-2"
                 >
                   {file.is_dir ? (
-                    <FolderIcon className="mt-0.5 size-4 shrink-0 text-blue-500" />
+                    <FolderIcon className="size-4 shrink-0 text-blue-500" />
                   ) : (
-                    <FileIcon className="mt-0.5 size-4 shrink-0 text-violet-500" />
+                    <FileIcon className="size-4 shrink-0 text-violet-500" />
                   )}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <span
-                        className={cn(
-                          "truncate text-sm",
-                          file.is_dir ? "text-blue-500" : "text-violet-500",
-                        )}
-                      >
-                        {displayNameOf(file)}
-                      </span>
-                      {file.is_dir ? null : (
-                        <span className="text-muted-foreground shrink-0 text-[10px]">
-                          {formatSize(file.size)}
-                        </span>
+                  <div className="min-w-0 flex-1 truncate text-sm">
+                    <span
+                      className={cn(
+                        file.is_dir ? "text-blue-500" : "text-violet-500",
                       )}
-                    </div>
-                    <div className="text-muted-foreground truncate text-[11px]">
+                    >
+                      {displayNameOf(file)}
+                    </span>
+                    <span className="text-muted-foreground ml-2">
                       {file.virtual_path}
-                    </div>
+                    </span>
                   </div>
                 </CommandItem>
               ))}
