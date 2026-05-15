@@ -1,4 +1,4 @@
-import { ChevronLeftIcon, ChevronRightIcon, FilesIcon, MapIcon, RefreshCwIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, FilesIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { usePanelRef } from "react-resizable-panels";
 
@@ -23,6 +23,8 @@ import { useThread } from "../messages/context";
 
 import { ChatActivityPanel } from "./chat-activity-panel";
 
+const ARTIFACTS_POLL_INTERVAL_MS = 5 * 60_000;
+
 function sameStringArray(a: string[], b: string[]) {
   if (a.length !== b.length) {
     return false;
@@ -46,7 +48,6 @@ const ChatBox: React.FC<{
   extraDirectoryFiles = [],
   onSubmitPlanRevision,
 }) => {
-  const ARTIFACTS_POLL_INTERVAL_MS = 5 * 60_000;
   const { thread } = useThread();
   const threadIdRef = useRef(threadId);
   const panelRef = usePanelRef();
@@ -60,23 +61,24 @@ const ChatBox: React.FC<{
     selectedFile,
   } = useDirectory();
 
-  const planPath = thread.values.plan?.plan_path ?? thread.values.plan?.latest_alias_path ?? null;
   const [sandboxOutputFiles, setSandboxOutputFiles] = useState<string[]>([]);
+  const [createdDirectoryPath, setCreatedDirectoryPath] = useState("");
+  const [mountedDirectoryPath, setMountedDirectoryPath] = useState("");
 
-  const [activeTab, setActiveTab] = useState<"activity" | "directory" | "preview">("activity");
+  const [activeTab, setActiveTab] = useState<"activity" | "directory">("activity");
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
   const stableThreadId = sanitizeThreadId(threadId);
   const tabsActivityTriggerId = `chatbox-tabs-trigger-activity-${stableThreadId}`;
   const tabsDirectoryTriggerId = `chatbox-tabs-trigger-directory-${stableThreadId}`;
-  const tabsPreviewTriggerId = `chatbox-tabs-trigger-preview-${stableThreadId}`;
   const tabsActivityContentId = `chatbox-tabs-content-activity-${stableThreadId}`;
   const tabsDirectoryContentId = `chatbox-tabs-content-directory-${stableThreadId}`;
-  const tabsPreviewContentId = `chatbox-tabs-content-preview-${stableThreadId}`;
 
   useEffect(() => {
     if (threadIdRef.current !== threadId) {
       threadIdRef.current = threadId;
       deselect();
+      setCreatedDirectoryPath("");
+      setMountedDirectoryPath("");
       setActiveTab("activity");
       setIsPanelCollapsed(false);
       panelRef.current?.expand();
@@ -112,6 +114,15 @@ const ChatBox: React.FC<{
   }, [activeTab, directoryOpen, panelRef]);
 
   useEffect(() => {
+    const shouldPollDirectories =
+      activeTab === "directory" &&
+      directoryOpen &&
+      !isPanelCollapsed &&
+      document.visibilityState === "visible";
+    if (!shouldPollDirectories) {
+      return;
+    }
+
     let active = true;
     let timer: number | null = null;
     let inFlight = false;
@@ -156,7 +167,7 @@ const ChatBox: React.FC<{
         window.clearTimeout(timer);
       }
     };
-  }, [threadId]);
+  }, [activeTab, directoryOpen, isPanelCollapsed, threadId]);
 
   const handleArtifactsRefresh = async () => {
     try {
@@ -189,19 +200,9 @@ const ChatBox: React.FC<{
   };
 
   const handleTabChange = (value: string) => {
-    const next =
-      value === "directory"
-        ? "directory"
-        : value === "preview"
-          ? "preview"
-          : "activity";
+    const next = value === "directory" ? "directory" : "activity";
     setActiveTab(next);
     setDirectoryOpen(next === "directory");
-  };
-
-  const handlePlanPreviewClose = () => {
-    setActiveTab("activity");
-    setDirectoryOpen(false);
   };
 
   return (
@@ -238,7 +239,7 @@ const ChatBox: React.FC<{
             className="flex size-full flex-col"
           >
             <div className="flex items-center gap-2 border-b p-2">
-              <TabsList className={cn("grid w-full", planPath ? "grid-cols-3" : "grid-cols-2")}>
+              <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger
                   id={tabsActivityTriggerId}
                   aria-controls={tabsActivityContentId}
@@ -253,17 +254,6 @@ const ChatBox: React.FC<{
                 >
                   Directories
                 </TabsTrigger>
-                {planPath && (
-                  <TabsTrigger
-                    id={tabsPreviewTriggerId}
-                    aria-controls={tabsPreviewContentId}
-                    value="preview"
-                    className="flex items-center gap-1"
-                  >
-                    <MapIcon className="size-3" />
-                    Plan
-                  </TabsTrigger>
-                )}
               </TabsList>
               <Button
                 size="icon-sm"
@@ -295,46 +285,44 @@ const ChatBox: React.FC<{
               value="directory"
               className="min-h-0 flex-1 overflow-hidden p-0"
             >
-              <div className="size-full overflow-y-auto p-3">
-                {selectedFile ? (
-                  <ArtifactFileDetail
-                    className="size-full"
-                    filepath={selectedFile}
-                    threadId={threadId}
-                    onSubmitPlanRevision={onSubmitPlanRevision}
-                  />
-                ) : directoryFiles?.length === 0 ? (
-                  <ConversationEmptyState
-                    icon={<FilesIcon />}
-                    title="No directories yet"
-                    description="Directories will appear here once files are generated."
-                  />
-                ) : (
-                  <ArtifactFileList
-                    className="size-full"
-                    files={directoryFiles ?? []}
-                    threadId={threadId}
-                  />
-                )}
+              <div className="grid size-full grid-cols-[minmax(240px,42%)_minmax(0,58%)] gap-3 p-3">
+                <div className="min-h-0 overflow-y-auto rounded-md border p-2">
+                  {directoryFiles?.length === 0 ? (
+                    <ConversationEmptyState
+                      icon={<FilesIcon />}
+                      title="No directories yet"
+                      description="Directories will appear here once files are generated."
+                    />
+                  ) : (
+                    <ArtifactFileList
+                      className="size-full"
+                      files={directoryFiles ?? []}
+                      threadId={threadId}
+                      createdPath={createdDirectoryPath}
+                      onCreatedPathChange={setCreatedDirectoryPath}
+                      mountedPath={mountedDirectoryPath}
+                      onMountedPathChange={setMountedDirectoryPath}
+                    />
+                  )}
+                </div>
+                <div className="min-h-0 overflow-y-auto rounded-md border">
+                  {selectedFile ? (
+                    <ArtifactFileDetail
+                      className="size-full"
+                      filepath={selectedFile}
+                      threadId={threadId}
+                      onSubmitPlanRevision={onSubmitPlanRevision}
+                    />
+                  ) : (
+                    <ConversationEmptyState
+                      icon={<FilesIcon />}
+                      title="Select a file to preview"
+                      description="Choose a file from the explorer to open it in this preview pane."
+                    />
+                  )}
+                </div>
               </div>
             </TabsContent>
-
-            {planPath && (
-              <TabsContent
-                id={tabsPreviewContentId}
-                aria-labelledby={tabsPreviewTriggerId}
-                value="preview"
-                className="min-h-0 flex-1 p-0"
-              >
-                <ArtifactFileDetail
-                  className="size-full"
-                  filepath={planPath}
-                  threadId={threadId}
-                  onClose={handlePlanPreviewClose}
-                  onSubmitPlanRevision={onSubmitPlanRevision}
-                />
-              </TabsContent>
-            )}
           </Tabs>
         </ResizablePanel>
       </ResizablePanelGroup>

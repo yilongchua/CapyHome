@@ -19,6 +19,8 @@ export function ArtifactListTray({
   autoExpand?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(true);
+  const [createdPath, setCreatedPath] = useState("");
+  const [mountedPath, setMountedPath] = useState("");
 
   useEffect(() => {
     if (autoExpand) {
@@ -60,6 +62,10 @@ export function ArtifactListTray({
             className="h-full overflow-y-auto"
             files={files}
             threadId={threadId}
+            createdPath={createdPath}
+            onCreatedPathChange={setCreatedPath}
+            mountedPath={mountedPath}
+            onMountedPathChange={setMountedPath}
           />
         </div>
       </main>

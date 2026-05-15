@@ -15,16 +15,34 @@ class _ThreadsClient:
         self.values = values
         self.created = 0
         self.updated: list[tuple[str, dict]] = []
+        self.created_graph_ids: list[str | None] = []
+        self.updated_metadata: list[tuple[str, dict]] = []
+        self.raise_missing_graph_id_on_update_state = False
+        self.raise_ambiguous_update_on_update_state = False
 
     async def get_state(self, thread_id: str):  # noqa: ARG002
         return {"values": self.values}
 
-    async def create(self):
+    async def get(self, thread_id: str):  # noqa: ARG002
+        return {"thread_id": "source", "graph_id": "graph-source"}
+
+    async def create(self, **kwargs):
         self.created += 1
+        self.created_graph_ids.append(kwargs.get("graph_id"))
         return {"thread_id": f"thread-new-{self.created}"}
 
     async def update_state(self, thread_id: str, values: dict):
+        if self.raise_missing_graph_id_on_update_state:
+            raise RuntimeError(
+                f"Thread '{thread_id}' has no assigned graph ID. This usually occurs when no runs have been made on this particular thread."
+            )
+        if self.raise_ambiguous_update_on_update_state:
+            raise RuntimeError("Ambiguous update, specify as_node")
         self.updated.append((thread_id, values))
+
+    async def update(self, thread_id: str, *, metadata: dict, ttl=None, headers=None, params=None):  # noqa: ARG002
+        self.updated_metadata.append((thread_id, metadata))
+        return {"thread_id": thread_id, "metadata": metadata}
 
 
 class _Client:
@@ -75,6 +93,7 @@ def test_create_thread_handoff_generates_package_and_copies_workspace(monkeypatc
     response = asyncio.run(create_thread_handoff(source_thread_id))
 
     assert response.new_thread_id == "thread-new-1"
+    assert threads.created_graph_ids == ["graph-source"]
     assert response.handoff_root_virtual_path.startswith("/mnt/user-data/workspace/.handoff/")
     assert response.package_manifest_virtual_path
     assert response.copied_file_count and response.copied_file_count >= 3
@@ -110,3 +129,55 @@ def test_create_thread_handoff_blocks_dreamy(monkeypatch):
 
     assert exc.value.status_code == 409
     assert "/dreamy-exit" in str(exc.value.detail)
+
+
+def test_create_thread_handoff_handles_missing_graph_id_update_state(monkeypatch, tmp_path):
+    paths = Paths(tmp_path)
+    source_thread_id = "thread-source"
+    paths.ensure_thread_dirs(source_thread_id)
+    source_workspace = paths.sandbox_work_dir(source_thread_id)
+    (source_workspace / "src").mkdir(parents=True, exist_ok=True)
+    (source_workspace / "src" / "app.py").write_text("print('hello')\n", encoding="utf-8")
+
+    values = {
+        "title": "Build Handoff",
+        "dreamy_mode": False,
+        "messages": [{"id": "m1", "type": "human", "content": "Fork this."}],
+    }
+    threads = _ThreadsClient(values)
+    threads.raise_missing_graph_id_on_update_state = True
+
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads))
+    monkeypatch.setattr("src.gateway.routers.handoff.get_paths", lambda: paths)
+
+    response = asyncio.run(create_thread_handoff(source_thread_id))
+
+    assert response.new_thread_id == "thread-new-1"
+    assert threads.updated_metadata
+    assert threads.updated_metadata[0][1]["source_thread_id"] == source_thread_id
+
+
+def test_create_thread_handoff_handles_ambiguous_update_state(monkeypatch, tmp_path):
+    paths = Paths(tmp_path)
+    source_thread_id = "thread-source"
+    paths.ensure_thread_dirs(source_thread_id)
+    source_workspace = paths.sandbox_work_dir(source_thread_id)
+    (source_workspace / "src").mkdir(parents=True, exist_ok=True)
+    (source_workspace / "src" / "app.py").write_text("print('hello')\n", encoding="utf-8")
+
+    values = {
+        "title": "Build Handoff",
+        "dreamy_mode": False,
+        "messages": [{"id": "m1", "type": "human", "content": "Fork this."}],
+    }
+    threads = _ThreadsClient(values)
+    threads.raise_ambiguous_update_on_update_state = True
+
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads))
+    monkeypatch.setattr("src.gateway.routers.handoff.get_paths", lambda: paths)
+
+    response = asyncio.run(create_thread_handoff(source_thread_id))
+
+    assert response.new_thread_id == "thread-new-1"
+    assert threads.updated_metadata
+    assert threads.updated_metadata[0][1]["source_thread_id"] == source_thread_id

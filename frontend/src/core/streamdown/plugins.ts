@@ -17,6 +17,16 @@ export const streamdownPlugins = {
   ] as StreamdownProps["rehypePlugins"],
 };
 
+export const streamdownSafePlugins = {
+  remarkPlugins: [
+    remarkGfm,
+    [remarkMath, { singleDollarTextMath: true }],
+  ] as StreamdownProps["remarkPlugins"],
+  rehypePlugins: [
+    [rehypeKatex, { output: "html" }],
+  ] as StreamdownProps["rehypePlugins"],
+};
+
 export const streamdownPluginsWithWordAnimation = {
   remarkPlugins: [
     remarkGfm,

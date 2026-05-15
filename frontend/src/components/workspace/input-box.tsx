@@ -280,6 +280,7 @@ export function InputBox({
   const [slashSelected, setSlashSelected] = useState<string>("compact");
   const [hasStagedDocs, setHasStagedDocs] = useState(false);
   const repoOverviewPollRef = useRef<number | null>(null);
+  const repoOverviewPollJobRef = useRef<string | null>(null);
   const saveMountedFolder = useSaveMountedFolder(threadId);
   const { data: mountedFolder } = useMountedFolder(threadId);
   const renameThread = useRenameThread();
@@ -310,6 +311,56 @@ export function InputBox({
       setHasStagedDocs(false);
     }
   }, [threadId]);
+  const repoOverviewJobStorageKey = useMemo(
+    () => `dreamy.repo_overview_refresh_job.${threadId}`,
+    [threadId],
+  );
+  const stopRepoOverviewPolling = useCallback(() => {
+    if (repoOverviewPollRef.current) {
+      window.clearInterval(repoOverviewPollRef.current);
+      repoOverviewPollRef.current = null;
+    }
+    repoOverviewPollJobRef.current = null;
+  }, []);
+  const startRepoOverviewPolling = useCallback(
+    (jobId: string) => {
+      const normalized = jobId.trim();
+      if (!normalized) return;
+      window.localStorage.setItem(repoOverviewJobStorageKey, normalized);
+      stopRepoOverviewPolling();
+      repoOverviewPollJobRef.current = normalized;
+      repoOverviewPollRef.current = window.setInterval(() => {
+        void (async () => {
+          try {
+            const statusRes = await fetch(
+              `${getBackendBaseURL()}${api.threads.dreamy.repoOverviewRefreshStatus(threadId, normalized)}`,
+            );
+            if (!statusRes.ok) return;
+            const statusPayload = (await statusRes.json()) as {
+              status?: string;
+              error?: string;
+            };
+            if (statusPayload.status === "succeeded") {
+              stopRepoOverviewPolling();
+              window.localStorage.removeItem(repoOverviewJobStorageKey);
+              toast.success("repo_overview.md analysis completed.");
+            } else if (statusPayload.status === "failed") {
+              stopRepoOverviewPolling();
+              window.localStorage.removeItem(repoOverviewJobStorageKey);
+              toast.error(
+                statusPayload.error
+                  ? `repo_overview.md analysis failed: ${statusPayload.error}`
+                  : "repo_overview.md analysis failed.",
+              );
+            }
+          } catch {
+            // Ignore transient polling errors.
+          }
+        })();
+      }, 2500);
+    },
+    [repoOverviewJobStorageKey, stopRepoOverviewPolling, threadId],
+  );
   const slashCommands = useMemo(
     () =>
       SLASH_COMMANDS.filter((command) =>
@@ -664,59 +715,30 @@ export function InputBox({
       const refreshJobId = payload.repo_overview_refresh_job_id?.trim();
       if (refreshJobId) {
         toast.message("Background repo_overview.md analysis started.");
-        if (repoOverviewPollRef.current) {
-          window.clearInterval(repoOverviewPollRef.current);
-          repoOverviewPollRef.current = null;
-        }
-        repoOverviewPollRef.current = window.setInterval(() => {
-          void (async () => {
-            try {
-              const statusRes = await fetch(
-                `${getBackendBaseURL()}${api.threads.dreamy.repoOverviewRefreshStatus(threadId, refreshJobId)}`,
-              );
-              if (!statusRes.ok) return;
-              const statusPayload = (await statusRes.json()) as {
-                status?: string;
-                error?: string;
-              };
-              if (statusPayload.status === "succeeded") {
-                if (repoOverviewPollRef.current) {
-                  window.clearInterval(repoOverviewPollRef.current);
-                  repoOverviewPollRef.current = null;
-                }
-                toast.success("repo_overview.md analysis completed.");
-              } else if (statusPayload.status === "failed") {
-                if (repoOverviewPollRef.current) {
-                  window.clearInterval(repoOverviewPollRef.current);
-                  repoOverviewPollRef.current = null;
-                }
-                toast.error(
-                  statusPayload.error
-                    ? `repo_overview.md analysis failed: ${statusPayload.error}`
-                    : "repo_overview.md analysis failed.",
-                );
-              }
-            } catch {
-              // Ignore transient polling errors.
-            }
-          })();
-        }, 2500);
+        startRepoOverviewPolling(refreshJobId);
       }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to run /analyse.";
       toast.error(message);
     }
-  }, [mountedFolder, threadId]);
+  }, [mountedFolder, startRepoOverviewPolling, threadId]);
+
+  useEffect(() => {
+    const existingJobId = window.localStorage.getItem(repoOverviewJobStorageKey)?.trim();
+    if (existingJobId) {
+      startRepoOverviewPolling(existingJobId);
+    }
+    return () => {
+      stopRepoOverviewPolling();
+    };
+  }, [repoOverviewJobStorageKey, startRepoOverviewPolling, stopRepoOverviewPolling]);
 
   useEffect(() => {
     return () => {
-      if (repoOverviewPollRef.current) {
-        window.clearInterval(repoOverviewPollRef.current);
-        repoOverviewPollRef.current = null;
-      }
+      stopRepoOverviewPolling();
     };
-  }, []);
+  }, [stopRepoOverviewPolling]);
 
   const runPublishDocs = useCallback(async () => {
     if (!mountedFolder) {

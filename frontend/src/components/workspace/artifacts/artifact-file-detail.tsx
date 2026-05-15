@@ -39,7 +39,7 @@ import { urlOfArtifact } from "@/core/artifacts/utils";
 import { getBackendBaseURL } from "@/core/config";
 import { useI18n } from "@/core/i18n/hooks";
 import { installSkill } from "@/core/skills/api";
-import { streamdownPlugins } from "@/core/streamdown";
+import { streamdownSafePlugins } from "@/core/streamdown";
 import { checkCodeFile, getFileName } from "@/core/utils/files";
 import { env } from "@/env";
 import { cn } from "@/lib/utils";
@@ -421,7 +421,7 @@ export function ArtifactFilePreview({
       <div className="size-full px-4">
         <Streamdown
           className="size-full"
-          {...streamdownPlugins}
+          {...streamdownSafePlugins}
           components={{ a: CitationLink }}
         >
           {content ?? ""}

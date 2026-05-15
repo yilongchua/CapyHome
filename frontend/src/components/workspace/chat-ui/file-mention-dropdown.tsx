@@ -1,6 +1,6 @@
 "use client";
 
-import { FileIcon } from "lucide-react";
+import { FileIcon, FolderIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { usePromptInputController } from "@/components/ai-elements/prompt-input";
@@ -27,13 +27,23 @@ function formatSize(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function fuzzyMatch(name: string, query: string): boolean {
+function fuzzyMatch(file: MountedFolderFile, query: string): boolean {
   if (!query) return true;
-  return name.toLowerCase().includes(query.toLowerCase());
+  const q = query.toLowerCase();
+  return (
+    file.name.toLowerCase().includes(q) ||
+    file.virtual_path.toLowerCase().includes(q)
+  );
 }
 
 function valueOf(file: MountedFolderFile): string {
   return file.virtual_path;
+}
+
+function displayNameOf(file: MountedFolderFile): string {
+  const raw = file.name.replace(/\/$/, "");
+  const segments = raw.split("/").filter(Boolean);
+  return segments[segments.length - 1] ?? raw;
 }
 
 export function FileMentionDropdown({
@@ -127,7 +137,7 @@ export function FileMentionDropdown({
   const folderMounted = Boolean(data?.folder_path) || outputFiles.length > 0;
 
   const filtered = useMemo(
-    () => allFiles.filter((f) => fuzzyMatch(f.name, query)).slice(0, MAX_VISIBLE),
+    () => allFiles.filter((f) => fuzzyMatch(f, query)).slice(0, MAX_VISIBLE),
     [allFiles, query],
   );
 
@@ -235,12 +245,33 @@ export function FileMentionDropdown({
                   key={valueOf(file)}
                   value={valueOf(file)}
                   onSelect={() => accept(file)}
+                  className="items-start gap-2 py-2"
                 >
-                  <FileIcon className="size-4 shrink-0 text-violet-500" />
-                  <span className="truncate">{file.name}</span>
-                  <span className="text-muted-foreground ml-auto text-[10px]">
-                    {formatSize(file.size)}
-                  </span>
+                  {file.is_dir ? (
+                    <FolderIcon className="mt-0.5 size-4 shrink-0 text-blue-500" />
+                  ) : (
+                    <FileIcon className="mt-0.5 size-4 shrink-0 text-violet-500" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <span
+                        className={cn(
+                          "truncate text-sm",
+                          file.is_dir ? "text-blue-500" : "text-violet-500",
+                        )}
+                      >
+                        {displayNameOf(file)}
+                      </span>
+                      {file.is_dir ? null : (
+                        <span className="text-muted-foreground shrink-0 text-[10px]">
+                          {formatSize(file.size)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-muted-foreground truncate text-[11px]">
+                      {file.virtual_path}
+                    </div>
+                  </div>
                 </CommandItem>
               ))}
             </CommandGroup>

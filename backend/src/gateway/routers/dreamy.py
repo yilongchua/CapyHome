@@ -31,6 +31,8 @@ router = APIRouter(prefix="/api", tags=["dreamy"])
 _REPO_OVERVIEW_PROMPT = """Conduct an indepth analysis of the mounted folder at /mnt/user-data/mounted and write a complete report on all critical files and main features of the mounted folder.
 for specific files, there is a mirror repo created within "mnt/user-data/workspace/.docs/" as a identical mirrored(markdownfiles) of the mounted folder."""
 _REPO_OVERVIEW_MODEL_TIMEOUT_SECONDS = 45.0
+_REPO_OVERVIEW_REFRESH_MAX_ATTEMPTS = 3
+_REPO_OVERVIEW_REFRESH_BACKOFF_SECONDS = 2.0
 
 
 @dataclass
@@ -43,6 +45,7 @@ class _RepoOverviewRefreshJob:
     finished_at: str | None = None
     error: str | None = None
     output_virtual_path: str | None = None
+    attempt_count: int = 0
     trigger: str = "manual"
 
 
@@ -109,6 +112,152 @@ _TEXT_EXTENSIONS = {
 
 _MOUNT_LIST_DEFAULT_LIMIT = 2000
 _MOUNT_LIST_HARD_LIMIT = 10000
+
+
+def _repo_overview_jobs_path(thread_id: str) -> Path:
+    return get_paths().sandbox_user_data_dir(thread_id) / "repo_overview_refresh_jobs.json"
+
+
+def _job_to_dict(job: _RepoOverviewRefreshJob) -> dict:
+    return {
+        "job_id": job.job_id,
+        "thread_id": job.thread_id,
+        "status": job.status,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+        "error": job.error,
+        "output_virtual_path": job.output_virtual_path,
+        "attempt_count": job.attempt_count,
+        "trigger": job.trigger,
+    }
+
+
+def _job_from_dict(data: dict) -> _RepoOverviewRefreshJob:
+    return _RepoOverviewRefreshJob(
+        job_id=str(data.get("job_id") or ""),
+        thread_id=str(data.get("thread_id") or ""),
+        status=str(data.get("status") or "queued"),
+        created_at=str(data.get("created_at") or datetime.now(UTC).isoformat()),
+        started_at=data.get("started_at"),
+        finished_at=data.get("finished_at"),
+        error=data.get("error"),
+        output_virtual_path=data.get("output_virtual_path"),
+        attempt_count=int(data.get("attempt_count") or 0),
+        trigger=str(data.get("trigger") or "manual"),
+    )
+
+
+def _load_jobs_for_thread(thread_id: str) -> list[_RepoOverviewRefreshJob]:
+    path = _repo_overview_jobs_path(thread_id)
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("Failed to read repo overview job store for thread %s: %s", thread_id, exc)
+        return []
+    raw_jobs = data.get("jobs", []) if isinstance(data, dict) else []
+    jobs: list[_RepoOverviewRefreshJob] = []
+    for item in raw_jobs:
+        if not isinstance(item, dict):
+            continue
+        job = _job_from_dict(item)
+        if not job.job_id or job.thread_id != thread_id:
+            continue
+        jobs.append(job)
+    jobs.sort(key=lambda j: j.created_at)
+    return jobs
+
+
+def _save_jobs_for_thread(thread_id: str, jobs: list[_RepoOverviewRefreshJob]) -> None:
+    path = _repo_overview_jobs_path(thread_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"jobs": [_job_to_dict(j) for j in jobs]}
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _persist_job(job: _RepoOverviewRefreshJob) -> None:
+    jobs = _load_jobs_for_thread(job.thread_id)
+    replaced = False
+    for idx, existing in enumerate(jobs):
+        if existing.job_id == job.job_id:
+            jobs[idx] = job
+            replaced = True
+            break
+    if not replaced:
+        jobs.append(job)
+    _save_jobs_for_thread(job.thread_id, jobs)
+
+
+def _load_job_from_store(thread_id: str, job_id: str) -> _RepoOverviewRefreshJob | None:
+    for job in _load_jobs_for_thread(thread_id):
+        if job.job_id == job_id:
+            return job
+    return None
+
+
+def _get_latest_job_for_thread(thread_id: str) -> _RepoOverviewRefreshJob | None:
+    jobs = _load_jobs_for_thread(thread_id)
+    if not jobs:
+        return None
+    latest = jobs[-1]
+    _REPO_OVERVIEW_JOBS[latest.job_id] = latest
+    if latest.status in {"queued", "running"}:
+        _REPO_OVERVIEW_JOB_BY_THREAD[thread_id] = latest.job_id
+    return latest
+
+
+def _thread_ids_with_repo_overview_job_store() -> list[str]:
+    threads_dir = get_paths().base_dir / "threads"
+    if not threads_dir.exists():
+        return []
+    thread_ids: list[str] = []
+    for p in threads_dir.iterdir():
+        if not p.is_dir():
+            continue
+        candidate = p / "user-data" / "repo_overview_refresh_jobs.json"
+        if candidate.exists():
+            thread_ids.append(p.name)
+    return sorted(set(thread_ids))
+
+
+async def initialize_repo_overview_refresh_jobs() -> None:
+    for thread_id in _thread_ids_with_repo_overview_job_store():
+        latest = _get_latest_job_for_thread(thread_id)
+        if latest is None:
+            continue
+        if latest.status not in {"queued", "running"}:
+            continue
+        mount_cfg = _mount_config_path(thread_id)
+        docs_root = _docs_root(thread_id)
+        try:
+            if not mount_cfg.exists() or not docs_root.exists() or not (docs_root / "index.md").exists():
+                latest.status = "failed"
+                latest.finished_at = datetime.now(UTC).isoformat()
+                latest.error = "Recovery failed: missing mount config or staged docs index."
+                _persist_job(latest)
+                continue
+            data = json.loads(mount_cfg.read_text(encoding="utf-8"))
+            mounted_path_str = (data.get("path") or "").strip()
+            source_root = Path(mounted_path_str).expanduser().resolve()
+            if not mounted_path_str or not source_root.exists() or not source_root.is_dir():
+                latest.status = "failed"
+                latest.finished_at = datetime.now(UTC).isoformat()
+                latest.error = "Recovery failed: mounted folder does not exist."
+                _persist_job(latest)
+                continue
+            latest.status = "queued"
+            latest.started_at = None
+            latest.finished_at = None
+            latest.error = None
+            _persist_job(latest)
+            _REPO_OVERVIEW_JOBS[latest.job_id] = latest
+            _REPO_OVERVIEW_JOB_BY_THREAD[thread_id] = latest.job_id
+            task = asyncio.create_task(_run_repo_overview_refresh_job(latest.job_id, source_root, docs_root))
+            _REPO_OVERVIEW_TASKS[latest.job_id] = task
+        except Exception as exc:
+            logger.warning("Failed to recover repo overview refresh job for thread %s: %s", thread_id, exc)
 
 
 def _analyse_lock_for_thread(thread_id: str) -> threading.Lock:
@@ -395,6 +544,8 @@ def _job_to_response(job: _RepoOverviewRefreshJob) -> "RepoOverviewRefreshStatus
         finished_at=job.finished_at,
         error=job.error,
         output_virtual_path=job.output_virtual_path,
+        attempt_count=job.attempt_count,
+        trigger=job.trigger,
     )
 
 
@@ -437,74 +588,94 @@ def _build_repo_overview_refresh_prompt(source_root: Path, docs_root: Path) -> s
 
 
 async def _run_repo_overview_refresh_job(job_id: str, source_root: Path, docs_root: Path) -> None:
-    job = _REPO_OVERVIEW_JOBS[job_id]
+    job = _REPO_OVERVIEW_JOBS.get(job_id)
+    if job is None:
+        logger.warning("Repo overview refresh job %s missing from in-memory cache; skipping run", job_id)
+        return
     job.status = "running"
     job.started_at = datetime.now(UTC).isoformat()
+    job.finished_at = None
+    job.error = None
+    _persist_job(job)
     try:
         if not docs_root.exists() or not docs_root.is_dir():
             raise RuntimeError("Docs mirror not found. Run /analyse first.")
         if not (docs_root / "index.md").exists():
             raise RuntimeError("Docs index not found. Run /analyse first.")
 
-        prompt = _build_repo_overview_refresh_prompt(source_root, docs_root)
-        router = ModelRouter()
-        primary_model = router.resolve("planner")
-        configured_models = [m.name for m in get_app_config().models]
-        ordered_models: list[str] = []
-        if primary_model:
-            ordered_models.append(primary_model)
-        for name in configured_models:
-            if name not in ordered_models:
-                ordered_models.append(name)
-
-        response = None
+        content_text = ""
         last_exc: Exception | None = None
-        for candidate in ordered_models:
+        for attempt in range(1, _REPO_OVERVIEW_REFRESH_MAX_ATTEMPTS + 1):
+            job.attempt_count = attempt
+            _persist_job(job)
             try:
-                model = create_chat_model(
-                    name=candidate,
-                    thinking_enabled=True,
-                    reasoning_effort="high",
-                )
-                response = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        model.invoke,
-                        [
-                            SystemMessage(
-                                content=(
-                                    "You are an expert software architect and reviewer. "
-                                    "Generate a detailed, practical repository analysis report in markdown only."
-                                )
+                prompt = _build_repo_overview_refresh_prompt(source_root, docs_root)
+                router = ModelRouter()
+                primary_model = router.resolve("planner")
+                configured_models = [m.name for m in get_app_config().models]
+                ordered_models: list[str] = []
+                if primary_model:
+                    ordered_models.append(primary_model)
+                for name in configured_models:
+                    if name not in ordered_models:
+                        ordered_models.append(name)
+
+                response = None
+                model_exc: Exception | None = None
+                for candidate in ordered_models:
+                    try:
+                        model = create_chat_model(
+                            name=candidate,
+                            thinking_enabled=True,
+                            reasoning_effort="high",
+                        )
+                        response = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                model.invoke,
+                                [
+                                    SystemMessage(
+                                        content=(
+                                            "You are an expert software architect and reviewer. "
+                                            "Generate a detailed, practical repository analysis report in markdown only."
+                                        )
+                                    ),
+                                    HumanMessage(content=prompt),
+                                ],
                             ),
-                            HumanMessage(content=prompt),
-                        ],
-                    ),
-                    timeout=_REPO_OVERVIEW_MODEL_TIMEOUT_SECONDS,
-                )
+                            timeout=_REPO_OVERVIEW_MODEL_TIMEOUT_SECONDS,
+                        )
+                        break
+                    except Exception as exc:
+                        model_exc = exc
+                        logger.warning(
+                            "Repo overview refresh model '%s' failed for thread %s: %s",
+                            candidate,
+                            job.thread_id,
+                            exc,
+                        )
+                if response is None:
+                    raise RuntimeError(f"All configured models failed during repo overview refresh. Last error: {model_exc}")
+                content = getattr(response, "content", "")
+                if isinstance(content, list):
+                    text_parts: list[str] = []
+                    for part in content:
+                        if isinstance(part, dict) and part.get("type") == "text":
+                            text_parts.append(str(part.get("text", "")))
+                        else:
+                            text_parts.append(str(part))
+                    content_text = "\n".join(text_parts).strip()
+                else:
+                    content_text = str(content).strip()
+                if not content_text:
+                    raise RuntimeError("Model returned empty repo overview content.")
                 break
             except Exception as exc:
                 last_exc = exc
-                logger.warning(
-                    "Repo overview refresh model '%s' failed for thread %s: %s",
-                    candidate,
-                    job.thread_id,
-                    exc,
-                )
-        if response is None:
-            raise RuntimeError(f"All configured models failed during repo overview refresh. Last error: {last_exc}")
-        content = getattr(response, "content", "")
-        if isinstance(content, list):
-            text_parts: list[str] = []
-            for part in content:
-                if isinstance(part, dict) and part.get("type") == "text":
-                    text_parts.append(str(part.get("text", "")))
-                else:
-                    text_parts.append(str(part))
-            content_text = "\n".join(text_parts).strip()
-        else:
-            content_text = str(content).strip()
+                if attempt >= _REPO_OVERVIEW_REFRESH_MAX_ATTEMPTS:
+                    break
+                await asyncio.sleep(_REPO_OVERVIEW_REFRESH_BACKOFF_SECONDS * attempt)
         if not content_text:
-            raise RuntimeError("Model returned empty repo overview content.")
+            raise RuntimeError(f"Repo overview refresh failed after retries: {last_exc}")
 
         target = docs_root / "repo_overview.md"
         backup = docs_root / "repo_overview.previous.md"
@@ -515,12 +686,14 @@ async def _run_repo_overview_refresh_job(job_id: str, source_root: Path, docs_ro
         tmp.replace(target)
         job.output_virtual_path = f"/mnt/user-data/workspace/.docs/{target.name}"
         job.status = "succeeded"
+        job.error = None
     except Exception as exc:
         logger.exception("Repo overview refresh failed for thread %s: %s", job.thread_id, exc)
         job.status = "failed"
         job.error = str(exc)
     finally:
         job.finished_at = datetime.now(UTC).isoformat()
+        _persist_job(job)
         _REPO_OVERVIEW_TASKS.pop(job_id, None)
         current = _REPO_OVERVIEW_JOB_BY_THREAD.get(job.thread_id)
         if current == job_id:
@@ -543,6 +716,11 @@ async def _enqueue_repo_overview_refresh(
                 status=running.status,
                 already_running=True,
             )
+    latest = _get_latest_job_for_thread(thread_id)
+    if latest and latest.status in {"queued", "running"}:
+        _REPO_OVERVIEW_JOBS[latest.job_id] = latest
+        _REPO_OVERVIEW_JOB_BY_THREAD[thread_id] = latest.job_id
+        return RepoOverviewRefreshStartResponse(job_id=latest.job_id, status=latest.status, already_running=True, queued_at=latest.created_at)
 
     job_id = str(uuid4())
     job = _RepoOverviewRefreshJob(
@@ -554,9 +732,10 @@ async def _enqueue_repo_overview_refresh(
     )
     _REPO_OVERVIEW_JOBS[job_id] = job
     _REPO_OVERVIEW_JOB_BY_THREAD[thread_id] = job_id
+    _persist_job(job)
     task = asyncio.create_task(_run_repo_overview_refresh_job(job_id, source_root, docs_root))
     _REPO_OVERVIEW_TASKS[job_id] = task
-    return RepoOverviewRefreshStartResponse(job_id=job_id, status=job.status, already_running=False)
+    return RepoOverviewRefreshStartResponse(job_id=job_id, status=job.status, already_running=False, queued_at=job.created_at)
 
 
 def _maybe_migrate_v1(data: dict) -> dict:
@@ -638,6 +817,8 @@ class AnalyseResponse(BaseModel):
     failed_manifest_virtual_path: str
     failed_files: list[dict[str, str]]
     repo_overview_refresh_job_id: str | None = None
+    repo_overview_refresh_status: str | None = None
+    repo_overview_refresh_queued_at: str | None = None
 
 
 @dataclass
@@ -669,6 +850,7 @@ class RepoOverviewRefreshStartResponse(BaseModel):
     job_id: str
     status: str
     already_running: bool = False
+    queued_at: str | None = None
 
 
 class RepoOverviewRefreshStatusResponse(BaseModel):
@@ -680,6 +862,8 @@ class RepoOverviewRefreshStatusResponse(BaseModel):
     finished_at: str | None = None
     error: str | None = None
     output_virtual_path: str | None = None
+    attempt_count: int = 0
+    trigger: str = "manual"
 
 
 @router.get("/threads/{thread_id}/analyse/status", response_model=AnalyseStatusResponse)
@@ -731,6 +915,10 @@ async def start_repo_overview_refresh(thread_id: str) -> RepoOverviewRefreshStar
 )
 async def get_repo_overview_refresh_status(thread_id: str, job_id: str) -> RepoOverviewRefreshStatusResponse:
     job = _REPO_OVERVIEW_JOBS.get(job_id)
+    if job is None:
+        job = _load_job_from_store(thread_id, job_id)
+        if job is not None:
+            _REPO_OVERVIEW_JOBS[job.job_id] = job
     if job is None or job.thread_id != thread_id:
         raise HTTPException(status_code=404, detail="Repo overview refresh job not found.")
     return _job_to_response(job)
@@ -1155,11 +1343,13 @@ async def run_analyse(thread_id: str) -> AnalyseResponse:
         failed_manifest_virtual_path=_to_virtual_workspace(result.failed_manifest_path, thread_id),
         failed_files=result.failed_files[:200],
         repo_overview_refresh_job_id=refresh_job.job_id,
+        repo_overview_refresh_status=refresh_job.status,
+        repo_overview_refresh_queued_at=refresh_job.queued_at,
     )
 
 
 @router.post("/threads/{thread_id}/publishdocs", response_model=PublishDocsResponse)
-async def publish_docs(thread_id: str) -> PublishDocsResponse:
+async def publish_docs(thread_id: str, force: bool = Query(default=False, description="Publish even if deep repo overview refresh has not succeeded.")) -> PublishDocsResponse:
     config_path = _mount_config_path(thread_id)
     if not config_path.exists():
         raise HTTPException(status_code=400, detail="No mounted folder configured for this thread.")
@@ -1177,6 +1367,17 @@ async def publish_docs(thread_id: str) -> PublishDocsResponse:
         raise HTTPException(status_code=400, detail="Staged docs not found at /mnt/user-data/workspace/.docs.")
     if not (source_root / "index.md").exists():
         raise HTTPException(status_code=400, detail="Staged docs index not found. Run /analyse first.")
+    latest_job = _get_latest_job_for_thread(thread_id)
+    if latest_job and latest_job.status != "succeeded" and not force:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Latest repo_overview.md deep refresh is not complete. Publishing now may copy stale docs.",
+                "job_id": latest_job.job_id,
+                "status": latest_job.status,
+                "hint": "Wait for refresh to succeed, or call /publishdocs?force=true to override.",
+            },
+        )
 
     destination_root = Path(mounted_path_str).expanduser().resolve() / ".docs"
     destination_root.mkdir(parents=True, exist_ok=True)

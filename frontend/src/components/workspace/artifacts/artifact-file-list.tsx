@@ -35,10 +35,18 @@ export function ArtifactFileList({
   className,
   files,
   threadId,
+  createdPath,
+  onCreatedPathChange,
+  mountedPath,
+  onMountedPathChange,
 }: {
   className?: string;
   files: string[];
   threadId: string;
+  createdPath: string;
+  onCreatedPathChange: (path: string) => void;
+  mountedPath: string;
+  onMountedPathChange: (path: string) => void;
 }) {
   const { t } = useI18n();
   const { select: selectFile, setOpen } = useDirectory();
@@ -48,8 +56,6 @@ export function ArtifactFileList({
   const clearMountedFolder = useClearMountedFolder(threadId);
   const { data: mountedFolderFiles } = useMountedFolderFiles(threadId, Boolean(mountedFolder));
   const { pickFolder, isPicking } = useFolderPicker();
-  const [createdPath, setCreatedPath] = useState("");
-  const [mountedPath, setMountedPath] = useState("");
 
   const { mountedFiles, createdFiles } = useMemo(() => {
     const mounted: string[] = [];
@@ -262,7 +268,7 @@ export function ArtifactFileList({
           <button
             type="button"
             className={cn(
-              "hover:text-foreground rounded px-1 py-0.5",
+              "text-foreground hover:text-foreground rounded px-1 py-0.5",
               parts.length === 0 && "text-foreground font-medium",
             )}
             onClick={() => onPathChange("")}
@@ -330,16 +336,15 @@ export function ArtifactFileList({
         <div className="text-muted-foreground flex items-center gap-1.5 px-1 text-xs">
           <FolderOpenIcon className="size-3.5" />
           <span className="font-medium uppercase tracking-wide">Created Files</span>
-          <span className="font-mono">/mnt/user-data/workspace</span>
         </div>
         {createdFiles.length > 0 ? (
           <div className="px-1">
-            {renderBreadcrumb("/mnt/user-data/workspace", createdPath, setCreatedPath)}
+            {renderBreadcrumb("/mnt/user-data/workspace", createdPath, onCreatedPathChange)}
           </div>
         ) : null}
         {createdFiles.length > 0 ? (
           <ul className="divide-border border-border divide-y rounded-md border">
-            {renderFolderRows(createdEntries.directoryEntries, createdPath, setCreatedPath)}
+            {renderFolderRows(createdEntries.directoryEntries, createdPath, onCreatedPathChange)}
             {createdEntries.filesInCurrent.map((entry) => renderRow(entry.full, "created"))}
           </ul>
         ) : (
@@ -387,13 +392,13 @@ export function ArtifactFileList({
             )}
             {mountedFiles.length > 0 && (
               <div className="pt-1">
-                {renderBreadcrumb("/mnt/user-data/mounted", mountedPath, setMountedPath)}
+                {renderBreadcrumb("/mnt/user-data/mounted", mountedPath, onMountedPathChange)}
               </div>
             )}
           </div>
           {mountedFiles.length > 0 ? (
             <ul className="divide-border border-border divide-y rounded-md border">
-              {renderFolderRows(mountedEntries.directoryEntries, mountedPath, setMountedPath)}
+              {renderFolderRows(mountedEntries.directoryEntries, mountedPath, onMountedPathChange)}
               {mountedEntries.filesInCurrent.map((entry) => renderRow(entry.full, "mounted"))}
             </ul>
           ) : (

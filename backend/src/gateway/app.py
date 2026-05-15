@@ -108,6 +108,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.exception("Control-plane scheduler failed to start")
         _mark_component_status(app, "control_plane_scheduler", status="failed", error=str(exc))
 
+    # Recover pending dreamy repo overview refresh jobs
+    try:
+        await dreamy.initialize_repo_overview_refresh_jobs()
+        _mark_component_status(app, "dreamy_repo_overview_recovery", status="running")
+    except Exception as exc:
+        logger.exception("Dreamy repo overview refresh recovery failed")
+        _mark_component_status(app, "dreamy_repo_overview_recovery", status="failed", error=str(exc))
+
     # Start generation poller if enabled
     try:
         from src.generation.poller import start_generation_poller

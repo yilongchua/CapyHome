@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 from datetime import UTC, datetime
@@ -18,6 +19,7 @@ from src.config.paths import get_paths
 from src.sandbox.path_mapping import replace_virtual_path, to_virtual_path
 
 router = APIRouter(prefix="/api", tags=["handoff"])
+logger = logging.getLogger(__name__)
 
 _HANDOFF_DIR = ".handoff"
 _MAX_RECENT_MESSAGES = 12
@@ -45,6 +47,29 @@ def _utc_now() -> datetime:
 
 def _utc_now_iso() -> str:
     return _utc_now().isoformat()
+
+
+def _extract_graph_id(raw: Any) -> str | None:
+    if isinstance(raw, dict):
+        graph_id = raw.get("graph_id")
+        if isinstance(graph_id, str) and graph_id.strip():
+            return graph_id.strip()
+        metadata = raw.get("metadata")
+        if isinstance(metadata, dict):
+            nested = metadata.get("graph_id")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    return None
+
+
+def _is_missing_graph_id_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "no assigned graph id" in message
+
+
+def _is_ambiguous_update_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "ambiguous update" in message and "as_node" in message
 
 
 class HandoffResponse(BaseModel):
@@ -588,6 +613,8 @@ async def create_thread_handoff(thread_id: str) -> HandoffResponse:
         from langgraph_sdk import get_client
 
         client = get_client(url=_langgraph_url())
+        source_thread = await client.threads.get(thread_id)
+        source_graph_id = _extract_graph_id(source_thread)
         source_state = await client.threads.get_state(thread_id)
         source_values = _extract_state_values(source_state)
         if bool(source_values.get("dreamy_mode")):
@@ -596,7 +623,10 @@ async def create_thread_handoff(thread_id: str) -> HandoffResponse:
                 detail="Exit Dreamy with /dreamy-exit before creating a handoff.",
             )
 
-        new_thread = await client.threads.create()
+        if source_graph_id:
+            new_thread = await client.threads.create(graph_id=source_graph_id)
+        else:
+            new_thread = await client.threads.create()
         new_thread_id = str(new_thread["thread_id"])
 
         source_thread_data = _thread_data_for_thread(thread_id)
@@ -611,8 +641,16 @@ async def create_thread_handoff(thread_id: str) -> HandoffResponse:
                         "title": f"Handoff · {title}",
                     },
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                if _is_missing_graph_id_error(exc) or _is_ambiguous_update_error(exc):
+                    logger.warning(
+                        "Skipping handoff title state update for thread %s due to state-update precondition on new thread %s: %s",
+                        thread_id,
+                        new_thread_id,
+                        exc,
+                    )
+                else:
+                    raise
 
         handoff_root_virtual_path, manifest_virtual_path, created_at = _build_handoff_package(thread_id, new_thread_id, source_values)
 
@@ -621,17 +659,36 @@ async def create_thread_handoff(thread_id: str) -> HandoffResponse:
             Path(dest_thread_data["workspace_path"]),
         )
 
-        await client.threads.update_state(
-            new_thread_id,
-            {
-                "handoff_meta": {
-                    "source_thread_id": thread_id,
-                    "handoff_root_virtual_path": handoff_root_virtual_path,
-                    "package_manifest_virtual_path": manifest_virtual_path,
-                    "created_at": created_at,
-                }
-            },
-        )
+        handoff_meta_payload = {
+            "handoff_meta": {
+                "source_thread_id": thread_id,
+                "handoff_root_virtual_path": handoff_root_virtual_path,
+                "package_manifest_virtual_path": manifest_virtual_path,
+                "created_at": created_at,
+            }
+        }
+        try:
+            await client.threads.update_state(
+                new_thread_id,
+                handoff_meta_payload,
+            )
+        except Exception as exc:
+            if _is_missing_graph_id_error(exc) or _is_ambiguous_update_error(exc):
+                logger.warning(
+                    "Falling back to metadata update for thread %s due to state-update precondition on new thread %s: %s",
+                    thread_id,
+                    new_thread_id,
+                    exc,
+                )
+                try:
+                    await client.threads.update(
+                        new_thread_id,
+                        metadata=handoff_meta_payload["handoff_meta"],
+                    )
+                except Exception:
+                    logger.warning("Fallback metadata update failed for handoff thread %s", new_thread_id)
+            else:
+                raise
 
         return HandoffResponse(
             new_thread_id=new_thread_id,
