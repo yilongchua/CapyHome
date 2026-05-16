@@ -18,7 +18,7 @@ from src.config.paths import get_paths
 logger = logging.getLogger(__name__)
 
 VIRTUAL_MOUNT_PATH = "/mnt/user-data/mounted"
-MAX_MOUNT_FILE_LIST = 100
+VIRTUAL_DOCS_MIRROR_PATH = "/mnt/user-data/workspace/.docs"
 
 
 class DreamyMountState(AgentState):
@@ -63,16 +63,6 @@ class DreamyMountMiddleware(AgentMiddleware[DreamyMountState]):
             logger.debug("Mounted folder does not exist or is not a directory: %s", mounted_path_str)
             return None
 
-        try:
-            files = sorted(
-                p.name
-                for p in folder.iterdir()
-                if p.is_file() and not p.name.startswith(".")
-            )
-        except Exception as exc:
-            logger.warning("Failed to list mounted folder %s: %s", mounted_path_str, exc)
-            files = []
-
         # Update thread_data so the sandbox path-translation layer can resolve
         # /mnt/user-data/mounted/* → <real folder path>/*
         existing_thread_data: ThreadDataState = state.get("thread_data") or {}
@@ -92,18 +82,9 @@ class DreamyMountMiddleware(AgentMiddleware[DreamyMountState]):
             f"A local folder is mounted and accessible at the virtual path: {VIRTUAL_MOUNT_PATH}",
             f"Real path on host: {mounted_path_str}",
             "",
-        ]
-        if files:
-            lines.append("Files in this folder:")
-            for f in files[:MAX_MOUNT_FILE_LIST]:
-                lines.append(f"  - {VIRTUAL_MOUNT_PATH}/{f}")
-            if len(files) > MAX_MOUNT_FILE_LIST:
-                lines.append(
-                    f"  - ... and {len(files) - MAX_MOUNT_FILE_LIST} more files (truncated)."
-                )
-        else:
-            lines.append("(folder is empty or contains no readable files)")
-        lines += [
+            f"important: A mirror of the mounted folder is located within {VIRTUAL_DOCS_MIRROR_PATH}",
+            "inside contains all the markdown version of the mounted folder. always use this as search source of truth",
+            "",
             "",
             f"Use {VIRTUAL_MOUNT_PATH}/<filename> with read_file, write_file, str_replace, bash, and ls.",
             "When the user references @filename (e.g. @work.txt), resolve it to "

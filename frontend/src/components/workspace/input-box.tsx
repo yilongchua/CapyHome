@@ -83,7 +83,6 @@ import {
 import {
   AutoresearchDialog,
   FollowupConfirmDialog,
-  MountFolderDialog,
   RenameThreadDialog,
 } from "./input-box-dialogs";
 import { FollowupSuggestionsPanel } from "./input-box-followups";
@@ -101,6 +100,7 @@ export type InputBoxSubmitOptions = {
   checkpoint?: Omit<Checkpoint, "thread_id">;
   forkSourceMessageId?: string;
   forkSourceBranch?: string;
+  extraContext?: Record<string, unknown>;
 };
 
 function getResolvedMode(
@@ -323,8 +323,6 @@ export function InputBox({
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingSuggestion, setPendingSuggestion] = useState<string | null>(null);
-  const [mountDialogOpen, setMountDialogOpen] = useState(false);
-  const [mountPathInput, setMountPathInput] = useState("");
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renameInput, setRenameInput] = useState("");
   const [autoresearchDialogOpen, setAutoresearchDialogOpen] = useState(false);
@@ -516,6 +514,9 @@ export function InputBox({
       return;
     }
     launchPayloadAppliedRef.current = threadId;
+    if (payload.source !== "handoff") {
+      return;
+    }
     clearPendingChatLaunchPayload();
     if (payload.prefill?.trim()) {
       textInput.setInput(payload.prefill);
@@ -619,11 +620,15 @@ export function InputBox({
   );
 
   const createThreadForMountedFolder = useCallback(
-    async (path: string) => {
+    async () => {
       const apiClient = getAPIClient(isMock);
-      const createdThread = await apiClient.threads.create();
+      const createdThread = await (
+        apiClient.threads.create as (payload?: { graphId?: string }) => Promise<{
+          thread_id: string;
+        }>
+      )({ graphId: "lead_agent" });
       const createdThreadId = createdThread.thread_id;
-      const title = `📁 ${getMountedFolderDisplayName(path)}`;
+      const title = "mount-drive";
 
       await apiClient.threads.updateState(createdThreadId, {
         values: { title },
@@ -647,7 +652,13 @@ export function InputBox({
       const path = await pickFolder();
       if (path === null) return;
       if (isNewThread) {
-        const { createdThreadId } = await createThreadForMountedFolder(path);
+        const { createdThreadId } = await createThreadForMountedFolder();
+        setPendingChatLaunchPayload({
+          source: "mount",
+          targetThreadId: createdThreadId,
+          mountedPath: path,
+          createdAt: Date.now(),
+        });
         await fetch(`${getBackendBaseURL()}${api.threads.dreamy.mountFolder(createdThreadId)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -658,69 +669,23 @@ export function InputBox({
             throw new Error(message || "failed to mount folder");
           }
         });
-        toast.success(`Mounted: ${path}`);
-        emitMountedNotice(path, createdThreadId);
+        toast.message(`Mounting files from ${getMountedFolderDisplayName(path)}...`);
         router.push(pathOfThread(createdThreadId));
         return;
       }
       const savedPath = await saveMountedFolder.mutateAsync(path);
       toast.success(`Mounted: ${savedPath}`);
       emitMountedNotice(savedPath);
-    } catch {
-      setMountPathInput("");
-      setMountDialogOpen(true);
-    }
-  }, [
-    createThreadForMountedFolder,
-    emitMountedNotice,
-    isNewThread,
-    pickFolder,
-    router,
-    saveMountedFolder,
-  ]);
-
-  const handleConfirmMount = useCallback(async () => {
-    const path = mountPathInput.trim();
-    if (!path) {
-      setMountDialogOpen(false);
-      return;
-    }
-    try {
-      if (isNewThread) {
-        const { createdThreadId } = await createThreadForMountedFolder(path);
-        const response = await fetch(
-          `${getBackendBaseURL()}${api.threads.dreamy.mountFolder(createdThreadId)}`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path }),
-          },
-        );
-        if (!response.ok) {
-          const message = await response.text();
-          throw new Error(message || "Failed to mount folder");
-        }
-        toast.success(`Mounted folder: ${path}`);
-        emitMountedNotice(path, createdThreadId);
-        setMountDialogOpen(false);
-        setMountPathInput("");
-        router.push(pathOfThread(createdThreadId));
-        return;
-      }
-      const savedPath = await saveMountedFolder.mutateAsync(path);
-      toast.success(`Mounted folder: ${savedPath}`);
-      emitMountedNotice(savedPath);
-      setMountDialogOpen(false);
-      setMountPathInput("");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to mount folder";
+      const message =
+        error instanceof Error ? error.message : "Failed to mount folder";
       toast.error(message);
     }
   }, [
     createThreadForMountedFolder,
     emitMountedNotice,
     isNewThread,
-    mountPathInput,
+    pickFolder,
     router,
     saveMountedFolder,
   ]);
@@ -1003,7 +968,10 @@ export function InputBox({
           return;
         }
         const recoveryPrompt = [
+          "User command: /recover",
           "Recover the existing work-mode plan from current thread state.",
+          "Read the plan file first: /mnt/user-data/workspace/plan.md",
+          "If plan.md is unavailable, use the in-memory plan/todo_graph from thread state.",
           "Only execute the incomplete todos listed below, in order.",
           "Do not redo completed todos.",
           "",
@@ -1025,7 +993,15 @@ export function InputBox({
             text: recoveryPrompt,
             files: [],
           },
-          { queued: true },
+          {
+            queued: true,
+            extraContext: {
+              recover_todo_command: true,
+              recover_todo_incomplete_count: incomplete.length,
+              recover_todo_completed_count: completed.length,
+              recover_todo_plan_path: "/mnt/user-data/workspace/plan.md",
+            },
+          },
         );
         toast.success(`Recovering ${incomplete.length} incomplete todo${incomplete.length === 1 ? "" : "s"}.`);
         textInput.setInput("");
@@ -1627,14 +1603,6 @@ export function InputBox({
         followups={followups}
         onSelect={handleFollowupClick}
         onHide={() => setFollowupsHidden(true)}
-      />
-
-      <MountFolderDialog
-        open={mountDialogOpen}
-        onOpenChange={setMountDialogOpen}
-        value={mountPathInput}
-        onChange={setMountPathInput}
-        onConfirm={() => void handleConfirmMount()}
       />
 
       <RenameThreadDialog

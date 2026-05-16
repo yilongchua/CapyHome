@@ -7,6 +7,7 @@ reconcile todo state via ``write_todos`` and continue only with remaining work.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, NotRequired, override
 
 from langchain.agents import AgentState
@@ -15,6 +16,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
 _MAX_TODO_RECOVERY_ATTEMPTS = 2
+logger = logging.getLogger(__name__)
 
 _TODO_RECOVERY_PROMPT = """You are in work mode. Do not create a new plan.
 1) Read current todo_graph/plan.
@@ -51,6 +53,9 @@ class TodoFailureRetryMiddleware(AgentMiddleware[TodoFailureRetryState]):
         runtime_context = getattr(runtime, "context", None) or {}
         if str(runtime_context.get("mode") or "work").strip().lower() != "work":
             return None
+        if bool(runtime_context.get("recover_todo_command")):
+            logger.debug("Skipping todo_failure_recovery: /recover command already provided explicit recovery instructions.")
+            return None
 
         if not _has_incomplete_todos(state):
             return None
@@ -67,8 +72,17 @@ class TodoFailureRetryMiddleware(AgentMiddleware[TodoFailureRetryState]):
 
         attempts = int(state.get("todo_recovery_attempts", 0))
         if attempts >= _MAX_TODO_RECOVERY_ATTEMPTS:
+            logger.warning(
+                "todo_failure_recovery suppressed after max attempts. attempts=%s has_incomplete_todos=%s",
+                attempts,
+                _has_incomplete_todos(state),
+            )
             return None
 
+        logger.info(
+            "Injecting todo_failure_recovery system reminder. attempts=%s",
+            attempts + 1,
+        )
         reminder = HumanMessage(
             name="todo_failure_recovery",
             content=f"<system_reminder>\n{_TODO_RECOVERY_PROMPT}\n</system_reminder>",

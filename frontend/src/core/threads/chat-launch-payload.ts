@@ -1,10 +1,17 @@
-export type PendingChatLaunchPayload = {
-  source: "handoff";
-  targetThreadId: string;
-  handoffRootVirtualPath?: string;
-  prefill?: string;
-  createdAt: number;
-};
+export type PendingChatLaunchPayload =
+  | {
+      source: "handoff";
+      targetThreadId: string;
+      handoffRootVirtualPath?: string;
+      prefill?: string;
+      createdAt: number;
+    }
+  | {
+      source: "mount";
+      targetThreadId: string;
+      mountedPath?: string;
+      createdAt: number;
+    };
 
 const STORAGE_KEY = "capybara:pending-chat-launch";
 
@@ -23,7 +30,7 @@ export function getPendingChatLaunchPayload(): PendingChatLaunchPayload | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as PendingChatLaunchPayload;
-    if (parsed?.source !== "handoff") return null;
+    if (parsed?.source !== "handoff" && parsed?.source !== "mount") return null;
     if (typeof parsed.targetThreadId !== "string" || !parsed.targetThreadId.trim()) return null;
     if (typeof parsed.createdAt !== "number") return null;
     return parsed;
