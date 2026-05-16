@@ -24,7 +24,6 @@ import { ThreadContext } from "@/components/workspace/messages/context";
 import { QueuedMessageList } from "@/components/workspace/queued-message-list";
 import { ThreadTitle } from "@/components/workspace/thread-title";
 import { Welcome } from "@/components/workspace/welcome";
-import { getAPIClient } from "@/core/api/api-client";
 import { urlOfArtifact } from "@/core/artifacts/utils";
 import { getBackendBaseURL } from "@/core/config";
 import { api } from "@/core/dreamy/api";
@@ -43,7 +42,7 @@ import {
 } from "@/core/threads/chat-launch-payload";
 import type { ForkDraft } from "@/core/threads/fork";
 import type { ComplexityEscalationEvent, PlanAdaptedEvent, PlanCreatedEvent } from "@/core/threads/hooks";
-import { useThreadStream } from "@/core/threads/hooks";
+import { useRenameThread, useThreadStream } from "@/core/threads/hooks";
 import { useContextTokens } from "@/core/threads/use-context-tokens";
 import { useRunningRun } from "@/core/threads/use-running-run";
 import { useThreadNotification } from "@/core/threads/use-thread-notification";
@@ -63,39 +62,23 @@ function normalizeIntent(text: string): string {
   return text.toLowerCase().trim().replace(/[.!?]+$/g, "");
 }
 
-function getMountedTitleFromFiles(
-  files: Array<{ name: string }>,
+function getMountedFolderName(
   fallbackPath: string | null | undefined,
 ): string | null {
-  const seen = new Set<string>();
-  const folders: string[] = [];
-
-  for (const file of files) {
-    const parts = file.name.split("/").filter(Boolean);
-    if (parts.length < 2) {
-      continue;
-    }
-    const topLevelFolder = parts[0];
-    if (!topLevelFolder || seen.has(topLevelFolder)) {
-      continue;
-    }
-    seen.add(topLevelFolder);
-    folders.push(topLevelFolder);
-    if (folders.length >= 4) {
-      break;
-    }
-  }
-
-  if (folders.length > 0) {
-    return folders.join("/");
-  }
-
   const normalized = fallbackPath?.trim().replace(/[\\/]+$/, "");
   if (!normalized) {
     return null;
   }
   const segments = normalized.split(/[\\/]/).filter(Boolean);
   return segments[segments.length - 1] ?? null;
+}
+
+function formatMountedThreadTitle(title: string): string {
+  return `📁 ${title}`;
+}
+
+function isMountPlaceholderTitle(title: string): boolean {
+  return title === "" || title === "mount-drive";
 }
 
 export default function ChatPage() {
@@ -167,6 +150,7 @@ function ChatPageContent({
   const executePlanRetryCountRef = useRef(0);
   const finalizedMountedTitleRef = useRef<string | null>(null);
   const mountBootstrapSentRef = useRef<string | null>(null);
+  const renameThread = useRenameThread();
 
   const isInFlightRunConflict = useCallback((statusCode: number, rawBody: string): boolean => {
     if (statusCode === 409 || statusCode === 423) {
@@ -325,7 +309,10 @@ function ChatPageContent({
   }, [pendingMountPath, sendMessage, threadId]);
 
   useEffect(() => {
-    if (!pendingMountPath) {
+    const currentTitle = String(thread.values.title ?? "").trim();
+    const mountSourcePath = pendingMountPath ?? mountedFolder ?? null;
+
+    if (!mountSourcePath) {
       return;
     }
     if (finalizedMountedTitleRef.current === threadId) {
@@ -335,35 +322,37 @@ function ChatPageContent({
       return;
     }
 
-    const derivedTitle = getMountedTitleFromFiles(
-      mountedFolderFiles.files ?? [],
-      mountedFolderFiles.folder_path ?? pendingMountPath,
+    const derivedTitle = getMountedFolderName(
+      mountedFolderFiles.folder_path ?? mountSourcePath,
     );
     if (!derivedTitle) {
       return;
     }
 
-    const currentTitle = String(thread.values.title ?? "").trim();
-    if (currentTitle === derivedTitle) {
+    const formattedTitle = formatMountedThreadTitle(derivedTitle);
+    if (currentTitle === formattedTitle) {
       finalizedMountedTitleRef.current = threadId;
       setPendingMountPath(null);
+      return;
+    }
+    if (!pendingMountPath && !isMountPlaceholderTitle(currentTitle) && currentTitle !== derivedTitle) {
       return;
     }
 
     void (async () => {
       try {
-        const apiClient = getAPIClient(isMock);
-        await apiClient.threads.updateState(threadId, {
-          values: { title: derivedTitle },
+        await renameThread.mutateAsync({
+          threadId,
+          title: formattedTitle,
         });
         finalizedMountedTitleRef.current = threadId;
         setPendingMountPath(null);
-        toast.success(`Mounted folder ready: ${derivedTitle}`);
+        toast.success(`Mounted folder ready: ${formattedTitle}`);
       } catch (error) {
         console.error("Failed to finalize mounted thread title:", error);
       }
     })();
-  }, [isMock, mountedFolderFiles, pendingMountPath, thread.values.title, threadId]);
+  }, [mountedFolder, mountedFolderFiles, pendingMountPath, renameThread, thread.values.title, threadId]);
 
   useEffect(() => {
     if (planCreatedEvent && settings.context.auto_mode === true) {
