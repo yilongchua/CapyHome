@@ -170,7 +170,17 @@ function AgentChatPageContent({
         handleExecutePlan();
         return;
       }
-      void sendMessage(threadId, message, { agent_name: agentName }, options);
+      const { extraContext: submitExtraContext, ...submitOptions } = options ?? {};
+      const normalizedSubmitOptions = options ? submitOptions : undefined;
+      void sendMessage(
+        threadId,
+        message,
+        {
+          agent_name: agentName,
+          ...(submitExtraContext ?? {}),
+        },
+        normalizedSubmitOptions,
+      );
     },
     [agentName, handleExecutePlan, sendMessage, thread.isLoading, thread.values.plan?.status, threadId],
   );

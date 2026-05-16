@@ -24,6 +24,7 @@ import { ThreadContext } from "@/components/workspace/messages/context";
 import { QueuedMessageList } from "@/components/workspace/queued-message-list";
 import { ThreadTitle } from "@/components/workspace/thread-title";
 import { Welcome } from "@/components/workspace/welcome";
+import { getAPIClient } from "@/core/api/api-client";
 import { urlOfArtifact } from "@/core/artifacts/utils";
 import { getBackendBaseURL } from "@/core/config";
 import { api } from "@/core/dreamy/api";
@@ -36,6 +37,10 @@ import {
 import { useI18n } from "@/core/i18n/hooks";
 import { useModels } from "@/core/models/hooks";
 import { useLocalSettings } from "@/core/settings";
+import {
+  clearPendingChatLaunchPayload,
+  getPendingChatLaunchPayload,
+} from "@/core/threads/chat-launch-payload";
 import type { ForkDraft } from "@/core/threads/fork";
 import type { ComplexityEscalationEvent, PlanAdaptedEvent, PlanCreatedEvent } from "@/core/threads/hooks";
 import { useThreadStream } from "@/core/threads/hooks";
@@ -56,6 +61,41 @@ const EXECUTE_PLAN_INTENTS = new Set([
 
 function normalizeIntent(text: string): string {
   return text.toLowerCase().trim().replace(/[.!?]+$/g, "");
+}
+
+function getMountedTitleFromFiles(
+  files: Array<{ name: string }>,
+  fallbackPath: string | null | undefined,
+): string | null {
+  const seen = new Set<string>();
+  const folders: string[] = [];
+
+  for (const file of files) {
+    const parts = file.name.split("/").filter(Boolean);
+    if (parts.length < 2) {
+      continue;
+    }
+    const topLevelFolder = parts[0];
+    if (!topLevelFolder || seen.has(topLevelFolder)) {
+      continue;
+    }
+    seen.add(topLevelFolder);
+    folders.push(topLevelFolder);
+    if (folders.length >= 4) {
+      break;
+    }
+  }
+
+  if (folders.length > 0) {
+    return folders.join("/");
+  }
+
+  const normalized = fallbackPath?.trim().replace(/[\\/]+$/, "");
+  if (!normalized) {
+    return null;
+  }
+  const segments = normalized.split(/[\\/]/).filter(Boolean);
+  return segments[segments.length - 1] ?? null;
 }
 
 export default function ChatPage() {
@@ -122,8 +162,11 @@ function ChatPageContent({
   const [forkDraft, setForkDraft] = useState<ForkDraft | null>(null);
   const [uiNotices, setUiNotices] = useState<LiveGenerationNotice[]>([]);
   const [pendingExecutePlan, setPendingExecutePlan] = useState(false);
+  const [pendingMountPath, setPendingMountPath] = useState<string | null>(null);
   const suppressedAutoExecutePlanKeyRef = useRef<string | null>(null);
   const executePlanRetryCountRef = useRef(0);
+  const finalizedMountedTitleRef = useRef<string | null>(null);
+  const mountBootstrapSentRef = useRef<string | null>(null);
 
   const isInFlightRunConflict = useCallback((statusCode: number, rawBody: string): boolean => {
     if (statusCode === 409 || statusCode === 423) {
@@ -244,6 +287,85 @@ function ChatPageContent({
   }, [threadId]);
 
   useEffect(() => {
+    const payload = getPendingChatLaunchPayload();
+    if (payload?.source !== "mount" || payload.targetThreadId !== threadId) {
+      return;
+    }
+    const normalizedMountedPath = payload.mountedPath?.trim();
+    setPendingMountPath(normalizedMountedPath && normalizedMountedPath.length > 0 ? normalizedMountedPath : null);
+    setUiNotices((prev) => [
+      ...prev,
+      {
+        id: `mounting-${payload.targetThreadId}`,
+        content: payload.mountedPath
+          ? `Mounting files from ${payload.mountedPath}...`
+          : "Mounting files...",
+      },
+    ]);
+    clearPendingChatLaunchPayload();
+  }, [threadId]);
+
+  useEffect(() => {
+    if (!pendingMountPath) {
+      return;
+    }
+    if (mountBootstrapSentRef.current === threadId) {
+      return;
+    }
+    mountBootstrapSentRef.current = threadId;
+    void sendMessage(
+      threadId,
+      {
+        text: "Check if drive is mounted. Reply yes or no.",
+        files: [],
+      },
+      undefined,
+      { queued: true },
+    );
+  }, [pendingMountPath, sendMessage, threadId]);
+
+  useEffect(() => {
+    if (!pendingMountPath) {
+      return;
+    }
+    if (finalizedMountedTitleRef.current === threadId) {
+      return;
+    }
+    if (!mountedFolderFiles) {
+      return;
+    }
+
+    const derivedTitle = getMountedTitleFromFiles(
+      mountedFolderFiles.files ?? [],
+      mountedFolderFiles.folder_path ?? pendingMountPath,
+    );
+    if (!derivedTitle) {
+      return;
+    }
+
+    const currentTitle = String(thread.values.title ?? "").trim();
+    if (currentTitle === derivedTitle) {
+      finalizedMountedTitleRef.current = threadId;
+      setPendingMountPath(null);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const apiClient = getAPIClient(isMock);
+        await apiClient.threads.updateState(threadId, {
+          values: { title: derivedTitle },
+        });
+        finalizedMountedTitleRef.current = threadId;
+        setPendingMountPath(null);
+        toast.success(`Mounted folder ready: ${derivedTitle}`);
+      } catch (error) {
+        console.error("Failed to finalize mounted thread title:", error);
+      }
+    })();
+  }, [isMock, mountedFolderFiles, pendingMountPath, thread.values.title, threadId]);
+
+  useEffect(() => {
     if (planCreatedEvent && settings.context.auto_mode === true) {
       const eventKey = planEventKey(planCreatedEvent);
       if (eventKey && suppressedAutoExecutePlanKeyRef.current === eventKey) {
@@ -337,7 +459,9 @@ function ChatPageContent({
         handleExecutePlan();
         return;
       }
-      void sendMessage(threadId, message, undefined, options);
+      const { extraContext: submitExtraContext, ...submitOptions } = options ?? {};
+      const normalizedSubmitOptions = options ? submitOptions : undefined;
+      void sendMessage(threadId, message, submitExtraContext, normalizedSubmitOptions);
     },
     [handleExecutePlan, sendMessage, thread.isLoading, thread.values.plan?.status, threadId],
   );
