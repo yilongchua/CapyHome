@@ -5,8 +5,10 @@ import {
   ChevronDownIcon,
   FileTextIcon,
   ListChecksIcon,
+  NetworkIcon,
   PlayIcon,
   PlusIcon,
+  SearchIcon,
   Trash2Icon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -54,9 +56,12 @@ import {
   useDeleteAutoresearchObjective,
   useIntegrationStatus,
   useRunSchedulerJob,
+  useSaveToVault,
   useStartAutoresearchObjective,
   useUpdateRuntimeSchedulerJob,
   useUpdateRuntimeSchedulerJobTime,
+  useVaultGraph,
+  useVaultSearch,
   useVaultStatus,
 } from "@/core/control-plane";
 import { useI18n } from "@/core/i18n/hooks";
@@ -113,22 +118,51 @@ export default function VaultPage() {
     refetchInterval: 20_000,
   });
   const { vaultStatus } = useVaultStatus({ refetchInterval: 20_000 });
+  const { vaultGraph } = useVaultGraph({ refetchInterval: 20_000, limit: 120 });
   const startAutoresearch = useStartAutoresearchObjective();
   const runSchedulerJob = useRunSchedulerJob();
+  const saveToVault = useSaveToVault();
   const deleteAutoresearchObjective = useDeleteAutoresearchObjective();
   const updateSchedulerJobTime = useUpdateRuntimeSchedulerJobTime();
   const updateSchedulerJob = useUpdateRuntimeSchedulerJob();
   const [openCreateDialog, setOpenCreateDialog] = useState(false);
   const [newTopic, setNewTopic] = useState("");
   const [endpointGoal, setEndpointGoal] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [saveTitle, setSaveTitle] = useState("");
+  const [saveContent, setSaveContent] = useState("");
   const [objectiveProgress, setObjectiveProgress] = useState<Record<string, number>>({});
   const toText = (value: unknown) => (typeof value === "string" ? value : "");
   const firstNonEmpty = (...values: string[]) =>
     values.map((item) => item.trim()).find((item) => item.length > 0) ?? "";
+  const { results: vaultSearchResults, isLoading: isSearchLoading } = useVaultSearch(searchQuery, {
+    enabled: searchQuery.trim().length > 1,
+    limit: 8,
+  });
 
   useEffect(() => {
     document.title = `${t.pages.vault} - ${t.pages.appName}`;
   }, [t.pages.appName, t.pages.vault]);
+
+  const handleSaveToVault = () => {
+    const title = saveTitle.trim();
+    const content = saveContent.trim();
+    if (!title || !content) {
+      toast.error("Enter both a title and content to save.");
+      return;
+    }
+    saveToVault.mutate(
+      { title, content, topic: title },
+      {
+        onSuccess: () => {
+          toast.success("Saved to Knowledge Vault.");
+          setSaveTitle("");
+          setSaveContent("");
+        },
+        onError: (error) => toast.error(error.message),
+      },
+    );
+  };
 
   const handleCreateObjective = () => {
     const topic = newTopic.trim();
@@ -218,6 +252,109 @@ export default function VaultPage() {
           </div>
 
           <div className="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-3">
+            <Card className="xl:col-span-1">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <SearchIcon className="size-4" />
+                  Vault Search
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search cached research, clips, and syntheses"
+                />
+                <div className="space-y-2">
+                  {isSearchLoading ? (
+                    <p className="text-muted-foreground text-xs">Searching…</p>
+                  ) : vaultSearchResults?.items?.length ? (
+                    vaultSearchResults.items.map((item) => (
+                      <div key={`${item.path}-${item.rank}`} className="rounded-md border p-2">
+                        <p className="text-sm font-medium">{item.title ?? item.path}</p>
+                        <p className="text-muted-foreground mt-1 line-clamp-3 text-xs">
+                          {item.snippet ?? "No snippet available."}
+                        </p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-muted-foreground text-xs">
+                      {searchQuery.trim().length > 1
+                        ? "No cached matches yet."
+                        : "Search the local vault to reuse previous research."}
+                    </p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="xl:col-span-1">
+              <CardHeader>
+                <CardTitle className="text-base">Save To Vault</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Input
+                  value={saveTitle}
+                  onChange={(event) => setSaveTitle(event.target.value)}
+                  placeholder="Short title"
+                />
+                <Textarea
+                  value={saveContent}
+                  onChange={(event) => setSaveContent(event.target.value)}
+                  className="min-h-32"
+                  placeholder="Paste a useful answer, summary, or curated note"
+                />
+                <Button onClick={handleSaveToVault} disabled={saveToVault.isPending}>
+                  {saveToVault.isPending ? "Saving..." : "Save"}
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="xl:col-span-1">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <NetworkIcon className="size-4" />
+                  Vault Graph
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-md border p-2">
+                    <p className="text-muted-foreground">Nodes</p>
+                    <p className="text-sm font-semibold">{Number(vaultGraph?.counts?.nodes ?? 0)}</p>
+                  </div>
+                  <div className="rounded-md border p-2">
+                    <p className="text-muted-foreground">Edges</p>
+                    <p className="text-sm font-semibold">{Number(vaultGraph?.counts?.edges ?? 0)}</p>
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium">Most connected</p>
+                  <div className="space-y-1">
+                    {Array.isArray(vaultGraph?.highlights?.top_connected) &&
+                    vaultGraph.highlights.top_connected.length > 0 ? (
+                      vaultGraph.highlights.top_connected.slice(0, 5).map((node) => {
+                        const typedNode = node as { id?: string; label?: string; degree?: number; kind?: string };
+                        return (
+                          <div
+                            key={typedNode.id}
+                            className="flex items-center justify-between rounded-md border px-2 py-1 text-xs"
+                          >
+                            <span>{typedNode.label ?? typedNode.id}</span>
+                            <Badge variant="outline">
+                              {(typedNode.kind ?? "node").toString()} · {Number(typedNode.degree ?? 0)}
+                            </Badge>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <p className="text-muted-foreground text-xs">Graph connections will appear as the vault grows.</p>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             {isLoading ? (
               <Card>
                 <CardContent className="pt-6 text-sm">{t.common.loading}</CardContent>

@@ -17,6 +17,7 @@ import {
   getPipelineRunArtifactContent,
   getPipelineRunArtifact,
   getVaultActionItems,
+  getVaultGraph,
   getIntegrationStatus,
   getIntegrationServicesStatus,
   getVaultStatus,
@@ -31,6 +32,7 @@ import {
   resolveApproval,
   resolveProposalApproval,
   runSchedulerJob,
+  saveToVault,
   searchVault,
   setIntegrationServiceEnabled,
   startIntegrationService,
@@ -42,14 +44,15 @@ import type {
   AutoresearchObjective,
   CreateFeedbackRequest,
   CreatePipelineRunRequest,
-  PipelineRun,
   ResolveProposalApprovalRequest,
   ResolveApprovalRequest,
   SchedulerRuntimeJobCreateRequest,
   SelfImproverDraftReport,
   PipelineArtifactContent,
   VaultSearchResponse,
+  VaultSaveRequest,
   VaultActionItemsResponse,
+  VaultGraphResponse,
   VaultSufficiencyRequest,
   VaultStatusResponse,
   StartAutoresearchObjectiveRequest,
@@ -90,7 +93,7 @@ export function usePipelineRuns(options?: {
       if (typeof options?.refetchInterval === "number") {
         return options.refetchInterval;
       }
-      const runs = (query.state.data as PipelineRun[] | undefined) ?? [];
+      const runs = query.state.data ?? [];
       const hasActive = runs.some((run) =>
         run.status === "pending_approval" || run.status === "approved" || run.status === "running",
       );
@@ -167,6 +170,16 @@ export function useVaultActionItems(options?: { refetchInterval?: number; limit?
   return { actionItems: data ?? null, isLoading, error };
 }
 
+export function useVaultGraph(options?: { refetchInterval?: number; limit?: number }) {
+  const { data, isLoading, error } = useWorkspaceRefreshQuery<VaultGraphResponse>({
+    queryKey: ["control-plane", "vault-graph", options?.limit ?? 200],
+    queryFn: () => getVaultGraph(options?.limit ?? 200),
+    refetchInterval: options?.refetchInterval ?? 20_000,
+    refreshDomains: ["vault"],
+  });
+  return { vaultGraph: data ?? null, isLoading, error };
+}
+
 export function useEvaluateVaultSufficiency() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -174,6 +187,19 @@ export function useEvaluateVaultSufficiency() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-status"] });
       void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-action-items"] });
+      publishControlPlaneRefresh(["vault"]);
+    },
+  });
+}
+
+export function useSaveToVault() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: VaultSaveRequest) => saveToVault(request),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-status"] });
+      void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-search"] });
+      void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-graph"] });
       publishControlPlaneRefresh(["vault"]);
     },
   });

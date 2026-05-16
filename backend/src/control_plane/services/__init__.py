@@ -13,6 +13,7 @@ from src.control_plane.services.proposals import ProposalsService
 from src.control_plane.services.scheduler import SchedulerService
 from src.control_plane.services.templates import TemplatesService
 from src.control_plane.services.triggers import TriggersService
+from src.control_plane.services.unified_vault_search import UnifiedVaultSearchService
 
 __all__ = [
     "ApprovalsService",
@@ -22,4 +23,5 @@ __all__ = [
     "SchedulerService",
     "TemplatesService",
     "TriggersService",
+    "UnifiedVaultSearchService",
 ]

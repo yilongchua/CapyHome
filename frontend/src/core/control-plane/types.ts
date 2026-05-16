@@ -306,6 +306,47 @@ export interface VaultSearchResponse {
   items: VaultSearchItem[];
 }
 
+export interface VaultWriteResponse {
+  status: string;
+  source_id?: string | null;
+  queue_path?: string | null;
+  appended_count?: number | null;
+  compiled_path?: string | null;
+  raw_path?: string | null;
+}
+
+export interface VaultSaveRequest {
+  title: string;
+  content: string;
+  topic?: string;
+  topic_tags?: string[];
+  source_url?: string;
+  source_thread_id?: string;
+}
+
+export interface VaultGraphNode {
+  id: string;
+  label: string;
+  kind: string;
+  path: string;
+  tags: string[];
+  degree: number;
+}
+
+export interface VaultGraphEdge {
+  source: string;
+  target: string;
+  type: string;
+}
+
+export interface VaultGraphResponse {
+  generated_at: string;
+  counts: Record<string, unknown>;
+  nodes: VaultGraphNode[];
+  edges: VaultGraphEdge[];
+  highlights: Record<string, unknown>;
+}
+
 export interface VaultActionItem {
   kind: string;
   priority: string;

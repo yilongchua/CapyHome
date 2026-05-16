@@ -32,6 +32,12 @@ COMMUNITY_TOOL_REGISTRY: dict[str, CommunityToolEntry] = {
         "description": "BM25 keyword search over compiled knowledge vault pages.",
         "source": "builtin",
     },
+    "save_to_knowledge_vault": {
+        "import_path": "src.community.knowledge_vault_search.save_tool:save_to_knowledge_vault_tool",
+        "display_name": "Save To Knowledge Vault",
+        "description": "Persist useful answers or curated notes into the local knowledge vault.",
+        "source": "builtin",
+    },
     "query_lightrag": {
         "import_path": "src.community.lightrag.tool:query_lightrag_tool",
         "display_name": "LightRAG Query",

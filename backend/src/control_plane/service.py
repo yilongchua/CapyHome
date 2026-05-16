@@ -48,6 +48,7 @@ from src.control_plane.services import (
     SchedulerService,
     TemplatesService,
     TriggersService,
+    UnifiedVaultSearchService,
 )
 from src.control_plane.store import ControlPlaneStore
 from src.control_plane.vault_learning import VaultLearningManager
@@ -1075,7 +1076,44 @@ class ControlPlaneService:
 
     def search_vault(self, *, query: str, limit: int = 10) -> dict[str, Any]:
         manager = self._default_vault_manager()
-        return manager.search(query=query, limit=limit)
+        search_service = UnifiedVaultSearchService(manager.vault_root)
+        return search_service.search_payload(query=query, limit=limit)
+
+    def clip_to_vault(
+        self,
+        *,
+        url: str,
+        title: str,
+        markdown: str,
+        topic: str = "",
+        topic_tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        manager = self._default_vault_manager()
+        return manager.enqueue_clip(url=url, title=title, markdown=markdown, topic=topic, topic_tags=topic_tags)
+
+    def save_to_vault(
+        self,
+        *,
+        title: str,
+        content: str,
+        topic: str = "",
+        topic_tags: list[str] | None = None,
+        source_url: str = "",
+        source_thread_id: str = "",
+    ) -> dict[str, Any]:
+        manager = self._default_vault_manager()
+        return manager.save_document(
+            title=title,
+            content=content,
+            topic=topic,
+            topic_tags=topic_tags,
+            source_url=source_url,
+            source_thread_id=source_thread_id,
+        )
+
+    def get_vault_graph(self, *, limit: int = 200) -> dict[str, Any]:
+        manager = self._default_vault_manager()
+        return manager.get_graph(limit=limit)
 
     def get_vault_source(self, source_id: str) -> dict[str, Any]:
         manager = self._default_vault_manager()

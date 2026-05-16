@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -12,7 +14,10 @@ from uuid import uuid4
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.config import get_paths
+from src.config import get_app_config, get_paths
+from src.control_plane.prompts.vault_analyze import ANALYZE_SOURCE_PROMPT
+from src.control_plane.prompts.vault_generate import GENERATE_PAGE_PROMPT
+from src.control_plane.services.unified_vault_search import UnifiedVaultSearchService
 from src.control_plane.vault_text_utils import (
     extract_title as _extract_title,
 )
@@ -34,9 +39,7 @@ from src.control_plane.vault_text_utils import (
 from src.control_plane.vault_text_utils import (
     utcnow_iso as _utcnow_iso,
 )
-from src.control_plane.vault_text_utils import (
-    word_tokens as _word_tokens,
-)
+from src.models.factory import create_chat_model
 
 
 class VaultLoopGuardConfig(BaseModel):
@@ -84,6 +87,20 @@ class VaultLearningManager:
         search_results_max_queue_items: int = 5000,
     ) -> None:
         self.vault_root = vault_root.expanduser().resolve()
+        try:
+            self.vault_config = get_app_config().knowledge_vault
+        except Exception:
+            self.vault_config = SimpleNamespace(
+                cot_ingest_enabled=True,
+                cot_min_chars=1200,
+                cot_model="",
+                vector_search_enabled=False,
+                vector_backend="hash",
+                vector_dimensions=256,
+                vector_chunk_chars=1200,
+                vector_chunk_overlap_chars=200,
+                hybrid_rrf_k=60,
+            )
         self.allowed_domains = set(allowed_domains or [])
         self.max_content_chars = max(1000, int(max_content_chars))
         self.min_trust_score = float(min_trust_score)
@@ -526,6 +543,165 @@ class VaultLearningManager:
             "updated_at": _utcnow_iso(),
         }
 
+    @staticmethod
+    def _extract_json_payload(text: str) -> dict[str, Any]:
+        raw = str(text or "").strip()
+        if not raw:
+            return {}
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            raw = raw[start : end + 1]
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    @staticmethod
+    def _heuristic_sentences(text: str, *, limit: int) -> list[str]:
+        sentences = [item.strip() for item in re.split(r"(?<=[.!?])\s+", text.strip()) if item.strip()]
+        return sentences[: max(1, limit)]
+
+    def _heuristic_analysis(
+        self,
+        *,
+        title: str,
+        url: str,
+        topic: str,
+        raw_text: str,
+        topic_tags: list[str],
+        concept_refs: list[str],
+        entity_refs: list[str],
+        target_synthesis_refs: list[str],
+    ) -> dict[str, Any]:
+        summary = " ".join(self._heuristic_sentences(raw_text, limit=3))[:1000]
+        key_claims = self._heuristic_sentences(raw_text, limit=5)
+        title_tokens = [token for token in re.findall(r"[A-Z][A-Za-z0-9&/-]{2,}", title) if token.lower() not in {"the", "and"}]
+        topic_words = [item for item in re.findall(r"[A-Za-z0-9]+", topic) if len(item) > 4]
+        entities = list(dict.fromkeys(entity_refs + title_tokens[:5]))
+        concepts = list(dict.fromkeys(concept_refs + topic_words[:6]))
+        synthesis_refs = list(dict.fromkeys(target_synthesis_refs + topic_tags[:3] + ([self._topic_slug(topic)] if topic else [])))
+        open_questions = [f"What evidence is still missing around {topic or title}?", f"Which facts should be re-verified from {url}?"]
+        gap_queries = [f"{topic or title} latest evidence", f"{topic or title} contradictory sources"]
+        return {
+            "summary": summary or title,
+            "key_claims": key_claims or [title],
+            "entities": entities,
+            "concepts": concepts,
+            "topic_tags": topic_tags,
+            "open_questions": open_questions,
+            "gap_queries": gap_queries,
+            "synthesis_refs": [item for item in synthesis_refs if item],
+        }
+
+    def _call_vault_model_json(self, prompt: str) -> dict[str, Any]:
+        model_name = str(self.vault_config.cot_model or "").strip()
+        try:
+            app_config = get_app_config()
+        except Exception:
+            return {}
+        if not app_config.models:
+            return {}
+        model = create_chat_model(name=model_name or None, thinking_enabled=False)
+        response = model.invoke(prompt)
+        raw = response.content if isinstance(response.content, str) else str(response.content)
+        return self._extract_json_payload(raw)
+
+    def _analyze_source(
+        self,
+        *,
+        title: str,
+        url: str,
+        topic: str,
+        raw_text: str,
+        topic_tags: list[str],
+        concept_refs: list[str],
+        entity_refs: list[str],
+        target_synthesis_refs: list[str],
+    ) -> dict[str, Any]:
+        fallback = self._heuristic_analysis(
+            title=title,
+            url=url,
+            topic=topic,
+            raw_text=raw_text,
+            topic_tags=topic_tags,
+            concept_refs=concept_refs,
+            entity_refs=entity_refs,
+            target_synthesis_refs=target_synthesis_refs,
+        )
+        if not self.vault_config.cot_ingest_enabled or len(raw_text) < int(self.vault_config.cot_min_chars):
+            return {**fallback, "analysis_mode": "heuristic"}
+        try:
+            parsed = self._call_vault_model_json(
+                ANALYZE_SOURCE_PROMPT.format(
+                    title=title,
+                    url=url,
+                    topic=topic,
+                    content=raw_text[: self.max_content_chars],
+                )
+            )
+        except Exception:
+            parsed = {}
+        merged = {
+            **fallback,
+            **{key: value for key, value in parsed.items() if value not in (None, "", [], {})},
+        }
+        merged["analysis_mode"] = "model" if parsed else "heuristic"
+        for key in ("key_claims", "entities", "concepts", "topic_tags", "open_questions", "gap_queries", "synthesis_refs"):
+            value = merged.get(key)
+            if not isinstance(value, list):
+                merged[key] = fallback.get(key, [])
+            else:
+                merged[key] = [str(item).strip() for item in value if str(item).strip()]
+        merged["summary"] = str(merged.get("summary") or fallback["summary"]).strip()
+        return merged
+
+    def _generate_source_sections(
+        self,
+        *,
+        title: str,
+        url: str,
+        topic: str,
+        raw_text: str,
+        analysis: dict[str, Any],
+    ) -> dict[str, Any]:
+        fallback = {
+            "summary_markdown": str(analysis.get("summary") or title).strip(),
+            "claims_markdown": "\n".join(f"- {item}" for item in analysis.get("key_claims", [])[:8]) or f"- {title}",
+            "evidence_markdown": "\n".join(f"- {item}" for item in self._heuristic_sentences(raw_text, limit=6)) or raw_text[:1200],
+            "backlink_lines": [f"[[../syntheses/{item}.md]]" for item in analysis.get("synthesis_refs", [])[:8]],
+            "review_items": [str(item) for item in analysis.get("open_questions", [])[:8]],
+        }
+        if not self.vault_config.cot_ingest_enabled or len(raw_text) < int(self.vault_config.cot_min_chars):
+            return {**fallback, "generation_mode": "heuristic"}
+        try:
+            parsed = self._call_vault_model_json(
+                GENERATE_PAGE_PROMPT.format(
+                    title=title,
+                    url=url,
+                    topic=topic,
+                    analysis_json=json.dumps(analysis, ensure_ascii=False, indent=2),
+                    content=raw_text[: self.max_content_chars],
+                )
+            )
+        except Exception:
+            parsed = {}
+        merged = {
+            **fallback,
+            **{key: value for key, value in parsed.items() if value not in (None, "", [], {})},
+        }
+        merged["generation_mode"] = "model" if parsed else "heuristic"
+        merged["summary_markdown"] = str(merged.get("summary_markdown") or fallback["summary_markdown"]).strip()
+        merged["claims_markdown"] = str(merged.get("claims_markdown") or fallback["claims_markdown"]).strip()
+        merged["evidence_markdown"] = str(merged.get("evidence_markdown") or fallback["evidence_markdown"]).strip()
+        merged["backlink_lines"] = [str(item).strip() for item in merged.get("backlink_lines", []) if str(item).strip()]
+        merged["review_items"] = [str(item).strip() for item in merged.get("review_items", []) if str(item).strip()]
+        return merged
+
     def discover(
         self,
         *,
@@ -612,7 +788,7 @@ class VaultLearningManager:
             entry = {
                 "queue_id": f"queue-{uuid4().hex[:12]}",
                 "queued_at": now.isoformat(),
-                "source_tool": "web_search",
+                "source_tool": str(result.get("source_tool") or "web_search").strip() or "web_search",
                 "query": query,
                 "title": str(result.get("title") or "").strip(),
                 "url": url,
@@ -623,12 +799,15 @@ class VaultLearningManager:
                 "entity_refs": [str(item).strip() for item in result.get("entity_refs", []) if str(item).strip()],
                 "target_synthesis_refs": [str(item).strip() for item in result.get("target_synthesis_refs", []) if str(item).strip()],
                 "status": "queued",
-                "reason": "enriched_web_search_result",
+                "reason": str(result.get("reason") or "enriched_web_search_result").strip() or "enriched_web_search_result",
                 "content_hash": content_hash,
             }
             source_markdown_path = str(result.get("source_markdown_path") or "").strip()
             if source_markdown_path:
                 entry["source_markdown_path"] = source_markdown_path
+            metadata = result.get("metadata")
+            if isinstance(metadata, dict) and metadata:
+                entry["metadata"] = metadata
             queue.append(entry)
             appended.append(entry)
 
@@ -956,6 +1135,29 @@ class VaultLearningManager:
         target_synthesis_refs = [
             str(item).strip() for item in (queue_entry or {}).get("target_synthesis_refs", []) if str(item).strip()
         ]
+        analysis = self._analyze_source(
+            title=title,
+            url=url,
+            topic=topic,
+            raw_text=raw_text,
+            topic_tags=topic_tags,
+            concept_refs=concept_refs,
+            entity_refs=entity_refs,
+            target_synthesis_refs=target_synthesis_refs,
+        )
+        topic_tags = self._topic_tags(topic, {"topic_tags": analysis.get("topic_tags", topic_tags)})
+        concept_refs = list(dict.fromkeys(concept_refs + [str(item).strip() for item in analysis.get("concepts", []) if str(item).strip()]))
+        entity_refs = list(dict.fromkeys(entity_refs + [str(item).strip() for item in analysis.get("entities", []) if str(item).strip()]))
+        target_synthesis_refs = list(
+            dict.fromkeys(target_synthesis_refs + [str(item).strip() for item in analysis.get("synthesis_refs", []) if str(item).strip()])
+        )
+        generated_page = self._generate_source_sections(
+            title=title,
+            url=url,
+            topic=topic,
+            raw_text=raw_text,
+            analysis=analysis,
+        )
 
         raw_metadata = {
             "source_id": source_id,
@@ -970,6 +1172,11 @@ class VaultLearningManager:
             "topic_tags": topic_tags,
             "concept_refs": concept_refs,
             "entity_refs": entity_refs,
+            "analysis": analysis,
+            "generated_page": {
+                "generation_mode": generated_page.get("generation_mode"),
+                "review_items": generated_page.get("review_items", []),
+            },
         }
         raw_metadata_path.write_text(json.dumps(raw_metadata, indent=2), encoding="utf-8")
 
@@ -1045,12 +1252,19 @@ class VaultLearningManager:
             "concept_refs": concept_refs,
             "synthesis_refs": synthesis_refs,
             "last_reviewed_at": _utcnow_iso(),
+            "analysis_mode": analysis.get("analysis_mode"),
+            "generation_mode": generated_page.get("generation_mode"),
+            "open_questions": analysis.get("open_questions", []),
+            "gap_queries": analysis.get("gap_queries", []),
         }
         sections = [
-            "## Summary\n\n" + raw_text[:1200],
-            "## Claims\n\n" + "\n".join(f"- {line.strip()}" for line in raw_text.split(". ")[:5] if line.strip()),
+            "## Summary\n\n" + str(generated_page.get("summary_markdown") or raw_text[:1200]).strip(),
+            "## Claims\n\n" + str(generated_page.get("claims_markdown") or "").strip(),
+            "## Evidence\n\n" + str(generated_page.get("evidence_markdown") or "").strip(),
             "## Backlinks\n\n"
-            + "\n".join([f"- [[../syntheses/{ref}.md]]" for ref in synthesis_refs] or ["- None"]),
+            + "\n".join([f"- {line}" for line in generated_page.get("backlink_lines", [])] or [f"- [[../syntheses/{ref}.md]]" for ref in synthesis_refs] or ["- None"]),
+            "## Review Items\n\n" + "\n".join(f"- {item}" for item in (generated_page.get("review_items", [])[:10] or analysis.get("open_questions", [])[:10] or ["None"])),
+            "## Gap Queries\n\n" + "\n".join(f"- {item}" for item in (analysis.get("gap_queries", [])[:10] or ["None"])),
         ]
         self._write_page(path=compiled_source_path, frontmatter=source_frontmatter, title=title, sections=sections)
 
@@ -1069,6 +1283,9 @@ class VaultLearningManager:
                 "metadata_path": str(raw_metadata_path),
                 "source": source,
                 "topic_tags": topic_tags,
+                "source_tool": str((queue_entry or {}).get("source_tool") or source),
+                "analysis_mode": analysis.get("analysis_mode"),
+                "generation_mode": generated_page.get("generation_mode"),
             }
         )
         self._manifest["sources"][source_id] = source_record
@@ -1098,9 +1315,26 @@ class VaultLearningManager:
             kind="source",
             title=title,
             path=compiled_source_path,
-            text=raw_text,
+            text="\n\n".join(
+                [
+                    str(analysis.get("summary") or ""),
+                    "\n".join(str(item) for item in analysis.get("key_claims", [])[:8]),
+                    raw_text,
+                ]
+            ),
             tags=topic_tags,
         )
+        for question in analysis.get("open_questions", [])[:10]:
+            question_text = str(question).strip()
+            if not question_text:
+                continue
+            task_name = f"{_utcnow().strftime('%Y%m%dT%H%M%SZ')}-{_slugify(question_text)[:48] or 'review'}-vault-review.md"
+            task_path = self.task_review_dir / task_name
+            if not task_path.exists():
+                task_path.write_text(
+                    f"# Vault Review Item\n\n- Source: `{title}`\n- URL: {url}\n- Review: {question_text}\n",
+                    encoding="utf-8",
+                )
         return {
             "status": "ingested",
             "source_id": source_id,
@@ -1108,6 +1342,8 @@ class VaultLearningManager:
             "score": trust_score,
             "compiled_path": str(compiled_source_path),
             "raw_path": str(raw_source_path),
+            "analysis_mode": analysis.get("analysis_mode"),
+            "generation_mode": generated_page.get("generation_mode"),
         }
 
     def ingest(
@@ -1202,6 +1438,173 @@ class VaultLearningManager:
         }
         self._save_manifest()
         return report
+
+    def enqueue_clip(
+        self,
+        *,
+        url: str,
+        title: str,
+        markdown: str,
+        topic: str = "",
+        topic_tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        normalized_url = str(url).strip()
+        if not normalized_url or not self._is_web_url(normalized_url):
+            raise ValueError("A valid http(s) URL is required for vault clips.")
+        rendered_markdown = markdown.strip()
+        if not rendered_markdown:
+            raise ValueError("Clip markdown cannot be empty.")
+        result = self.enqueue_search_results(
+            query=topic or title or normalized_url,
+            results=[
+                {
+                    "title": title.strip() or normalized_url,
+                    "url": normalized_url,
+                    "snippet": rendered_markdown[:500],
+                    "extracted_content": rendered_markdown,
+                    "topic_tags": topic_tags or self._topic_tags(topic),
+                    "source_tool": "browser_clipper",
+                    "reason": "clipped_page",
+                    "metadata": {"ingest_origin": "browser_clipper"},
+                }
+            ],
+        )
+        self._manifest["last_run_summary"] = {
+            "step": "clip",
+            "updated_at": _utcnow_iso(),
+            "appended_count": int(result.get("appended_count") or 0),
+        }
+        self._save_manifest()
+        return result
+
+    def save_document(
+        self,
+        *,
+        title: str,
+        content: str,
+        topic: str = "",
+        topic_tags: list[str] | None = None,
+        source_url: str = "",
+        source_thread_id: str = "",
+    ) -> dict[str, Any]:
+        normalized_title = title.strip()
+        normalized_content = content.strip()
+        if not normalized_title:
+            raise ValueError("Title is required.")
+        if not normalized_content:
+            raise ValueError("Content is required.")
+        slug = _slugify(normalized_title) or "saved-note"
+        synthetic_url = source_url.strip() or f"https://vault.local/saved/{slug}"
+        queue_entry = {
+            "title": normalized_title,
+            "topic_tags": topic_tags or self._topic_tags(topic or normalized_title),
+            "target_synthesis_refs": [self._topic_slug(topic or normalized_title)],
+            "source_tool": "explicit_save",
+            "metadata": {"source_thread_id": source_thread_id.strip()} if source_thread_id.strip() else {},
+        }
+        result = self.reingest_if_changed(
+            url=synthetic_url,
+            source="explicit_save",
+            topic=topic or normalized_title,
+            pre_extracted_content=normalized_content,
+            queue_entry=queue_entry,
+        )
+        self.compile_incremental()
+        self._manifest["last_run_summary"] = {
+            "step": "save",
+            "updated_at": _utcnow_iso(),
+            "source_id": result.get("source_id"),
+            "status": result.get("status"),
+        }
+        self._save_manifest()
+        return result
+
+    def get_graph(self, *, limit: int = 200) -> dict[str, Any]:
+        nodes: dict[str, dict[str, Any]] = {}
+        edges: list[dict[str, Any]] = []
+        edge_seen: set[tuple[str, str, str]] = set()
+
+        def ensure_node(node_id: str, *, label: str, kind: str, path: str, tags: list[str] | None = None) -> None:
+            if node_id not in nodes:
+                nodes[node_id] = {
+                    "id": node_id,
+                    "label": label,
+                    "kind": kind,
+                    "path": path,
+                    "tags": tags or [],
+                    "degree": 0,
+                }
+
+        for category_dir in sorted(self.compiled_dir.iterdir() if self.compiled_dir.exists() else []):
+            if not category_dir.is_dir():
+                continue
+            category = category_dir.name
+            for path in sorted(category_dir.glob("*.md")):
+                if path.name == "index.md":
+                    continue
+                frontmatter, _body = _parse_frontmatter(path.read_text(encoding="utf-8"))
+                stem = path.stem
+                node_id = f"{category}:{stem}"
+                ensure_node(
+                    node_id,
+                    label=str(frontmatter.get("title") or stem.replace("-", " ").title()),
+                    kind=category,
+                    path=str(path),
+                    tags=[str(item) for item in frontmatter.get("topic_tags", []) if str(item).strip()],
+                )
+
+                for ref in frontmatter.get("source_refs", []) if isinstance(frontmatter.get("source_refs"), list) else []:
+                    target_id = f"sources:{_slugify(str(ref))}"
+                    ensure_node(target_id, label=str(ref), kind="sources", path="")
+                    edge_key = (node_id, target_id, "source_ref")
+                    if edge_key not in edge_seen:
+                        edge_seen.add(edge_key)
+                        edges.append({"source": node_id, "target": target_id, "type": "source_ref"})
+                for field, kind in (("concept_refs", "concepts"), ("entity_refs", "entities"), ("synthesis_refs", "syntheses")):
+                    raw_refs = frontmatter.get(field, [])
+                    if not isinstance(raw_refs, list):
+                        continue
+                    for ref in raw_refs:
+                        target_slug = _slugify(str(ref))
+                        if not target_slug:
+                            continue
+                        target_id = f"{kind}:{target_slug}"
+                        ensure_node(target_id, label=str(ref), kind=kind, path="")
+                        edge_key = (node_id, target_id, field)
+                        if edge_key in edge_seen:
+                            continue
+                        edge_seen.add(edge_key)
+                        edges.append({"source": node_id, "target": target_id, "type": field})
+
+        for edge in edges:
+            if edge["source"] in nodes:
+                nodes[edge["source"]]["degree"] += 1
+            if edge["target"] in nodes:
+                nodes[edge["target"]]["degree"] += 1
+
+        ranked_nodes = sorted(nodes.values(), key=lambda item: (int(item.get("degree") or 0), str(item.get("label") or "")), reverse=True)
+        limited_nodes = ranked_nodes[: max(1, int(limit))]
+        node_ids = {str(item["id"]) for item in limited_nodes}
+        limited_edges = [edge for edge in edges if edge["source"] in node_ids and edge["target"] in node_ids]
+        category_counts: dict[str, int] = {}
+        for item in limited_nodes:
+            kind = str(item.get("kind") or "unknown")
+            category_counts[kind] = category_counts.get(kind, 0) + 1
+
+        return {
+            "generated_at": _utcnow_iso(),
+            "counts": {
+                "nodes": len(limited_nodes),
+                "edges": len(limited_edges),
+                "categories": category_counts,
+            },
+            "nodes": limited_nodes,
+            "edges": limited_edges,
+            "highlights": {
+                "top_connected": limited_nodes[:10],
+                "orphans": [item for item in limited_nodes if int(item.get("degree") or 0) == 0][:10],
+            },
+        }
 
     def _render_index_for_dir(self, title: str, directory: Path) -> str:
         lines = [f"# {title}", ""]
@@ -1302,6 +1705,9 @@ class VaultLearningManager:
             "index_path": str(self.compiled_index_path),
             "log_path": str(self.compiled_log_path),
         }
+        search_service = UnifiedVaultSearchService(self.vault_root)
+        vector_status = search_service.vector_status()
+        compile_report["vector_index"] = vector_status
         report_path = self.compile_reports_dir / f"{_utcnow().strftime('%Y%m%dT%H%M%SZ')}-compile.json"
         report_path.write_text(json.dumps(compile_report, indent=2), encoding="utf-8")
         self._manifest["dirty_pages"] = []
@@ -1679,47 +2085,12 @@ class VaultLearningManager:
         return {"generated_at": _utcnow_iso(), "counts": counts, "items": sliced}
 
     def search(self, *, query: str, limit: int = 10) -> dict[str, Any]:
-        terms = _word_tokens(query)
-        if not terms:
-            return {"query": query, "total": 0, "items": []}
-
-        scored: list[tuple[float, dict[str, Any]]] = []
-        for item in self._manifest["search_index"].values():
-            title = str(item.get("title") or "").lower()
-            text = str(item.get("text") or "").lower()
-            tags = [str(tag).lower() for tag in item.get("tags", [])]
-            score = 0.0
-            for term in terms:
-                if term in title:
-                    score += 10.0
-                score += 1.5 * text.count(term)
-                if term in tags:
-                    score += 2.5
-            if score <= 0:
-                continue
-            scored.append((score, item))
-
-        scored.sort(key=lambda pair: pair[0], reverse=True)
-        return {
-            "query": query,
-            "total": len(scored),
-            "items": [
-                {
-                    "rank": index + 1,
-                    "score": round(score, 3),
-                    "id": item.get("id"),
-                    "kind": item.get("kind"),
-                    "title": item.get("title"),
-                    "path": item.get("path"),
-                    "snippet": item.get("snippet"),
-                    "updated_at": item.get("updated_at"),
-                }
-                for index, (score, item) in enumerate(scored[: max(1, limit)])
-            ],
-        }
+        return UnifiedVaultSearchService(self.vault_root).search_payload(query=query, limit=limit)
 
     def get_run_summary(self) -> dict[str, Any]:
         queue = self._load_queue()
+        search_service = UnifiedVaultSearchService(self.vault_root)
+        vector_status = search_service.vector_status()
         raw_bytes = self._raw_memory_bytes()
         memory = {
             "raw_bytes": raw_bytes,
@@ -1748,6 +2119,12 @@ class VaultLearningManager:
                 "search_index_total": len(self._manifest.get("search_index", {})),
                 "dirty_pages": len(self._manifest.get("dirty_pages", [])),
                 "queued_search_results": len([item for item in queue if str(item.get("status") or "") == "queued"]),
+                "queued_clips": len([item for item in queue if str(item.get("source_tool") or "") == "browser_clipper" and str(item.get("status") or "") == "queued"]),
+                "saved_outputs_total": len([item for item in self._manifest.get("sources", {}).values() if str(item.get("source") or "") == "explicit_save"]),
+                "clip_sources_total": len([item for item in self._manifest.get("sources", {}).values() if str(item.get("source_tool") or "") == "browser_clipper"]),
+                "vector_index_enabled": bool(vector_status.get("enabled")),
+                "vector_index_chunks": int(vector_status.get("chunk_count") or 0),
+                "vector_index_built_at": vector_status.get("built_at"),
                 "last_compile_at": self._manifest.get("last_compile_at"),
                 "last_lint_at": self._manifest.get("last_lint_at"),
             },

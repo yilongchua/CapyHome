@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.community.knowledge_vault_search import tool as vault_tool_module
 from src.config.app_config import AppConfig, set_app_config
 from src.config.control_plane_config import (
     ApprovalsConfig,
@@ -498,6 +500,87 @@ def test_vault_pipeline_artifacts_and_api(
     search_response = control_plane_client.get("/api/vault/search?q=maritime")
     assert search_response.status_code == 200
     assert search_response.json()["total"] >= 1
+
+
+def test_vault_tool_and_api_search_share_ranked_results(
+    control_plane_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = get_control_plane_service()
+    manager = service._default_vault_manager()
+    compiled_sources = manager.compiled_sources_dir
+
+    (compiled_sources / "shipping-rates.md").write_text(
+        "---\n"
+        "title: \"Shipping Rates Overview\"\n"
+        "tags: [\"shipping\", \"rates\"]\n"
+        "---\n\n"
+        "# Shipping Rates Overview\n\n"
+        "Shipping rates surged across major freight lanes.\n",
+        encoding="utf-8",
+    )
+    (compiled_sources / "port-logistics.md").write_text(
+        "---\n"
+        "title: \"Port Logistics Notes\"\n"
+        "tags: [\"ports\"]\n"
+        "---\n\n"
+        "# Port Logistics Notes\n\n"
+        "Port logistics updates mention shipping in passing.\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(vault_tool_module, "_searcher", None, raising=False)
+
+    api_response = control_plane_client.get("/api/vault/search?q=shipping rates&limit=2")
+    assert api_response.status_code == 200
+    api_payload = api_response.json()
+
+    raw_tool_payload = vault_tool_module.query_knowledge_vault_tool.invoke({"query": "shipping rates", "limit": 2})
+    tool_payload = json.loads(raw_tool_payload)
+
+    assert tool_payload["ok"] is True
+    assert [item["title"] for item in api_payload["items"]] == [item["title"] for item in tool_payload["results"]]
+    assert [item["path"] for item in api_payload["items"]] == [item["path"] for item in tool_payload["results"]]
+
+
+def test_vault_clip_save_and_graph_api(control_plane_client: TestClient):
+    clip_response = control_plane_client.post(
+        "/api/vault/clip",
+        json={
+            "url": "https://example.com/clipped-article",
+            "title": "Clipped Article",
+            "markdown": "# Clipped Article\n\nThis clipped page discusses local cached research workflows.",
+            "topic": "cached research",
+        },
+    )
+    assert clip_response.status_code == 200
+    assert clip_response.json()["status"] == "queued"
+    assert int(clip_response.json()["appended_count"] or 0) == 1
+
+    save_response = control_plane_client.post(
+        "/api/vault/save",
+        json={
+            "title": "Cached Research Summary",
+            "content": "This saved note explains how repeated searches can reuse prior evidence.",
+            "topic": "cached research",
+        },
+    )
+    assert save_response.status_code == 200
+    save_payload = save_response.json()
+    assert save_payload["status"] in {"ingested", "skipped_unchanged"}
+    assert save_payload["source_id"]
+
+    status_response = control_plane_client.get("/api/vault/status")
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert int(status_payload["counts"]["queued_clips"]) >= 1
+    assert "vector_index_chunks" in status_payload["counts"]
+
+    graph_response = control_plane_client.get("/api/vault/graph?limit=50")
+    assert graph_response.status_code == 200
+    graph_payload = graph_response.json()
+    assert graph_payload["counts"]["nodes"] >= 1
+    assert isinstance(graph_payload["nodes"], list)
 
 
 def test_start_integration_service_success(

@@ -28,6 +28,32 @@ class VaultSearchResponse(BaseModel):
     items: list[VaultSearchItem] = Field(default_factory=list)
 
 
+class VaultClipRequest(BaseModel):
+    url: str = Field(..., min_length=1)
+    title: str = ""
+    markdown: str = Field(..., min_length=1)
+    topic: str = ""
+    topic_tags: list[str] = Field(default_factory=list)
+
+
+class VaultSaveRequest(BaseModel):
+    title: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1)
+    topic: str = ""
+    topic_tags: list[str] = Field(default_factory=list)
+    source_url: str = ""
+    source_thread_id: str = ""
+
+
+class VaultWriteResponse(BaseModel):
+    status: str
+    source_id: str | None = None
+    queue_path: str | None = None
+    appended_count: int | None = None
+    compiled_path: str | None = None
+    raw_path: str | None = None
+
+
 class VaultStatusResponse(BaseModel):
     summary: dict[str, Any] = Field(default_factory=dict)
     counts: dict[str, Any] = Field(default_factory=dict)
@@ -75,6 +101,29 @@ class VaultSufficiencyResponse(BaseModel):
     progress: dict[str, Any] = Field(default_factory=dict)
 
 
+class VaultGraphNode(BaseModel):
+    id: str
+    label: str
+    kind: str
+    path: str
+    tags: list[str] = Field(default_factory=list)
+    degree: int = 0
+
+
+class VaultGraphEdge(BaseModel):
+    source: str
+    target: str
+    type: str
+
+
+class VaultGraphResponse(BaseModel):
+    generated_at: str
+    counts: dict[str, Any] = Field(default_factory=dict)
+    nodes: list[VaultGraphNode] = Field(default_factory=list)
+    edges: list[VaultGraphEdge] = Field(default_factory=list)
+    highlights: dict[str, Any] = Field(default_factory=dict)
+
+
 @router.get("/status", response_model=VaultStatusResponse)
 async def get_vault_status() -> VaultStatusResponse:
     service = get_control_plane_service()
@@ -90,6 +139,39 @@ async def search_vault(
     service = get_control_plane_service()
     payload = service.search_vault(query=q, limit=limit)
     return VaultSearchResponse.model_validate(payload)
+
+
+@router.post("/clip", response_model=VaultWriteResponse)
+async def clip_to_vault(request: VaultClipRequest) -> VaultWriteResponse:
+    service = get_control_plane_service()
+    payload = service.clip_to_vault(
+        url=request.url,
+        title=request.title,
+        markdown=request.markdown,
+        topic=request.topic,
+        topic_tags=request.topic_tags,
+    )
+    return VaultWriteResponse.model_validate(
+        {
+            "status": "queued",
+            "queue_path": payload.get("queue_path"),
+            "appended_count": payload.get("appended_count"),
+        }
+    )
+
+
+@router.post("/save", response_model=VaultWriteResponse)
+async def save_to_vault(request: VaultSaveRequest) -> VaultWriteResponse:
+    service = get_control_plane_service()
+    payload = service.save_to_vault(
+        title=request.title,
+        content=request.content,
+        topic=request.topic,
+        topic_tags=request.topic_tags,
+        source_url=request.source_url,
+        source_thread_id=request.source_thread_id,
+    )
+    return VaultWriteResponse.model_validate(payload)
 
 
 @router.get("/sources/{source_id}")
@@ -108,6 +190,13 @@ async def list_vault_action_items(
     service = get_control_plane_service()
     payload = service.list_vault_action_items(limit=limit)
     return VaultActionItemsResponse.model_validate(payload)
+
+
+@router.get("/graph", response_model=VaultGraphResponse)
+async def get_vault_graph(limit: int = Query(200, ge=1, le=1000)) -> VaultGraphResponse:
+    service = get_control_plane_service()
+    payload = service.get_vault_graph(limit=limit)
+    return VaultGraphResponse.model_validate(payload)
 
 
 @router.post("/sufficiency/evaluate", response_model=VaultSufficiencyResponse)

@@ -131,5 +131,21 @@ class KnowledgeVaultConfig(BaseModel):
         le=50000,
         description="Maximum queue entries retained before older terminal records are trimmed",
     )
+    vector_search_enabled: bool = Field(default=True, description="Enable local vector indexing and hybrid vault search")
+    vector_backend: str = Field(
+        default="openai_compatible",
+        description="Vector backend implementation for vault search (`openai_compatible` preferred, `hash` fallback)",
+    )
+    vector_embedding_model: str = Field(
+        default="",
+        description="Optional embedding model name for openai-compatible embedding endpoint (defaults to first configured model)",
+    )
+    vector_dimensions: int = Field(default=256, ge=32, le=4096, description="Embedding dimensions for local hashed vectors")
+    vector_chunk_chars: int = Field(default=1200, ge=200, le=20000, description="Approximate chunk size for compiled page vector indexing")
+    vector_chunk_overlap_chars: int = Field(default=200, ge=0, le=5000, description="Chunk overlap used when splitting compiled pages")
+    hybrid_rrf_k: int = Field(default=60, ge=1, le=500, description="Reciprocal-rank fusion constant for hybrid search")
+    cot_ingest_enabled: bool = Field(default=True, description="Enable two-step source analysis and generation during ingest")
+    cot_min_chars: int = Field(default=1200, ge=0, le=200000, description="Minimum source length before invoking the CoT ingest flow")
+    cot_model: str = Field(default="", description="Optional explicit model name for knowledge vault analysis and generation")
     lightrag: LightRAGConfig = Field(default_factory=LightRAGConfig)
     model_config = ConfigDict(extra="allow")

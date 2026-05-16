@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Knowledge Vault Clipper</title>
+    <style>
+      body {
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        margin: 0;
+        padding: 14px;
+        width: 320px;
+        background: #f7f4ed;
+        color: #1f2937;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+      label {
+        display: block;
+        margin: 10px 0 4px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      input, textarea, button {
+        width: 100%;
+        box-sizing: border-box;
+        border-radius: 10px;
+        border: 1px solid #d6d3d1;
+        padding: 10px 12px;
+        font: inherit;
+      }
+      textarea {
+        min-height: 88px;
+        resize: vertical;
+      }
+      button {
+        margin-top: 12px;
+        border: none;
+        background: #0f766e;
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .hint, #status {
+        margin-top: 8px;
+        font-size: 12px;
+      }
+      .hint {
+        color: #57534e;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Save To Vault</h1>
+    <label for="apiBase">API Base</label>
+    <input id="apiBase" value="http://127.0.0.1:8001" />
+    <label for="topic">Topic Hint</label>
+    <input id="topic" placeholder="optional topic" />
+    <label for="notes">Extra Notes</label>
+    <textarea id="notes" placeholder="optional context to prepend"></textarea>
+    <button id="clipButton">Clip Current Page</button>
+    <div id="status" class="hint"></div>
+    <div class="hint">Selection is preferred. Otherwise the extension clips the visible article text.</div>
+    <script src="popup.js"></script>
+  </body>
+  </html>

@@ -24,10 +24,13 @@ import type {
   SelfImproverDraftReport,
   StartupJob,
   VaultSearchResponse,
+  VaultSaveRequest,
   VaultActionItemsResponse,
+  VaultGraphResponse,
   VaultSufficiencyRequest,
   VaultSufficiencyResponse,
   VaultStatusResponse,
+  VaultWriteResponse,
 } from "./types";
 
 async function parseError(response: Response, fallback: string) {
@@ -221,6 +224,28 @@ export async function getVaultActionItems(limit = 100): Promise<VaultActionItems
     await parseError(response, `Failed to load vault action items: ${response.statusText}`);
   }
   return response.json() as Promise<VaultActionItemsResponse>;
+}
+
+export async function saveToVault(request: VaultSaveRequest): Promise<VaultWriteResponse> {
+  const response = await fetch(`${getBackendBaseURL()}/api/vault/save`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    await parseError(response, `Failed to save to vault: ${response.statusText}`);
+  }
+  return response.json() as Promise<VaultWriteResponse>;
+}
+
+export async function getVaultGraph(limit = 200): Promise<VaultGraphResponse> {
+  const response = await fetch(
+    `${getBackendBaseURL()}/api/vault/graph?limit=${Math.max(1, Math.min(1000, limit))}`,
+  );
+  if (!response.ok) {
+    await parseError(response, `Failed to load vault graph: ${response.statusText}`);
+  }
+  return response.json() as Promise<VaultGraphResponse>;
 }
 
 export async function evaluateVaultSufficiency(
