@@ -15,6 +15,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.config import get_app_config, get_paths
+from src.config.loop_detection_config import get_loop_detection_config
 from src.control_plane.prompts.vault_analyze import ANALYZE_SOURCE_PROMPT
 from src.control_plane.prompts.vault_generate import GENERATE_PAGE_PROMPT
 from src.control_plane.services.unified_vault_search import UnifiedVaultSearchService
@@ -307,6 +308,15 @@ class VaultLearningManager:
         cooldown_hours: int | None = None,
         retry_budget: int | None = None,
     ) -> dict[str, Any]:
+        if not get_loop_detection_config().enabled:
+            return {
+                "allowed": True,
+                "reason": "disabled",
+                "fingerprint": "",
+                "cooldown_hours": 0,
+                "retry_budget": 0,
+            }
+
         objective = self._ensure_objective(objective_id=objective_id, topic=topic)
         loop_guard = self._manifest.get("loop_guard", {})
         eff_cooldown = max(1, int(cooldown_hours or loop_guard.get("cooldown_hours") or 24))

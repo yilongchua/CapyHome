@@ -83,7 +83,11 @@ export function PhaseProgress({
       </div>
       <div className="space-y-0">
         {results.map((result, i) => (
-          <PhaseRow key={result.todo_id} result={result} isLast={i === results.length - 1} />
+          <PhaseRow
+            key={`${result.todo_id ?? "todo"}-${i}`}
+            result={result}
+            isLast={i === results.length - 1}
+          />
         ))}
       </div>
     </div>

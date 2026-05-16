@@ -371,7 +371,7 @@ export function useThreadStream({
 
   const queryClient = useQueryClient();
   const updateSubtask = useUpdateSubtask();
-  const { appendLiveEvents: appendTraceLiveEvents, setCurrentRunId } = useExecutionTraceContext();
+  const { appendLiveEvents: appendTraceLiveEvents, setCurrentRunId, clear: clearTraceLiveEvents } = useExecutionTraceContext();
   const {
     appendLiveEvent: appendActivityLiveEvent,
     clear: clearActivityLiveEvents,
@@ -383,6 +383,16 @@ export function useThreadStream({
   const flushTimerRef = useRef<number | null>(null);
   const fetchStateHistory = true;
   const thinkingSignalEmittedRef = useRef(false);
+
+  useEffect(() => {
+    // Live activity/trace buffers are global provider state; clear them when
+    // switching threads so one chat never shows another chat's running signals.
+    clearActivityLiveEvents();
+    clearTraceLiveEvents();
+    currentRunIdRef.current = null;
+    dispatchThinking({ type: "reset" });
+    thinkingSignalEmittedRef.current = false;
+  }, [clearActivityLiveEvents, clearTraceLiveEvents, threadId]);
 
   // Accumulates streamed thinking/reasoning tokens for the current run.
   // Reset to "" when a new message is submitted. Exposed as liveThinkingContent.

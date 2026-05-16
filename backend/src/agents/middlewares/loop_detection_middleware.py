@@ -40,6 +40,8 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
+from src.config.loop_detection_config import get_loop_detection_config
+
 logger = logging.getLogger(__name__)
 
 _WORKFLOW_CACHE_TTL = 30.0  # seconds between skill reloads for workflow check
@@ -391,6 +393,9 @@ class LoopDetectionMiddleware(AgentMiddleware[AgentState]):
     # ------------------------------------------------------------------
 
     def _apply(self, state: AgentState, runtime: Runtime) -> dict | None:
+        if not get_loop_detection_config().enabled:
+            return None
+
         warning, hard_stop = self._track_and_check(state, runtime)
 
         if hard_stop:
