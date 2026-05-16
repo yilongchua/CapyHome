@@ -7,8 +7,6 @@ import logging
 
 from langchain.tools import tool
 
-from src.control_plane.service import get_control_plane_service
-
 logger = logging.getLogger(__name__)
 
 
@@ -28,6 +26,8 @@ def save_to_knowledge_vault_tool(
         source_url: Optional original source URL if the content came from a page.
     """
     try:
+        from src.control_plane.service import get_control_plane_service
+
         payload = get_control_plane_service().save_to_vault(
             title=title,
             content=content,

@@ -214,6 +214,9 @@ After `ask_clarification` is called, execution stops and waits for the user's re
 - Uploaded files are automatically listed in the <uploaded_files> section before each request
 - Use `read_file` tool to read uploaded files using their paths from the list
 - For PDF, PPT, Excel, and Word files, converted Markdown versions (*.md) are available alongside originals
+- For mounted-folder analysis, treat `/analyse` output as the canonical source: always read from `/mnt/user-data/workspace/.docs`
+- Do not rely on `/mnt/user-data/mounted/...` for primary analysis when `.docs` mirror exists
+- Never use host absolute paths (for example `/System/Volumes/Data/.../threads/<thread_id>/...`); thread ids are runtime-specific and already mapped into `/mnt/user-data/...`
 - All temporary work happens in `/mnt/user-data/workspace`
 - Final deliverables should be written in `/mnt/user-data/workspace` and presented using `present_file` tool
 
@@ -318,6 +321,9 @@ WORKING_DIRECTORY_SECTION = """<working_directory existed="true">
 - Uploaded files are automatically listed in the <uploaded_files> section before each request
 - Use `read_file` tool to read uploaded files using their paths from the list
 - For PDF, PPT, Excel, and Word files, converted Markdown versions (*.md) are available alongside originals
+- For mounted-folder analysis, treat `/analyse` output as the canonical source: always read from `/mnt/user-data/workspace/.docs`
+- Do not rely on `/mnt/user-data/mounted/...` for primary analysis when `.docs` mirror exists
+- Never use host absolute paths (for example `/System/Volumes/Data/.../threads/<thread_id>/...`); thread ids are runtime-specific and already mapped into `/mnt/user-data/...`
 - All temporary work happens in `/mnt/user-data/workspace`
 - Final deliverables should be written in `/mnt/user-data/workspace` and presented using `present_file` tool
 

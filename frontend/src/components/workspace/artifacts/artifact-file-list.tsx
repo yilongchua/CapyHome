@@ -221,15 +221,14 @@ export function ArtifactFileList({
   const mountedFolderActionDisabled =
     isPicking || saveMountedFolder.isPending || clearMountedFolder.isPending;
 
-  const renderRow = useCallback(
+  const renderRowContent = useCallback(
     (file: string, source: "created" | "mounted") => {
       const metadata = source === "mounted"
         ? `${getFileExtensionDisplayName(file)} file • ${mountedFolder ?? "/mnt/user-data/mounted"}`
         : `${getFileExtensionDisplayName(file)} file • /mnt/user-data/workspace`;
 
       return (
-        <li
-          key={file}
+        <div
           className="hover:bg-muted/50 grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-1.5"
           onClick={() => handleClick(file)}
         >
@@ -271,7 +270,7 @@ export function ArtifactFileList({
               </Button>
             </a>
           </div>
-        </li>
+        </div>
       );
     },
     [handleClick, handleInstallSkill, installingFile, mountedFolder, t, threadId],
@@ -281,16 +280,16 @@ export function ArtifactFileList({
     (node: FileTreeNode, source: "created" | "mounted", depth = 0): React.ReactNode => {
       if (node.kind === "file") {
         return (
-          <li key={node.fullPath} className={depth > 0 ? "ml-0" : ""}>
+          <div key={node.fullPath} className={depth > 0 ? "ml-0" : ""}>
             <div style={{ paddingLeft: `${depth * 14}px` }}>
-              {renderRow(node.fullPath, source)}
+              {renderRowContent(node.fullPath, source)}
             </div>
-          </li>
+          </div>
         );
       }
       const isOpen = expandedPaths[node.fullPath] ?? depth <= 1;
       return (
-        <li key={node.fullPath}>
+        <div key={node.fullPath}>
           <button
             type="button"
             className="hover:bg-muted/50 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left"
@@ -309,12 +308,12 @@ export function ArtifactFileList({
             </div>
           </button>
           {isOpen && node.children.length > 0 ? (
-            <ul className="space-y-0.5">{node.children.map((child) => renderTree(child, source, depth + 1))}</ul>
+            <div className="space-y-0.5">{node.children.map((child) => renderTree(child, source, depth + 1))}</div>
           ) : null}
-        </li>
+        </div>
       );
     },
-    [expandedPaths, renderRow],
+    [expandedPaths, renderRowContent],
   );
 
   return (
@@ -325,9 +324,9 @@ export function ArtifactFileList({
           <span className="font-medium uppercase tracking-wide">Created Files</span>
         </div>
         {createdFiles.length > 0 ? (
-          <ul className="space-y-0.5 rounded-md border p-1">
+          <div className="space-y-0.5 rounded-md border p-1">
             {renderTree(createdTree, "created")}
-          </ul>
+          </div>
         ) : (
           <div className="text-muted-foreground rounded-md border px-3 py-2 text-xs">
             No files found in /mnt/user-data/workspace.
@@ -373,9 +372,9 @@ export function ArtifactFileList({
             )}
           </div>
           {mountedFiles.length > 0 ? (
-            <ul className="space-y-0.5 rounded-md border p-1">
+            <div className="space-y-0.5 rounded-md border p-1">
               {renderTree(mountedTree, "mounted")}
-            </ul>
+            </div>
           ) : (
             <div className="text-muted-foreground rounded-md border px-3 py-2 text-xs">
               No files found in mounted folder.

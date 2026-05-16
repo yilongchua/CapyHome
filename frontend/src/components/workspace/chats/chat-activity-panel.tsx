@@ -124,8 +124,45 @@ export function ChatActivityPanel({
   const hasInProgressPhase = (effectivePhaseExecution?.phase_results ?? []).some(
     (phase) => phase.status === "in_progress",
   );
+  const hasRecentLiveRunSignal = useMemo(() => {
+    const now = Date.now() / 1000;
+    return liveEvents.some((event) => {
+      const kind = (event.kind ?? "").toLowerCase();
+      const isStartLike =
+        kind.includes("start") ||
+        kind.includes("running") ||
+        kind.includes("work_");
+      const isEndLike =
+        kind.includes("completed") ||
+        kind.includes("failed") ||
+        kind.includes("timed_out") ||
+        kind.includes("cancel");
+      const recent = now - event.timestamp < 120;
+      return isStartLike && !isEndLike && recent;
+    });
+  }, [liveEvents]);
+
   const runState: "run" | "idle" =
-    thread.isLoading && hasInProgressPhase ? "run" : "idle";
+    thread.isLoading && hasInProgressPhase && hasRecentLiveRunSignal ? "run" : "idle";
+
+  const displayPhaseExecution = useMemo(() => {
+    if (!effectivePhaseExecution) {
+      return effectivePhaseExecution;
+    }
+    if (runState === "run") {
+      return effectivePhaseExecution;
+    }
+    // If no live run signal exists, avoid showing stale in-progress rows from
+    // persisted thread snapshots as currently running.
+    return {
+      ...effectivePhaseExecution,
+      phase_results: (effectivePhaseExecution.phase_results ?? []).map((phase) => (
+        phase.status === "in_progress"
+          ? { ...phase, status: "pending" as const }
+          : phase
+      )),
+    };
+  }, [effectivePhaseExecution, runState]);
 
   const orderedTimeline = useMemo(
     () => [...timeline].sort((a, b) => a.timestamp !== b.timestamp ? a.timestamp - b.timestamp : a.order - b.order),
@@ -172,7 +209,7 @@ export function ChatActivityPanel({
     <div className={cn("flex h-full flex-col overflow-hidden", className)}>
       <div className="flex-1 overflow-y-auto">
         <div className="space-y-0 p-3">
-          <PhaseProgress phaseExecution={effectivePhaseExecution} runState={runState} />
+          <PhaseProgress phaseExecution={displayPhaseExecution} runState={runState} />
           <TodoList
             className="my-2"
             todos={todos}
