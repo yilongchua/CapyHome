@@ -24,6 +24,16 @@ logger = logging.getLogger(__name__)
 _HANDOFF_DIR = ".handoff"
 _MAX_RECENT_MESSAGES = 12
 _MAX_RECENT_USER_MESSAGES = 8
+_ANALYSE_DIR = ".analyse"
+_ANALYSE_FILE_NAMES = (
+    "index.md",
+    "repo_overview.md",
+    "repo_overview.previous.md",
+    "failed_files.md",
+    "created_files.md",
+    "directory_tree.md",
+    "file_catalog.md",
+)
 
 
 def _langgraph_url() -> str:
@@ -237,6 +247,22 @@ def _collect_runtime_artifacts(state: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(artifacts))
 
 
+def _collect_analysis_artifacts(workspace_root: Path, thread_data: dict[str, str]) -> list[str]:
+    analyse_root = workspace_root / _ANALYSE_DIR
+    if not analyse_root.exists() or not analyse_root.is_dir():
+        return []
+
+    paths: list[str] = []
+    for name in _ANALYSE_FILE_NAMES:
+        candidate = analyse_root / name
+        if not candidate.exists() or not candidate.is_file():
+            continue
+        virtual = to_virtual_path(str(candidate), thread_data)
+        if virtual:
+            paths.append(virtual)
+    return paths
+
+
 def _current_status_summary(plan: dict[str, Any], nodes: list[dict[str, Any]], artifacts: list[str]) -> str:
     status = str(plan.get("status") or "draft").strip() or "draft"
     completed = sum(1 for node in nodes if str(node.get("status") or "").strip() == "completed")
@@ -297,7 +323,14 @@ def _read_plan_content(state: dict[str, Any], thread_data: dict[str, str]) -> st
     return _render_plan_for_handoff(state, thread_data)
 
 
-def _build_project_status(state: dict[str, Any], plan: dict[str, Any], nodes: list[dict[str, Any]], artifacts: list[str], runtime_artifacts: list[str]) -> str:
+def _build_project_status(
+    state: dict[str, Any],
+    plan: dict[str, Any],
+    nodes: list[dict[str, Any]],
+    artifacts: list[str],
+    runtime_artifacts: list[str],
+    analysis_artifacts: list[str],
+) -> str:
     completed = [node for node in nodes if str(node.get("status") or "") == "completed"]
     pending = [node for node in nodes if str(node.get("status") or "") != "completed"]
     next_step = pending[0]["content"] if pending else "Review the copied workspace and continue from the completed plan."
@@ -309,6 +342,7 @@ def _build_project_status(state: dict[str, Any], plan: dict[str, Any], nodes: li
         f"- Todos completed: {len(completed)}/{len(nodes)}",
         f"- Workspace artifacts tracked: {len(artifacts)}",
         f"- Runtime artifacts tracked: {len(runtime_artifacts)}",
+        f"- Analysis artifacts available: {len(analysis_artifacts)}",
         "",
         "## Done",
     ]
@@ -326,6 +360,11 @@ def _build_project_status(state: dict[str, Any], plan: dict[str, Any], nodes: li
         lines.extend(f"- `{artifact}`" for artifact in artifacts[:20])
     else:
         lines.append("- No tracked workspace files yet.")
+    lines.extend(["", "## Analysis Outputs"])
+    if analysis_artifacts:
+        lines.extend(f"- `{artifact}`" for artifact in analysis_artifacts[:20])
+    else:
+        lines.append("- No `.analyse` outputs were found in this workspace snapshot.")
     lines.extend(["", "## Next", f"- {next_step}", ""])
     return "\n".join(lines)
 
@@ -406,7 +445,12 @@ def _build_memory(state: dict[str, Any], plan: dict[str, Any], recent_user_messa
     return "\n".join(lines)
 
 
-def _build_artifacts(artifacts: list[str], runtime_artifacts: list[str], plan_virtual_path: str) -> str:
+def _build_artifacts(
+    artifacts: list[str],
+    runtime_artifacts: list[str],
+    analysis_artifacts: list[str],
+    plan_virtual_path: str,
+) -> str:
     lines = [
         "# Artifacts",
         "",
@@ -424,6 +468,11 @@ def _build_artifacts(artifacts: list[str], runtime_artifacts: list[str], plan_vi
         lines.extend(f"- `{artifact}`" for artifact in runtime_artifacts[:40])
     else:
         lines.append("- No runtime artifacts recorded.")
+    lines.extend(["", "## Analysis Artifacts"])
+    if analysis_artifacts:
+        lines.extend(f"- `{artifact}`" for artifact in analysis_artifacts[:40])
+    else:
+        lines.append("- No `.analyse` artifacts recorded.")
     lines.append("")
     return "\n".join(lines)
 
@@ -491,7 +540,22 @@ def _write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def _build_index(handoff_id: str, source_thread_id: str, new_thread_id: str) -> str:
+def _build_index(
+    handoff_id: str,
+    source_thread_id: str,
+    new_thread_id: str,
+    analysis_artifacts: list[str],
+) -> str:
+    analysis_lines = (
+        [
+            "## Analysis Companion",
+            "Read the derived `/mnt/user-data/workspace/.analyse` files when you need repo summaries, catalogs, or failure manifests.",
+            *[f"- `{artifact}`" for artifact in analysis_artifacts[:10]],
+            "",
+        ]
+        if analysis_artifacts
+        else []
+    )
     return "\n".join(
         [
             "# Handoff Package",
@@ -517,6 +581,7 @@ def _build_index(handoff_id: str, source_thread_id: str, new_thread_id: str) -> 
             "- [open_items.md](open_items.md)",
             "- [handoff_manifest.json](handoff_manifest.json)",
             "",
+            *analysis_lines,
         ]
     )
 
@@ -562,18 +627,31 @@ def _build_handoff_package(source_thread_id: str, new_thread_id: str, state_valu
     recent_user_messages = _recent_user_messages(normalized_messages)
     workspace_artifacts = _collect_workspace_artifacts(state_for_plan, thread_data)
     runtime_artifacts = _collect_runtime_artifacts(state_for_plan)
+    analysis_artifacts = _collect_analysis_artifacts(workspace_root, thread_data)
 
     plan_md = _read_plan_content(state_for_plan, thread_data)
     plan_virtual_path = f"/mnt/user-data/workspace/{_HANDOFF_DIR}/{handoff_id}/plan.md"
 
     files_to_write: dict[str, str] = {
-        "index.md": _build_index(handoff_id, source_thread_id, new_thread_id),
-        "project_status.md": _build_project_status(state_for_plan, plan, nodes, workspace_artifacts, runtime_artifacts),
+        "index.md": _build_index(handoff_id, source_thread_id, new_thread_id, analysis_artifacts),
+        "project_status.md": _build_project_status(
+            state_for_plan,
+            plan,
+            nodes,
+            workspace_artifacts,
+            runtime_artifacts,
+            analysis_artifacts,
+        ),
         "conversation_context.md": _build_conversation_context(state_for_plan, plan, recent_user_messages),
         "recent_messages.md": _build_recent_messages(recent_messages),
         "plan.md": plan_md,
         "memory.md": _build_memory(state_for_plan, plan, recent_user_messages),
-        "artifacts.md": _build_artifacts(workspace_artifacts, runtime_artifacts, plan_virtual_path),
+        "artifacts.md": _build_artifacts(
+            workspace_artifacts,
+            runtime_artifacts,
+            analysis_artifacts,
+            plan_virtual_path,
+        ),
         "open_items.md": _build_open_items(plan, nodes),
     }
 

@@ -216,8 +216,9 @@ const ChatBox: React.FC<{
         </ResizablePanel>
         <ResizableHandle
           id="workspace-chat-panel-separator"
+          withHandle
           className={cn(
-            "opacity-33 hover:opacity-100",
+            "w-2 bg-muted/85 opacity-100 transition-colors hover:bg-muted",
             isPanelCollapsed && "pointer-events-none opacity-0",
           )}
         />
@@ -308,7 +309,11 @@ const ChatBox: React.FC<{
                       )}
                     </div>
                   </ResizablePanel>
-                  <ResizableHandle id="workspace-directory-panel-separator" className="mx-1 opacity-33 hover:opacity-100" />
+                  <ResizableHandle
+                    id="workspace-directory-panel-separator"
+                    withHandle
+                    className="mx-1 w-2 bg-muted/85 opacity-100 transition-colors hover:bg-muted"
+                  />
                   <ResizablePanel defaultSize={58} minSize={24} id="workspace-directory-preview">
                     <div className="size-full overflow-y-auto rounded-md border">
                       {selectedFile ? (

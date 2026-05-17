@@ -282,6 +282,26 @@ function isRetryableSubmitConflictError(error: unknown): boolean {
   );
 }
 
+function isBenignStopAbortError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return true;
+  }
+
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : JSON.stringify(error);
+  const normalized = message.toLowerCase();
+
+  return (
+    normalized.includes("aborterror") ||
+    normalized.includes("aborted") ||
+    normalized.includes("bodystreambuffer was aborted")
+  );
+}
+
 export function useThreadStream({
   threadId,
   context,
@@ -304,6 +324,7 @@ export function useThreadStream({
   // Ref to track current thread ID across async callbacks without causing re-renders,
   // and to allow access to the current thread id in onUpdateEvent
   const threadIdRef = useRef<string | null>(threadId ?? null);
+  const stopInProgressRef = useRef(false);
   const startedRef = useRef(false);
   const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
   const queueRef = useRef<QueuedMessage[]>([]);
@@ -1446,7 +1467,24 @@ export function useThreadStream({
   );
 
   const stop = useCallback(async () => {
-    await thread.stop();
+    if (stopInProgressRef.current) {
+      toast.message("Run is already stopping.");
+      return;
+    }
+
+    stopInProgressRef.current = true;
+    try {
+      await thread.stop();
+      toast.message("Run stopped.");
+    } catch (error) {
+      if (isBenignStopAbortError(error)) {
+        toast.message("Run stopped.");
+        return;
+      }
+      throw error;
+    } finally {
+      stopInProgressRef.current = false;
+    }
   }, [thread]);
 
   // Merge thread with optimistic messages for display

@@ -86,10 +86,10 @@ def test_analyse_enqueues_durable_refresh_and_overwrites_repo_overview(
     assert status_payload["status"] == "succeeded"
     assert status_payload["attempt_count"] >= 1
 
-    docs_root = paths.sandbox_work_dir(thread_id) / ".docs"
-    assert (docs_root / "repo_overview.md").exists()
-    assert (docs_root / "repo_overview.previous.md").exists()
-    assert "Deep Repo Overview" in (docs_root / "repo_overview.md").read_text(encoding="utf-8")
+    analyse_root = paths.sandbox_work_dir(thread_id) / ".analyse"
+    assert (analyse_root / "repo_overview.md").exists()
+    assert (analyse_root / "repo_overview.previous.md").exists()
+    assert "Deep Repo Overview" in (analyse_root / "repo_overview.md").read_text(encoding="utf-8")
 
     store = json.loads((paths.sandbox_user_data_dir(thread_id) / "repo_overview_refresh_jobs.json").read_text(encoding="utf-8"))
     assert store["jobs"][-1]["job_id"] == job_id
@@ -131,9 +131,13 @@ def test_publishdocs_blocks_stale_refresh_unless_forced(client: tuple[TestClient
     _mount_thread(test_client, thread_id, mounted_dir)
 
     docs_root = paths.sandbox_work_dir(thread_id) / ".docs"
+    analyse_root = paths.sandbox_work_dir(thread_id) / ".analyse"
     docs_root.mkdir(parents=True, exist_ok=True)
-    (docs_root / "index.md").write_text("# index\n", encoding="utf-8")
-    (docs_root / "repo_overview.md").write_text("# deterministic\n", encoding="utf-8")
+    analyse_root.mkdir(parents=True, exist_ok=True)
+    (docs_root / "src").mkdir(parents=True, exist_ok=True)
+    (docs_root / "src" / "app.py.md").write_text("# src/app.py\n", encoding="utf-8")
+    (analyse_root / "index.md").write_text("# index\n", encoding="utf-8")
+    (analyse_root / "repo_overview.md").write_text("# deterministic\n", encoding="utf-8")
 
     stale_job = dreamy._RepoOverviewRefreshJob(
         job_id="job-stale",
@@ -154,4 +158,4 @@ def test_publishdocs_blocks_stale_refresh_unless_forced(client: tuple[TestClient
 
     forced = test_client.post(f"/api/threads/{thread_id}/publishdocs?force=true")
     assert forced.status_code == 200
-    assert forced.json()["copied_files"] >= 2
+    assert forced.json()["copied_files"] >= 1
