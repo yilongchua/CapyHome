@@ -57,6 +57,9 @@ def test_create_thread_handoff_generates_package_and_copies_workspace(monkeypatc
     source_workspace = paths.sandbox_work_dir(source_thread_id)
     (source_workspace / "src").mkdir(parents=True, exist_ok=True)
     (source_workspace / "src" / "app.py").write_text("print('hello')\n", encoding="utf-8")
+    (source_workspace / ".analyse").mkdir(parents=True, exist_ok=True)
+    (source_workspace / ".analyse" / "index.md").write_text("# analysis index\n", encoding="utf-8")
+    (source_workspace / ".analyse" / "repo_overview.md").write_text("# repo overview\n", encoding="utf-8")
     (source_workspace / ".runtime").mkdir(parents=True, exist_ok=True)
     (source_workspace / ".runtime" / "report.md").write_text("runtime report\n", encoding="utf-8")
     (source_workspace / ".handoff" / "old-package").mkdir(parents=True, exist_ok=True)
@@ -103,6 +106,10 @@ def test_create_thread_handoff_generates_package_and_copies_workspace(monkeypatc
     assert (source_handoff_root / "index.md").exists()
     assert (source_handoff_root / "plan.md").exists()
     assert (source_handoff_root / "workspace_manifest.md").exists()
+    assert "/mnt/user-data/workspace/.analyse/index.md" in (source_handoff_root / "index.md").read_text(encoding="utf-8")
+    artifacts_md = (source_handoff_root / "artifacts.md").read_text(encoding="utf-8")
+    assert "/mnt/user-data/workspace/.analyse/index.md" in artifacts_md
+    assert "/mnt/user-data/workspace/.analyse/repo_overview.md" in artifacts_md
 
     manifest = json.loads((source_handoff_root / "handoff_manifest.json").read_text(encoding="utf-8"))
     assert manifest["source_thread_id"] == source_thread_id
@@ -111,6 +118,8 @@ def test_create_thread_handoff_generates_package_and_copies_workspace(monkeypatc
 
     dest_workspace = paths.sandbox_work_dir("thread-new-1")
     assert (dest_workspace / "src" / "app.py").read_text(encoding="utf-8") == "print('hello')\n"
+    assert (dest_workspace / ".analyse" / "index.md").read_text(encoding="utf-8") == "# analysis index\n"
+    assert (dest_workspace / ".analyse" / "repo_overview.md").read_text(encoding="utf-8") == "# repo overview\n"
     assert (dest_workspace / ".runtime" / "report.md").read_text(encoding="utf-8") == "runtime report\n"
     assert (dest_workspace / ".handoff" / handoff_dir_name / "index.md").exists()
     assert not (dest_workspace / ".handoff" / "old-package").exists()

@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 VIRTUAL_MOUNT_PATH = "/mnt/user-data/mounted"
 VIRTUAL_DOCS_MIRROR_PATH = "/mnt/user-data/workspace/.docs"
+VIRTUAL_ANALYSE_PATH = "/mnt/user-data/workspace/.analyse"
 
 
 class DreamyMountState(AgentState):
@@ -84,6 +85,7 @@ class DreamyMountMiddleware(AgentMiddleware[DreamyMountState]):
             "",
             f"important: A mirror of the mounted folder is located within {VIRTUAL_DOCS_MIRROR_PATH}",
             "inside contains all the markdown version of the mounted folder. always use this as search source of truth",
+            f"Derived analysis artifacts such as repo_overview.md, failed_files.md, and file_catalog.md are stored in {VIRTUAL_ANALYSE_PATH}",
             "",
             "",
             f"Use {VIRTUAL_MOUNT_PATH}/<filename> with read_file, write_file, str_replace, bash, and ls.",

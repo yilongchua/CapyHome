@@ -453,6 +453,10 @@ def _docs_root(thread_id: str) -> Path:
     return get_paths().sandbox_work_dir(thread_id).resolve() / ".docs"
 
 
+def _analyse_root(thread_id: str) -> Path:
+    return get_paths().sandbox_work_dir(thread_id).resolve() / ".analyse"
+
+
 def _to_virtual_workspace(path: Path, thread_id: str) -> str:
     workspace_dir = get_paths().sandbox_work_dir(thread_id).resolve()
     rel = path.resolve().relative_to(workspace_dir).as_posix()
@@ -476,15 +480,6 @@ def _summarize_markdown_corpus(docs_root: Path) -> dict[str, object]:
     high_signal_files: list[str] = []
 
     for p in sorted(docs_root.rglob("*.md")):
-        if p.name in {
-            "index.md",
-            "failed_files.md",
-            "created_files.md",
-            "file_catalog.md",
-            "directory_tree.md",
-            "repo_overview.md",
-        }:
-            continue
         docs.append(p)
         rel = p.relative_to(docs_root).as_posix()
         top = rel.split("/", 1)[0] if "/" in rel else "(root)"
@@ -561,11 +556,11 @@ def _read_text_if_exists(path: Path, *, max_chars: int = 80000) -> str:
         return ""
 
 
-def _build_repo_overview_refresh_prompt(source_root: Path, docs_root: Path) -> str:
-    index_text = _read_text_if_exists(docs_root / "index.md")
-    tree_text = _read_text_if_exists(docs_root / "directory_tree.md")
-    catalog_text = _read_text_if_exists(docs_root / "file_catalog.md", max_chars=120000)
-    failed_text = _read_text_if_exists(docs_root / "failed_files.md", max_chars=40000)
+def _build_repo_overview_refresh_prompt(source_root: Path, docs_root: Path, analyse_root: Path) -> str:
+    index_text = _read_text_if_exists(analyse_root / "index.md")
+    tree_text = _read_text_if_exists(analyse_root / "directory_tree.md")
+    catalog_text = _read_text_if_exists(analyse_root / "file_catalog.md", max_chars=120000)
+    failed_text = _read_text_if_exists(analyse_root / "failed_files.md", max_chars=40000)
     return "\n\n".join(
         [
             _REPO_OVERVIEW_PROMPT,
@@ -587,7 +582,7 @@ def _build_repo_overview_refresh_prompt(source_root: Path, docs_root: Path) -> s
     )
 
 
-async def _run_repo_overview_refresh_job(job_id: str, source_root: Path, docs_root: Path) -> None:
+async def _run_repo_overview_refresh_job(job_id: str, source_root: Path, docs_root: Path, analyse_root: Path) -> None:
     job = _REPO_OVERVIEW_JOBS.get(job_id)
     if job is None:
         logger.warning("Repo overview refresh job %s missing from in-memory cache; skipping run", job_id)
@@ -600,8 +595,10 @@ async def _run_repo_overview_refresh_job(job_id: str, source_root: Path, docs_ro
     try:
         if not docs_root.exists() or not docs_root.is_dir():
             raise RuntimeError("Docs mirror not found. Run /analyse first.")
-        if not (docs_root / "index.md").exists():
-            raise RuntimeError("Docs index not found. Run /analyse first.")
+        if not analyse_root.exists() or not analyse_root.is_dir():
+            raise RuntimeError("Analysis outputs not found. Run /analyse first.")
+        if not (analyse_root / "index.md").exists():
+            raise RuntimeError("Analysis index not found. Run /analyse first.")
 
         content_text = ""
         last_exc: Exception | None = None
@@ -609,7 +606,7 @@ async def _run_repo_overview_refresh_job(job_id: str, source_root: Path, docs_ro
             job.attempt_count = attempt
             _persist_job(job)
             try:
-                prompt = _build_repo_overview_refresh_prompt(source_root, docs_root)
+                prompt = _build_repo_overview_refresh_prompt(source_root, docs_root, analyse_root)
                 router = ModelRouter()
                 primary_model = router.resolve("planner")
                 configured_models = [m.name for m in get_app_config().models]
@@ -677,14 +674,15 @@ async def _run_repo_overview_refresh_job(job_id: str, source_root: Path, docs_ro
         if not content_text:
             raise RuntimeError(f"Repo overview refresh failed after retries: {last_exc}")
 
-        target = docs_root / "repo_overview.md"
-        backup = docs_root / "repo_overview.previous.md"
+        analyse_root.mkdir(parents=True, exist_ok=True)
+        target = analyse_root / "repo_overview.md"
+        backup = analyse_root / "repo_overview.previous.md"
         if target.exists():
             shutil.copy2(target, backup)
-        tmp = docs_root / f".repo_overview.{job_id}.tmp.md"
+        tmp = analyse_root / f".repo_overview.{job_id}.tmp.md"
         tmp.write_text(content_text + "\n", encoding="utf-8")
         tmp.replace(target)
-        job.output_virtual_path = f"/mnt/user-data/workspace/.docs/{target.name}"
+        job.output_virtual_path = f"/mnt/user-data/workspace/.analyse/{target.name}"
         job.status = "succeeded"
         job.error = None
     except Exception as exc:
@@ -704,6 +702,7 @@ async def _enqueue_repo_overview_refresh(
     thread_id: str,
     source_root: Path,
     docs_root: Path,
+    analyse_root: Path,
     *,
     trigger: str,
 ) -> "RepoOverviewRefreshStartResponse":
@@ -733,7 +732,7 @@ async def _enqueue_repo_overview_refresh(
     _REPO_OVERVIEW_JOBS[job_id] = job
     _REPO_OVERVIEW_JOB_BY_THREAD[thread_id] = job_id
     _persist_job(job)
-    task = asyncio.create_task(_run_repo_overview_refresh_job(job_id, source_root, docs_root))
+    task = asyncio.create_task(_run_repo_overview_refresh_job(job_id, source_root, docs_root, analyse_root))
     _REPO_OVERVIEW_TASKS[job_id] = task
     return RepoOverviewRefreshStartResponse(job_id=job_id, status=job.status, already_running=False, queued_at=job.created_at)
 
@@ -834,6 +833,7 @@ class _AnalyseArtifacts:
 class AnalyseStatusResponse(BaseModel):
     staged_available: bool
     docs_root_virtual_path: str
+    analyse_root_virtual_path: str | None = None
     index_virtual_path: str | None = None
     failed_manifest_virtual_path: str | None = None
 
@@ -869,11 +869,13 @@ class RepoOverviewRefreshStatusResponse(BaseModel):
 @router.get("/threads/{thread_id}/analyse/status", response_model=AnalyseStatusResponse)
 async def get_analyse_status(thread_id: str) -> AnalyseStatusResponse:
     docs_root = _docs_root(thread_id)
-    index_path = docs_root / "index.md"
-    failed_manifest = docs_root / "failed_files.md"
+    analyse_root = _analyse_root(thread_id)
+    index_path = analyse_root / "index.md"
+    failed_manifest = analyse_root / "failed_files.md"
     return AnalyseStatusResponse(
-        staged_available=docs_root.exists() and docs_root.is_dir() and index_path.exists(),
+        staged_available=docs_root.exists() and docs_root.is_dir() and analyse_root.exists() and analyse_root.is_dir() and index_path.exists(),
         docs_root_virtual_path="/mnt/user-data/workspace/.docs",
+        analyse_root_virtual_path="/mnt/user-data/workspace/.analyse",
         index_virtual_path=_to_virtual_workspace(index_path, thread_id) if index_path.exists() else None,
         failed_manifest_virtual_path=_to_virtual_workspace(failed_manifest, thread_id) if failed_manifest.exists() else None,
     )
@@ -898,13 +900,17 @@ async def start_repo_overview_refresh(thread_id: str) -> RepoOverviewRefreshStar
         raise HTTPException(status_code=400, detail="Mounted folder does not exist or is not a directory.")
 
     docs_root = _docs_root(thread_id)
-    if not docs_root.exists() or not docs_root.is_dir() or not (docs_root / "index.md").exists():
-        raise HTTPException(status_code=400, detail="Staged docs index not found. Run /analyse first.")
+    analyse_root = _analyse_root(thread_id)
+    if not docs_root.exists() or not docs_root.is_dir():
+        raise HTTPException(status_code=400, detail="Staged docs mirror not found. Run /analyse first.")
+    if not analyse_root.exists() or not analyse_root.is_dir() or not (analyse_root / "index.md").exists():
+        raise HTTPException(status_code=400, detail="Staged analysis index not found. Run /analyse first.")
 
     return await _enqueue_repo_overview_refresh(
         thread_id=thread_id,
         source_root=source_root,
         docs_root=docs_root,
+        analyse_root=analyse_root,
         trigger="manual",
     )
 
@@ -926,7 +932,9 @@ async def get_repo_overview_refresh_status(thread_id: str, job_id: str) -> RepoO
 
 def _run_analyse_sync(thread_id: str, source_root: Path) -> _AnalyseArtifacts:
     docs_root = _docs_root(thread_id)
+    analyse_root = _analyse_root(thread_id)
     docs_root.mkdir(parents=True, exist_ok=True)
+    analyse_root.mkdir(parents=True, exist_ok=True)
 
     generated_docs = 0
     skipped_non_text = 0
@@ -1003,7 +1011,7 @@ def _run_analyse_sync(thread_id: str, source_root: Path) -> _AnalyseArtifacts:
         except Exception as exc:
             failed_files.append({"path": rel.as_posix(), "reason": f"write-failed: {exc}"})
 
-    failed_manifest_path = docs_root / "failed_files.md"
+    failed_manifest_path = analyse_root / "failed_files.md"
     failed_lines = [
         "# Failed Files During /analyse",
         "",
@@ -1020,7 +1028,7 @@ def _run_analyse_sync(thread_id: str, source_root: Path) -> _AnalyseArtifacts:
         failed_lines.append("No failures.")
     failed_manifest_path.write_text("\n".join(failed_lines) + "\n", encoding="utf-8")
 
-    directory_tree_path = docs_root / "directory_tree.md"
+    directory_tree_path = analyse_root / "directory_tree.md"
     critical_paths: list[str] = []
     for item in converted_files:
         src = item["source_path"].lower()
@@ -1081,7 +1089,7 @@ def _run_analyse_sync(thread_id: str, source_root: Path) -> _AnalyseArtifacts:
     tree_lines.append("```")
     directory_tree_path.write_text("\n".join(tree_lines) + "\n", encoding="utf-8")
 
-    created_manifest_path = docs_root / "created_files.md"
+    created_manifest_path = analyse_root / "created_files.md"
     created_lines = [
         "# Created Files During /analyse",
         "",
@@ -1104,7 +1112,7 @@ def _run_analyse_sync(thread_id: str, source_root: Path) -> _AnalyseArtifacts:
         )
     created_manifest_path.write_text("\n".join(created_lines) + "\n", encoding="utf-8")
 
-    file_catalog_path = docs_root / "file_catalog.md"
+    file_catalog_path = analyse_root / "file_catalog.md"
     catalog_lines = [
         "# File Catalog",
         "",
@@ -1126,7 +1134,7 @@ def _run_analyse_sync(thread_id: str, source_root: Path) -> _AnalyseArtifacts:
         )
     file_catalog_path.write_text("\n".join(catalog_lines) + "\n", encoding="utf-8")
 
-    repo_overview_path = docs_root / "repo_overview.md"
+    repo_overview_path = analyse_root / "repo_overview.md"
     corpus = _summarize_markdown_corpus(docs_root)
     high_signal_files = sorted(
         {
@@ -1196,14 +1204,14 @@ def _run_analyse_sync(thread_id: str, source_root: Path) -> _AnalyseArtifacts:
             "",
             "### Recommended Prompting Instructions",
             "```text",
-            "Start with /mnt/user-data/workspace/.docs/index.md, repo_overview.md, and directory_tree.md.",
-            "Then use file_catalog.md to jump to mirrored files for any area you investigate.",
-            "When an answer depends on files listed in failed_files.md, explicitly state the uncertainty.",
+            "Start with /mnt/user-data/workspace/.analyse/index.md, repo_overview.md, and directory_tree.md.",
+            "Then use /mnt/user-data/workspace/.analyse/file_catalog.md to jump to mirrored files for any area you investigate.",
+            "When an answer depends on files listed in /mnt/user-data/workspace/.analyse/failed_files.md, explicitly state the uncertainty.",
             "```",
             "",
             "## Executive Summary",
             f"- Repository docs generated: **{len(converted_files)}** mirrored markdown files.",
-            f"- Files failed to process: **{len(failed_files)}** (see `failed_files.md`).",
+            f"- Files failed to process: **{len(failed_files)}** (see `/mnt/user-data/workspace/.analyse/failed_files.md`).",
             f"- File-type diversity: **{len(extension_counts)}** extensions, **{len(source_kind_counts)}** conversion kinds.",
         ]
     )
@@ -1246,37 +1254,38 @@ def _run_analyse_sync(thread_id: str, source_root: Path) -> _AnalyseArtifacts:
             "Use these directly in chat for deeper analysis:",
             "",
             "```text",
-            "Using /mnt/user-data/workspace/.docs/index.md, /repo_overview.md, /directory_tree.md, and /file_catalog.md,",
+            "Using /mnt/user-data/workspace/.analyse/index.md, /repo_overview.md, /directory_tree.md, and /file_catalog.md,",
             "give me an architecture-level summary of the repository with:",
             "1) core modules, 2) critical execution flow, 3) highest-risk areas, 4) suggested next code-reading order.",
             "```",
             "",
             "```text",
-            "From /mnt/user-data/workspace/.docs/failed_files.md and /created_files.md,",
+            "From /mnt/user-data/workspace/.analyse/failed_files.md and /created_files.md,",
             "identify any analysis blind spots and propose how to close them.",
             "```",
             "",
             "```text",
-            "Use /mnt/user-data/workspace/.docs/file_catalog.md to locate files related to <topic>,",
+            "Use /mnt/user-data/workspace/.analyse/file_catalog.md to locate files related to <topic>,",
             "then synthesize findings only from the mirrored markdown docs.",
             "```",
         ]
     )
     repo_overview_path.write_text("\n".join(overview_lines) + "\n", encoding="utf-8")
 
-    index_path = docs_root / "index.md"
+    index_path = analyse_root / "index.md"
     index_lines = [
-        "# Repository Docs Mirror",
+        "# Repository Analysis Outputs",
         "",
         f"- Source root: `{source_root}`",
-        "- Output root: `/mnt/user-data/workspace/.docs`",
-        f"- Generated docs: **{generated_docs}**",
+        "- Mirror root: `/mnt/user-data/workspace/.docs`",
+        "- Analysis root: `/mnt/user-data/workspace/.analyse`",
+        f"- Generated mirror docs: **{generated_docs}**",
         f"- Skipped non-text files: **{skipped_non_text}**",
         f"- Failures: **{len(failed_files)}**",
         "",
         "## Notes",
-        "- This mirror is deterministic and generated by `/analyse` API.",
-        "- Prefer consulting these `.docs` files first for follow-up queries in this thread.",
+        "- `/analyse` generates a deterministic markdown mirror in `.docs` and stores derived analysis files in `.analyse`.",
+        "- Prefer consulting `.docs` for source-of-truth content and `.analyse` for summaries, catalogs, and failure manifests.",
         f"- Overview: `{_to_virtual_workspace(repo_overview_path, thread_id)}`",
         f"- Directory tree: `{_to_virtual_workspace(directory_tree_path, thread_id)}`",
         f"- Created files manifest: `{_to_virtual_workspace(created_manifest_path, thread_id)}`",
@@ -1329,7 +1338,8 @@ async def run_analyse(thread_id: str) -> AnalyseResponse:
     refresh_job = await _enqueue_repo_overview_refresh(
         thread_id=thread_id,
         source_root=result.source_root,
-        docs_root=result.index_path.parent,
+        docs_root=_docs_root(thread_id),
+        analyse_root=result.index_path.parent,
         trigger="analyse",
     )
 
@@ -1363,10 +1373,11 @@ async def publish_docs(thread_id: str, force: bool = Query(default=False, descri
         raise HTTPException(status_code=400, detail="Mounted folder path is empty.")
 
     source_root = _docs_root(thread_id)
+    analyse_root = _analyse_root(thread_id)
     if not source_root.exists() or not source_root.is_dir():
         raise HTTPException(status_code=400, detail="Staged docs not found at /mnt/user-data/workspace/.docs.")
-    if not (source_root / "index.md").exists():
-        raise HTTPException(status_code=400, detail="Staged docs index not found. Run /analyse first.")
+    if not analyse_root.exists() or not analyse_root.is_dir() or not (analyse_root / "index.md").exists():
+        raise HTTPException(status_code=400, detail="Staged analysis index not found. Run /analyse first.")
     latest_job = _get_latest_job_for_thread(thread_id)
     if latest_job and latest_job.status != "succeeded" and not force:
         raise HTTPException(
@@ -1400,7 +1411,7 @@ async def publish_docs(thread_id: str, force: bool = Query(default=False, descri
         destination_root="/mnt/user-data/mounted/.docs",
         copied_files=copied_files,
         overwritten_files=overwritten_files,
-        index_virtual_path="/mnt/user-data/mounted/.docs/index.md",
+        index_virtual_path="/mnt/user-data/workspace/.analyse/index.md",
     )
 
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { GripVerticalIcon } from "lucide-react";
+import { EllipsisVerticalIcon } from "lucide-react";
 import * as React from "react";
 import * as ResizablePrimitive from "react-resizable-panels";
 
@@ -49,8 +49,8 @@ function ResizableHandle({
       {...props}
     >
       {withHandle && (
-        <div className="bg-border z-10 flex h-4 w-3 items-center justify-center rounded-xs border">
-          <GripVerticalIcon className="size-2.5" />
+        <div className="bg-background text-muted-foreground z-10 flex h-5 w-4 items-center justify-center rounded-sm border shadow-sm">
+          <EllipsisVerticalIcon className="size-3" />
         </div>
       )}
     </ResizablePrimitive.Separator>

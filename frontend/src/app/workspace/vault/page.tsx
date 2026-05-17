@@ -15,7 +15,7 @@ import {
   RefreshCwIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
@@ -124,6 +124,7 @@ export default function VaultPage() {
   const [previewTab, setPreviewTab] = useState<"preview" | "graph">("preview");
   const [editorCollapsed, setEditorCollapsed] = useState(false);
   const editorPanelRef = usePanelRef();
+  const graphContainerRef = useRef<HTMLDivElement | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({});
   const { vaultFile, isLoading: vaultFileLoading } = useVaultFile(selectedPath);
   const [editableContent, setEditableContent] = useState("");
@@ -193,11 +194,14 @@ export default function VaultPage() {
             style={{ paddingLeft: `${8 + depth * 14}px` }}
             onClick={() => {
               if (isDir) {
+                if (leftSection === "knowledge") {
+                  setPreviewTab("graph");
+                }
                 togglePath(node.path);
                 return;
               }
               setSelectedPath(node.path);
-              setPreviewTab("preview");
+              setPreviewTab(leftSection === "knowledge" ? "graph" : "preview");
             }}
           >
             {isDir ? (
@@ -229,6 +233,12 @@ export default function VaultPage() {
   useEffect(() => {
     setEditableContent(vaultFile?.content ?? "");
   }, [vaultFile?.content, vaultFile?.path]);
+
+  useEffect(() => {
+    if (previewTab === "graph") {
+      graphContainerRef.current?.scrollTo({ top: 0 });
+    }
+  }, [previewTab, selectedPath, leftSection]);
 
   const graphLayout = useMemo(() => {
     const rawNodes = effectiveExplorer?.graph?.nodes ?? [];
@@ -299,13 +309,18 @@ export default function VaultPage() {
     const width = 900;
     const height = 520;
     const cx = width / 2;
-    const cy = height / 2;
     const radiusByKind: Record<string, number> = {
       concept: Math.min(width, height) * 0.18,
       entity: Math.min(width, height) * 0.28,
       source: Math.min(width, height) * 0.36,
       other: Math.min(width, height) * 0.46,
     };
+    const activeMaxRadius = Math.max(
+      ...selectedNodes.map((node) => radiusByKind[normalizeGraphKind(node.kind || "other")] ?? radiusByKind.other),
+      radiusByKind.concept,
+    );
+    const topPadding = 36;
+    const cy = topPadding + activeMaxRadius;
 
     const nodesByKind = new Map<string, typeof selectedNodes>();
     for (const node of selectedNodes) {
@@ -646,9 +661,10 @@ export default function VaultPage() {
                           <NetworkIcon className="mr-1 inline size-3.5" />
                           Nodes {graphLayout.nodes.length} (trimmed) · Edges {graphLayout.edges.length}
                         </p>
-                        <div className="h-full min-h-0 overflow-auto rounded border p-2">
+                        <div ref={graphContainerRef} className="h-full min-h-0 overflow-auto rounded border p-2">
                           <svg
                             viewBox={`0 0 ${graphLayout.width} ${graphLayout.height}`}
+                            preserveAspectRatio="xMidYMin meet"
                             className="h-full min-h-[420px] w-full"
                             role="img"
                             aria-label="Knowledge graph"

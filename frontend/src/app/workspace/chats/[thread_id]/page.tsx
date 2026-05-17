@@ -85,6 +85,19 @@ function isMountPlaceholderTitle(title: string): boolean {
   return title === "" || title === "mount-drive";
 }
 
+function getComplexityEscalationKey(
+  event: ComplexityEscalationEvent | null | undefined,
+): string | null {
+  if (!event) {
+    return null;
+  }
+  return [
+    event.complexity_tier ?? "",
+    event.recommended_action ?? "",
+    event.message ?? "",
+  ].join("|");
+}
+
 function upsertNotice(
   notices: LiveGenerationNotice[],
   notice: LiveGenerationNotice,
@@ -178,6 +191,7 @@ function ChatPageContent({
   const [pendingExecutePlan, setPendingExecutePlan] = useState(false);
   const [pendingMountPath, setPendingMountPath] = useState<string | null>(null);
   const suppressedAutoExecutePlanKeyRef = useRef<string | null>(null);
+  const suppressedComplexityEscalationKeyRef = useRef<string | null>(null);
   const executePlanRetryCountRef = useRef(0);
   const finalizedMountedTitleRef = useRef<string | null>(null);
   const finalizingMountedTitleRef = useRef<string | null>(null);
@@ -218,7 +232,19 @@ function ChatPageContent({
     onFinish,
     onPlanCreated: (event) => setPlanCreatedEvent(event),
     onPlanAdapted: (event) => setAdaptationEvent(event),
-    onComplexityEscalation: (event) => setEscalationEvent(event),
+    onComplexityEscalation: (event) => {
+      const eventKey = getComplexityEscalationKey(event);
+      if (!eventKey) {
+        return;
+      }
+      if (settings.context.mode === "plan") {
+        return;
+      }
+      if (suppressedComplexityEscalationKeyRef.current === eventKey) {
+        return;
+      }
+      setEscalationEvent(event);
+    },
   });
   const handleStop = useCallback(async () => {
     await queueControls.stop();
@@ -412,6 +438,17 @@ function ChatPageContent({
   }, [planCreatedEvent, settings.context.auto_mode, handleExecutePlan, planEventKey]);
 
   useEffect(() => {
+    if (settings.context.mode !== "plan") {
+      return;
+    }
+    if (!escalationEvent) {
+      return;
+    }
+    suppressedComplexityEscalationKeyRef.current = getComplexityEscalationKey(escalationEvent);
+    setEscalationEvent(null);
+  }, [escalationEvent, settings.context.mode]);
+
+  useEffect(() => {
     if (!pendingExecutePlan || thread.isLoading) {
       return;
     }
@@ -449,13 +486,15 @@ function ChatPageContent({
   }, [adaptationEvent, sendMessage, setSettings, settings.context, threadId]);
 
   const handleSwitchToPlan = useCallback(() => {
+    suppressedComplexityEscalationKeyRef.current = getComplexityEscalationKey(escalationEvent);
     setEscalationEvent(null);
     setSettings("context", { ...settings.context, mode: "plan" });
-  }, [setEscalationEvent, setSettings, settings.context]);
+  }, [escalationEvent, setEscalationEvent, setSettings, settings.context]);
 
   const handleContinueWork = useCallback(() => {
+    suppressedComplexityEscalationKeyRef.current = getComplexityEscalationKey(escalationEvent);
     setEscalationEvent(null);
-  }, []);
+  }, [escalationEvent]);
 
   const handleSubmitPlanRevision = useCallback(async (markdown: string) => {
     const currentPlanTitle = String(thread.values.plan?.title ?? "Draft Plan");
@@ -483,6 +522,7 @@ function ChatPageContent({
 
   const handleSubmit = useCallback(
     (message: PromptInputMessage, options?: InputBoxSubmitOptions) => {
+      suppressedComplexityEscalationKeyRef.current = null;
       const maybeIntent = normalizeIntent(message.text ?? "");
       const planStatus = String(thread.values.plan?.status ?? "").toLowerCase();
       const hasPlanReadyForExecution = planStatus === "draft";
@@ -673,7 +713,10 @@ function ChatPageContent({
                       event={escalationEvent}
                       onSwitchToPlan={handleSwitchToPlan}
                       onContinueWork={handleContinueWork}
-                      onDismiss={() => setEscalationEvent(null)}
+                      onDismiss={() => {
+                        suppressedComplexityEscalationKeyRef.current = getComplexityEscalationKey(escalationEvent);
+                        setEscalationEvent(null);
+                      }}
                     />
                   )}
                   <InputBox
