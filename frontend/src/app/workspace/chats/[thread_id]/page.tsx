@@ -737,6 +737,7 @@ function ChatPageContent({
                     disabled={env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true"}
                     contextTokenState={contextTokenState}
                     onContextChange={handleContextChange}
+                    onCompaction={onCompaction}
                     onSubmit={handleSubmit}
                     onStop={handleStop}
                   />

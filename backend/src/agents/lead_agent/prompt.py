@@ -399,9 +399,9 @@ def _get_memory_context(agent_name: str | None = None) -> str:
         configurable = cfg.get("configurable", {}) if isinstance(cfg, dict) else {}
         workspace_id = str(configurable.get("thread_id") or "") or None
 
-        memory_data = get_memory_data(agent_name, scope="global")
+        memory_data = get_memory_data(agent_name, scope="global") if config.global_scope_enabled else {}
         workspace_memory_data = None
-        if workspace_id:
+        if config.workspace_scope_enabled and workspace_id:
             workspace_memory_data = get_memory_data(
                 agent_name,
                 scope="workspace",
@@ -518,9 +518,8 @@ def _build_prompt(
     agent_name: str | None,
     available_skills: set[str] | None,
 ) -> str:
-    """Render the full system prompt string (no caching layer)."""
-    memory_context = _get_memory_context(agent_name)
-
+    """Render the static system prompt string for prompt-cache storage."""
+    memory_context = ""
     n = max_concurrent_subagents
     subagent_section = _build_subagent_section(n) if subagent_enabled else ""
 
@@ -565,6 +564,17 @@ def _build_prompt(
         )
 
     return prompt + f"\n<current_date>{datetime.now().strftime('%Y-%m-%d, %A')}</current_date>"
+
+
+def _inject_memory_context(prompt: str, memory_context: str) -> str:
+    """Insert runtime-scoped memory into a cached static prompt."""
+    memory = memory_context.strip()
+    if not memory:
+        return prompt
+    marker = "\n<thinking_style>"
+    if marker not in prompt:
+        return f"{memory}\n\n{prompt}"
+    return prompt.replace(marker, f"\n{memory}\n\n<thinking_style>", 1)
 
 
 def _build_componentized_prompt(
@@ -681,10 +691,11 @@ def apply_prompt_template(
         prompt_componentized=get_prompt_config().componentized,
         progressive_skills=app_config.skills.progressive_disclosure,
     )
+    prompt = _inject_memory_context(base_prompt, _get_memory_context(agent_name))
     if dreamy_mode:
-        return base_prompt + "\n\n" + DREAMY_MODE_SECTION
+        return prompt + "\n\n" + DREAMY_MODE_SECTION
     if plan_mode and background_followup:
-        return base_prompt + "\n\n" + PLAN_MODE_SECTION + "\n\n" + PLAN_BACKGROUND_FOLLOWUP_SECTION
+        return prompt + "\n\n" + PLAN_MODE_SECTION + "\n\n" + PLAN_BACKGROUND_FOLLOWUP_SECTION
     if plan_mode:
-        return base_prompt + "\n\n" + PLAN_MODE_SECTION
-    return base_prompt
+        return prompt + "\n\n" + PLAN_MODE_SECTION
+    return prompt
