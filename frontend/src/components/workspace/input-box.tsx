@@ -30,7 +30,7 @@ import {
   usePromptInputController,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
-import { getAPIClient } from "@/core/api/api-client";
+import { clearThreadClientCache, getAPIClient } from "@/core/api/api-client";
 import { getBackendBaseURL } from "@/core/config";
 import {
   saveToVault as saveToVaultApi,
@@ -261,6 +261,7 @@ export function InputBox({
   onContextChange,
   onSubmit,
   onStop,
+  onCompaction,
   contextTokenState,
   ...props
 }: Omit<ComponentProps<typeof PromptInput>, "onSubmit"> & {
@@ -299,6 +300,10 @@ export function InputBox({
   onActivateDreamy?: () => Promise<void> | void;
   onDeactivateDreamy?: () => Promise<void> | void;
   onStop?: () => void;
+  onCompaction?: (event: {
+    messagesCompressed?: number;
+    messagesKept?: number;
+  }) => void;
   contextTokenState?: ContextTokenState;
 }) {
   const { t } = useI18n();
@@ -711,18 +716,33 @@ export function InputBox({
       const payload = (await response.json()) as {
         status?: string;
         message?: string;
+        compressed_messages?: number;
+        kept_messages?: number;
       };
       if (payload.status === "no_op") {
         toast.message(payload.message ?? "Nothing to compact right now.");
         return;
       }
-      toast.success(payload.message ?? "Compaction completed.");
+      clearThreadClientCache(threadId);
+      void queryClient.invalidateQueries({ queryKey: ["threads", "search"] });
+      publishWorkspaceRefresh(["threads", `thread:${threadId}`], {
+        source: "manual-compaction",
+      });
+      onCompaction?.({
+        messagesCompressed: payload.compressed_messages,
+        messagesKept: payload.kept_messages,
+      });
+      const countSuffix =
+        typeof payload.compressed_messages === "number"
+          ? ` (${payload.compressed_messages} compressed, ${payload.kept_messages ?? 0} kept)`
+          : "";
+      toast.success(`${payload.message ?? "Compaction completed."}${countSuffix}`);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to compact context.";
       toast.error(message);
     }
-  }, [threadId]);
+  }, [onCompaction, queryClient, threadId]);
 
   const collectIncompletePlanTodos = useCallback((): {
     incomplete: string[];

@@ -4,6 +4,7 @@ import { Client as LangGraphClient } from "@langchain/langgraph-sdk/client";
 
 import { getLangGraphBaseURL } from "../config";
 
+import { normalizeApiUrlForCache } from "./client-cache-key";
 import { sanitizeRunStreamOptions } from "./stream-mode";
 
 // Deduplication map for SSE stream connections.
@@ -118,10 +119,11 @@ function teeJoinStream<T>(
   };
 }
 
-function createCompatibleClient(isMock?: boolean): LangGraphClient {
+function createCompatibleClient(apiUrl: string): LangGraphClient {
   const client = new LangGraphClient({
-    apiUrl: getLangGraphBaseURL(isMock),
+    apiUrl,
   });
+  const streamKeyPrefix = normalizeApiUrlForCache(apiUrl);
 
   const originalGetHistory = client.threads.getHistory.bind(client.threads);
   client.threads.getHistory = (async (threadId, options) => {
@@ -175,7 +177,7 @@ function createCompatibleClient(isMock?: boolean): LangGraphClient {
     // React Strict Mode double-mounts and hot-reload can trigger simultaneous
     // `runs.stream` calls for the same thread, each opening a separate SSE
     // connection and creating duplicate backend runs.
-    const key = `${String(threadId)}::thread`;
+    const key = `${streamKeyPrefix}::${String(threadId)}::thread`;
     const existing = _activeJoinStreams.get(key);
     if (existing) {
       existing.refCount += 1;
@@ -198,7 +200,7 @@ function createCompatibleClient(isMock?: boolean): LangGraphClient {
 
   const originalJoinStream = client.runs.joinStream.bind(client.runs);
   client.runs.joinStream = ((threadId, runId, options) => {
-    const key = `${String(threadId)}::${String(runId)}`;
+    const key = `${streamKeyPrefix}::${String(threadId)}::${String(runId)}`;
     const existing = _activeJoinStreams.get(key);
     if (existing) {
       existing.refCount += 1;
@@ -222,8 +224,15 @@ function createCompatibleClient(isMock?: boolean): LangGraphClient {
   return client;
 }
 
-let _singleton: LangGraphClient | null = null;
+const _clientsByUrl = new Map<string, LangGraphClient>();
 export function getAPIClient(isMock?: boolean): LangGraphClient {
-  _singleton ??= createCompatibleClient(isMock);
-  return _singleton;
+  const apiUrl = getLangGraphBaseURL(isMock);
+  const cacheKey = normalizeApiUrlForCache(apiUrl);
+  const existing = _clientsByUrl.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+  const client = createCompatibleClient(apiUrl);
+  _clientsByUrl.set(cacheKey, client);
+  return client;
 }

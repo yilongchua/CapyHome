@@ -198,6 +198,32 @@ def test_compact_thread_router_success(monkeypatch):
     assert threads.calls
 
 
+def test_compact_thread_keeps_tool_call_pair_when_cutoff_splits_pair(monkeypatch):
+    messages = _messages(20)
+    messages[7] = {
+        "id": "m7",
+        "type": "ai",
+        "content": "",
+        "tool_calls": [{"id": "tc-1", "name": "read_file", "args": {"path": "/tmp/a"}}],
+    }
+    messages[8] = {
+        "id": "m8",
+        "type": "tool",
+        "tool_call_id": "tc-1",
+        "content": "file contents",
+    }
+    threads = _ThreadsClient(values={"messages": messages})
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads))
+
+    response = asyncio.run(compact_thread("thread-1"))
+
+    assert response.status == "accepted"
+    updated_messages = threads.calls[0][1]["messages"]
+    preserved_ids = [message["id"] for message in updated_messages[1:]]
+    assert preserved_ids[0:2] == ["m7", "m8"]
+    assert response.compressed_messages == 7
+
+
 def test_compact_thread_router_noop_for_short_history(monkeypatch):
     threads = _ThreadsClient(values={"messages": _messages(8)})
     monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads))

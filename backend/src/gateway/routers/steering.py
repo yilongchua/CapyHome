@@ -166,12 +166,84 @@ def _message_text(message: Any) -> str:
     return ""
 
 
+def _tool_call_ids(message: Any) -> set[str]:
+    if not isinstance(message, dict):
+        return set()
+    raw_tool_calls = message.get("tool_calls")
+    if not isinstance(raw_tool_calls, list):
+        additional_kwargs = message.get("additional_kwargs")
+        if isinstance(additional_kwargs, dict):
+            raw_tool_calls = additional_kwargs.get("tool_calls")
+    if not isinstance(raw_tool_calls, list):
+        return set()
+    ids: set[str] = set()
+    for tool_call in raw_tool_calls:
+        if not isinstance(tool_call, dict):
+            continue
+        tool_call_id = tool_call.get("id")
+        if isinstance(tool_call_id, str) and tool_call_id.strip():
+            ids.add(tool_call_id.strip())
+    return ids
+
+
+def _tool_message_call_id(message: Any) -> str | None:
+    if not isinstance(message, dict) or _message_type(message) != "tool":
+        return None
+    raw = message.get("tool_call_id")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return None
+
+
+def _safe_compaction_cutoff(messages: list[Any], desired_cutoff: int) -> int:
+    """Move cutoff back so preserved tool messages keep their AI tool calls."""
+    cutoff = max(0, min(desired_cutoff, len(messages)))
+    while cutoff > 0:
+        preserved = messages[cutoff:]
+        preserved_tool_calls: set[str] = set()
+        orphan_tool_id: str | None = None
+        for msg in preserved:
+            preserved_tool_calls.update(_tool_call_ids(msg))
+            tool_call_id = _tool_message_call_id(msg)
+            if tool_call_id and tool_call_id not in preserved_tool_calls:
+                orphan_tool_id = tool_call_id
+                break
+        if orphan_tool_id is None:
+            return cutoff
+        matching_ai_index = next(
+            (
+                index
+                for index in range(cutoff - 1, -1, -1)
+                if orphan_tool_id in _tool_call_ids(messages[index])
+            ),
+            None,
+        )
+        if matching_ai_index is None:
+            # Existing history is already malformed; skip the orphan instead of
+            # preserving an invalid tool message after the synthetic summary.
+            first_orphan = next(
+                (
+                    index
+                    for index in range(cutoff, len(messages))
+                    if _tool_message_call_id(messages[index]) == orphan_tool_id
+                ),
+                cutoff,
+            )
+            cutoff = min(len(messages), first_orphan + 1)
+            continue
+        cutoff = matching_ai_index
+    return cutoff
+
+
 def _compact_messages(messages: list[Any]) -> tuple[list[Any], dict[str, Any]] | None:
     if len(messages) < _COMPACTION_MIN_MESSAGES:
         return None
 
-    compressed = messages[:-_COMPACTION_KEEP_RECENT]
+    cutoff = _safe_compaction_cutoff(messages, len(messages) - _COMPACTION_KEEP_RECENT)
+    compressed = messages[:cutoff]
     preserved = messages[-_COMPACTION_KEEP_RECENT:]
+    if cutoff != len(messages) - _COMPACTION_KEEP_RECENT:
+        preserved = messages[cutoff:]
     if len(compressed) < 2:
         return None
 

@@ -1,7 +1,6 @@
 """Mtime-based cache for the lead agent system prompt.
 
-``apply_prompt_template`` performs three synchronous disk reads on every call:
-  - memory.json   (updated by the background memory worker, ~30 s debounce)
+``apply_prompt_template`` performs several synchronous disk reads on every call:
   - extensions_config.json  (skills enabled/disabled state)
   - SOUL.md       (agent personality, rarely changes)
 
@@ -63,15 +62,6 @@ def _app_config_path() -> Path | None:
         return None
 
 
-def _memory_file_path(agent_name: str | None) -> Path | None:
-    try:
-        from src.agents.memory.updater import _get_memory_file_path
-
-        return _get_memory_file_path(agent_name)
-    except Exception:
-        return None
-
-
 def _soul_file_path(agent_name: str | None) -> Path | None:
     try:
         from src.config.paths import get_paths
@@ -87,7 +77,6 @@ def _soul_file_path(agent_name: str | None) -> Path | None:
 
 def _current_mtimes(agent_name: str | None) -> dict[str, float | None]:
     return {
-        "memory": _mtime(_memory_file_path(agent_name)),
         "extensions": _mtime(_extensions_config_path()),
         "soul": _mtime(_soul_file_path(agent_name)),
         "config": _mtime(_app_config_path()),
