@@ -259,7 +259,6 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
 
         runtime_context: dict = getattr(runtime, "context", None) or {}
         auto_mode: bool = bool(runtime_context.get("auto_mode"))
-        execute_approved_plan: bool = bool(runtime_context.get("execute_approved_plan"))
         thread_id: str | None = runtime_context.get("thread_id")
         requested_model_name: str | None = runtime_context.get("model_name")
         plan_state = dict(state.get("plan") or {})
@@ -294,13 +293,6 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
             return None
 
         if plan_state:
-            if plan_status == "draft" and execute_approved_plan:
-                plan_state = {
-                    **plan_state,
-                    "status": "approved",
-                    "approved_at": str(plan_state.get("approved_at") or _utc_now_iso()),
-                }
-                plan_status = "approved"
             if plan_status not in {"approved", "executing", "completed"}:
                 return None
 

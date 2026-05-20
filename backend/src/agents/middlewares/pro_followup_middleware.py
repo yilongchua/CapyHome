@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 from datetime import UTC, datetime
-from typing import Any, NotRequired, override
+from typing import NotRequired, override
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
@@ -14,6 +14,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.config import get_config, get_stream_writer
 from langgraph.runtime import Runtime
 
+from src.agents.middlewares.message_selection import latest_message_text, latest_real_ai_answer
 from src.agents.middlewares.runtime_events import append_runtime_event
 from src.agents.thread_state import BackgroundFollowupJob
 
@@ -32,32 +33,6 @@ def _utc_now_iso() -> str:
 class PlanFollowupState(AgentState):
     background_followups: NotRequired[list[BackgroundFollowupJob] | None]
 
-
-def _message_text(message: Any) -> str:
-    content = getattr(message, "content", "")
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and isinstance(block.get("text"), str):
-                parts.append(block["text"])
-        return "\n".join(parts).strip()
-    return ""
-
-
-def _latest_message_text(messages: list[Any], *, msg_type: str) -> str:
-    for msg in reversed(messages):
-        if getattr(msg, "type", None) != msg_type:
-            continue
-        text = _message_text(msg)
-        if text:
-            return text
-    return ""
-
-
 def _run_background_followup(
     *,
     thread_id: str,
@@ -72,8 +47,8 @@ def _run_background_followup(
         model_name=requested_model_name,
         thinking_enabled=True,
         subagent_enabled=True,
-        plan_mode=True,
-        auto_mode=True,
+        plan_mode=False,
+        auto_mode=False,
     )
     config = client._get_runnable_config(  # noqa: SLF001
         thread_id,
@@ -85,8 +60,7 @@ def _run_background_followup(
         {
             "mode": "work",
             "background_followup": True,
-            "execute_approved_plan": True,
-            "plan_behavior": "plan_background_deepen",
+            "plan_behavior": "work_background_followup",
         }
     )
     client._ensure_agent(config)  # noqa: SLF001
@@ -98,8 +72,7 @@ def _run_background_followup(
                 "thread_id": thread_id,
                 "mode": "work",
                 "background_followup": True,
-                "execute_approved_plan": True,
-                "plan_behavior": "plan_background_deepen",
+                "plan_behavior": "work_background_followup",
                 "model_name": requested_model_name,
             },
         )
@@ -146,9 +119,10 @@ class PlanFollowupMiddleware(AgentMiddleware[PlanFollowupState]):
                 "mode": mode,
                 "plan_behavior": str(runtime_context.get("plan_behavior") or ("plan_foreground" if mode == "plan" else "work_interactive")),
                 "allow_background_deepen": (
-                    mode == "plan"
+                    mode == "work"
                     and not bool(runtime_context.get("background_followup"))
                     and self._has_plan_context(state)
+                    and not self._has_incomplete_todos(state)
                 ),
                 "max_primary_subagents": 1,
             }
@@ -163,12 +137,22 @@ class PlanFollowupMiddleware(AgentMiddleware[PlanFollowupState]):
             return False
         if getattr(last, "tool_calls", None):
             return False
-        return bool(_message_text(last))
+        return bool(latest_real_ai_answer([last]))
+
+    def _has_incomplete_todos(self, state: PlanFollowupState) -> bool:
+        graph = state.get("todo_graph") or {}
+        nodes = graph.get("nodes") if isinstance(graph, dict) else None
+        if not isinstance(nodes, list) or not nodes:
+            return False
+        return any(
+            isinstance(node, dict) and node.get("status") not in {"completed", "blocked"}
+            for node in nodes
+        )
 
     @override
     def after_model(self, state: PlanFollowupState, runtime: Runtime) -> dict | None:
         runtime_context = getattr(runtime, "context", None) or {}
-        if str(runtime_context.get("mode") or "").strip().lower() != "plan":
+        if str(runtime_context.get("mode") or "").strip().lower() != "work":
             return None
         if bool(runtime_context.get("background_followup")):
             return None
@@ -176,11 +160,13 @@ class PlanFollowupMiddleware(AgentMiddleware[PlanFollowupState]):
             return None
         plan = state.get("plan") if isinstance(state.get("plan"), dict) else {}
         plan_status = str(plan.get("status") or "").strip().lower()
-        if plan_status == "draft":
+        if plan_status != "completed":
             return None
         if str(plan.get("evaluation_status") or "").strip().lower() in {"failed", "max_attempts_reached"}:
             return None
         if str(plan.get("latest_evaluator_verdict") or "").strip().upper() == "FAIL":
+            return None
+        if self._has_incomplete_todos(state):
             return None
         if not self._is_terminal_answer(state):
             return None
@@ -194,15 +180,15 @@ class PlanFollowupMiddleware(AgentMiddleware[PlanFollowupState]):
             return None
 
         messages = state.get("messages", []) or []
-        user_text = _latest_message_text(messages, msg_type="human")
-        answer_text = _latest_message_text(messages, msg_type="ai")
+        user_text = latest_message_text(messages, msg_type="human", skip_synthetic_human=True)
+        answer_text = latest_real_ai_answer(messages)
         if not user_text or not answer_text:
             return None
 
         requested_model_name = (get_config().get("metadata") or {}).get("model_name")
         job_id = f"plan-followup-{int(time.time())}"
         summary_prompt = (
-            "Continue the previous Plan-mode answer in the background.\n"
+            "Continue the previous Work Mode answer in the background.\n"
             "Do not repeat the original answer. Add only meaningful follow-up value.\n"
             "Focus on evaluator critique, alternative-source verification, expanded comparison details, "
             "or a secondary research pass when useful.\n\n"

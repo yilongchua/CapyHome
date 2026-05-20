@@ -18,6 +18,7 @@ from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 
 from src.agents.middlewares.handoff_sync import render_plan_md
+from src.agents.middlewares.message_selection import extract_text, is_synthetic_human_message, message_name, message_type, original_user_prompt
 from src.agents.middlewares.runtime_events import append_runtime_event
 from src.agents.middlewares.todo_dag_middleware import _legacy_todos, normalize_todo_nodes
 from src.config.handoffs_config import HandoffsConfig
@@ -39,97 +40,24 @@ class PlannerState(AgentState):
     plan_history: NotRequired[list[dict[str, Any]] | None]
 
 
-def _extract_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and isinstance(block.get("text"), str):
-                parts.append(block["text"])
-        return "\n".join(parts)
-    return str(content)
-
-
-def _message_type(message: Any) -> str:
-    raw = getattr(message, "type", None)
-    if isinstance(raw, str):
-        return raw
-    if isinstance(message, dict):
-        val = message.get("type")
-        if isinstance(val, str):
-            return val
-    return ""
-
-
-def _message_name(message: Any) -> str:
-    raw = getattr(message, "name", None)
-    if isinstance(raw, str):
-        return raw
-    if isinstance(message, dict):
-        val = message.get("name")
-        if isinstance(val, str):
-            return val
-    return ""
-
-
 def _pending_clarification_answered(messages: list[Any]) -> bool:
     if not messages:
         return False
     last_ask_idx = -1
     for idx, message in enumerate(messages):
-        if _message_type(message) == "tool" and _message_name(message) == "ask_clarification":
+        if message_type(message) == "tool" and message_name(message) == "ask_clarification":
             last_ask_idx = idx
     if last_ask_idx < 0:
         return False
     for message in messages[last_ask_idx + 1 :]:
-        if _message_type(message) != "human":
+        if message_type(message) != "human":
             continue
-        if _is_synthetic_human_message(message):
+        if is_synthetic_human_message(message):
             continue
-        text = _extract_text(getattr(message, "content", ""))
+        text = extract_text(getattr(message, "content", ""))
         if text.strip():
             return True
     return False
-
-
-_SYNTHETIC_HUMAN_NAMES = {
-    "planner_handoff",
-    "planner_clarification_required",
-    "system_reminder",
-    "evaluator_feedback",
-    "task_deferred",
-}
-
-_SYNTHETIC_REQUEST_PATTERNS = (
-    "generate a detailed structured plan for the previous user request",
-    "work mode detected this request is too complex for direct execution",
-    "what was the content of the previous user request",
-    "what is the original user request",
-)
-
-
-def _is_synthetic_human_message(message: Any) -> bool:
-    if _message_type(message) != "human":
-        return False
-    name = _message_name(message).strip()
-    if name in _SYNTHETIC_HUMAN_NAMES:
-        return True
-    text = _extract_text(getattr(message, "content", "")).strip().lower()
-    return any(pattern in text for pattern in _SYNTHETIC_REQUEST_PATTERNS)
-
-
-def _original_user_prompt(messages: list[Any]) -> str:
-    """Return the latest real user request, ignoring middleware handoff messages."""
-    for message in reversed(messages):
-        if _message_type(message) != "human" or _is_synthetic_human_message(message):
-            continue
-        text = _extract_text(getattr(message, "content", "")).strip()
-        if text:
-            return text
-    return ""
 
 
 def _utc_now_iso() -> str:
@@ -197,6 +125,19 @@ def _ordered_clarification_options(options: list[ClarificationOption]) -> list[C
     return [*recommended[:1], *non_recommended, *recommended[1:]]
 
 
+def _normalize_clarification_options(options: list[ClarificationOption]) -> list[ClarificationOption]:
+    normalized = [option for option in _ordered_clarification_options(options) if option.label.strip()]
+    if not normalized:
+        return []
+    if not any(option.recommended for option in normalized):
+        normalized[0] = ClarificationOption(
+            label=normalized[0].label,
+            recommended=True,
+            description=normalized[0].description,
+        )
+    return normalized[:4]
+
+
 def _ensure_research_clarifications(user_prompt: str, output: PlannerOutput) -> list[PlannerClarification]:
     clarifications: list[PlannerClarification] = list(output.clarifications)
     text = user_prompt.lower()
@@ -256,10 +197,10 @@ def _ensure_research_clarifications(user_prompt: str, output: PlannerOutput) -> 
         if key in seen_questions:
             continue
         seen_questions.add(key)
-        options = _ordered_clarification_options(clarification.options)
-        if not options:
+        options = _normalize_clarification_options(clarification.options)
+        if len(options) < 2:
             continue
-        deduped.append(PlannerClarification(question=question, options=options[:4]))
+        deduped.append(PlannerClarification(question=question, options=options))
     return deduped[:2]
 
 
@@ -647,7 +588,7 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
         prompt = PLANNER_SYSTEM_PROMPT.replace("{max_steps}", str(self._max_plan_steps))
         full_prompt = f"{prompt}\n\nUser request:\n{user_prompt}"
         response = model.invoke(full_prompt)
-        output = _parse_plan_response(_extract_text(response.content), max_steps=self._max_plan_steps)
+        output = _parse_plan_response(extract_text(response.content), max_steps=self._max_plan_steps)
         return output, model_name
 
     @override
@@ -675,12 +616,12 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
             return None
 
         messages = state.get("messages", []) or []
-        user_prompt = _original_user_prompt(messages)
+        user_prompt = original_user_prompt(messages)
         if not user_prompt.strip():
             latest_user = next((msg for msg in reversed(messages) if getattr(msg, "type", None) == "human"), None)
             if latest_user is None:
                 return None
-            user_prompt = _extract_text(getattr(latest_user, "content", ""))
+            user_prompt = extract_text(getattr(latest_user, "content", ""))
         if not user_prompt.strip():
             return None
 
@@ -834,14 +775,23 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
 
         clarification_prompt_message = None
         if primary_clarification is not None:
-            option_labels = [option.label for option in primary_clarification.options if option.label.strip()]
+            structured_options = [
+                {
+                    "label": option.label,
+                    "recommended": option.recommended,
+                    "description": option.description,
+                }
+                for option in primary_clarification.options
+                if option.label.strip()
+            ]
             clarification_prompt_message = HumanMessage(
                 name="planner_clarification_required",
                 content=(
                     "<planner_clarification>\n"
                     "Before any execution, ask the user this clarification via `ask_clarification`.\n"
                     f"Question: {primary_clarification.question}\n"
-                    f"Options: {option_labels}\n"
+                    "IMPORTANT: pass options as structured dicts; do NOT flatten to plain strings.\n"
+                    f"Options JSON: {json.dumps(structured_options, ensure_ascii=False)}\n"
                     "</planner_clarification>"
                 ),
             )
@@ -929,11 +879,7 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
             "messages": [message for message in [planner_handoff, clarification_prompt_message] if message is not None],
         }
 
-        pause_after_plan = (
-            plan_status == "draft"
-            and not clarification_pending
-            and _plan_behavior(runtime) == "plan_foreground"
-        )
+        pause_after_plan = not clarification_pending and _plan_behavior(runtime) == "plan_foreground"
         if pause_after_plan:
             payload["jump_to"] = "end"
         return payload

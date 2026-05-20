@@ -1,6 +1,14 @@
-from typing import Literal
+from typing import Literal, TypedDict
 
 from langchain.tools import tool
+
+
+class ClarificationOption(TypedDict, total=False):
+    """Structured clarification option passed to ask_clarification."""
+
+    label: str
+    recommended: bool
+    description: str | None
 
 
 @tool("ask_clarification", parse_docstring=True, return_direct=True)
@@ -14,7 +22,7 @@ def ask_clarification_tool(
         "suggestion",
     ],
     context: str | None = None,
-    options: list[str] | None = None,
+    options: list[ClarificationOption] | None = None,
 ) -> str:
     """Ask the user for clarification when you need more information to proceed.
 
@@ -47,7 +55,7 @@ def ask_clarification_tool(
         question: The clarification question to ask the user. Be specific and clear.
         clarification_type: The type of clarification needed (missing_info, ambiguous_requirement, approach_choice, risk_confirmation, suggestion).
         context: Optional context explaining why clarification is needed. Helps the user understand the situation.
-        options: Optional list of choices (for approach_choice or suggestion types). Present clear options for the user to choose from.
+        options: Optional list of structured choices (for approach_choice or suggestion types), where each option may include `label`, `recommended`, and `description`.
     """
     # This is a placeholder implementation
     # The actual logic is handled by ClarificationMiddleware which intercepts this tool call

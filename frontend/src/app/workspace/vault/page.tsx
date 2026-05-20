@@ -13,9 +13,10 @@ import {
   PanelRightOpenIcon,
   PlayIcon,
   RefreshCwIcon,
+  SaveIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
@@ -48,32 +49,6 @@ type TreeNode = {
   kind: "directory" | "file";
   children?: TreeNode[];
 };
-
-function insertTreePath(nodes: TreeNode[], path: string) {
-  const clean = path.trim().replace(/^\/+/, "");
-  if (!clean) return;
-  const parts = clean.split("/").filter(Boolean);
-  let cursor = nodes;
-  let full = "";
-  parts.forEach((part, index) => {
-    full = full ? `${full}/${part}` : part;
-    let node = cursor.find((item) => item.path === full);
-    if (!node) {
-      node = {
-        name: part,
-        path: full,
-        kind: index === parts.length - 1 ? "file" : "directory",
-        children: [],
-      };
-      cursor.push(node);
-    }
-    if (index < parts.length - 1) {
-      node.kind = "directory";
-      node.children = node.children ?? [];
-      cursor = node.children;
-    }
-  });
-}
 
 function sortTree(nodes: TreeNode[]): TreeNode[] {
   return [...nodes]
@@ -118,52 +93,18 @@ export default function VaultPage() {
     }
     return "";
   })();
-  const [leftSection, setLeftSection] = useState<"raw" | "knowledge" | "files">("raw");
-  const [rootCollapsed, setRootCollapsed] = useState<Record<string, boolean>>({});
+  const [rootCollapsed, setRootCollapsed] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [previewTab, setPreviewTab] = useState<"preview" | "graph">("preview");
+  const [previewTab, setPreviewTab] = useState<"preview" | "graph">("graph");
   const [editorCollapsed, setEditorCollapsed] = useState(false);
+  const [graphNodeLimit, setGraphNodeLimit] = useState(80);
+  const deferredGraphNodeLimit = useDeferredValue(graphNodeLimit);
   const editorPanelRef = usePanelRef();
   const graphContainerRef = useRef<HTMLDivElement | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({});
   const { vaultFile, isLoading: vaultFileLoading } = useVaultFile(selectedPath);
   const [editableContent, setEditableContent] = useState("");
   const effectiveExplorer: VaultExplorerResponse | null = explorer;
-
-  const rawTree = useMemo(() => {
-    const root: TreeNode[] = [];
-    (effectiveExplorer?.raw_sources ?? []).forEach((item) => {
-      if (item.raw_path) insertTreePath(root, item.raw_path);
-    });
-    return sortTree(root);
-  }, [effectiveExplorer?.raw_sources]);
-
-  const knowledgeTree = useMemo(() => {
-    const groups: Array<{ label: string; key: "entities" | "concepts" | "sources" | "others" }> = [
-      { label: "Entities", key: "entities" },
-      { label: "Concepts", key: "concepts" },
-      { label: "Sources", key: "sources" },
-      { label: "Others", key: "others" },
-    ];
-    return groups.map((group) => ({
-      name: group.label,
-      path: `knowledge/${group.key}`,
-      kind: "directory" as const,
-      children: sortTree(
-        (effectiveExplorer?.knowledge?.[group.key] ?? []).map((node) => ({
-          name: node.name,
-          path: node.path,
-          kind: node.kind === "directory" ? "directory" : "file",
-          children: (node.children ?? []).map((child) => ({
-            name: child.name,
-            path: child.path,
-            kind: child.kind === "directory" ? "directory" : "file",
-            children: child.children as TreeNode[] | undefined,
-          })),
-        })),
-      ),
-    }));
-  }, [effectiveExplorer?.knowledge]);
 
   const filesTree = useMemo(
     () =>
@@ -194,14 +135,11 @@ export default function VaultPage() {
             style={{ paddingLeft: `${8 + depth * 14}px` }}
             onClick={() => {
               if (isDir) {
-                if (leftSection === "knowledge") {
-                  setPreviewTab("graph");
-                }
                 togglePath(node.path);
                 return;
               }
               setSelectedPath(node.path);
-              setPreviewTab(leftSection === "knowledge" ? "graph" : "preview");
+              setPreviewTab("preview");
             }}
           >
             {isDir ? (
@@ -238,14 +176,14 @@ export default function VaultPage() {
     if (previewTab === "graph") {
       graphContainerRef.current?.scrollTo({ top: 0 });
     }
-  }, [previewTab, selectedPath, leftSection]);
+  }, [previewTab, selectedPath]);
 
   const graphLayout = useMemo(() => {
     const rawNodes = effectiveExplorer?.graph?.nodes ?? [];
     const rawEdges = effectiveExplorer?.graph?.edges ?? [];
-    const MAX_GRAPH_NODES = 80;
     const MAX_CONCEPT_SEEDS = 28;
-    const normalizeGraphKind = (value: string) => {
+    type GraphKind = "source" | "concept" | "entity" | "other";
+    const normalizeGraphKind = (value: string): GraphKind => {
       const kind = value.toLowerCase();
       if (kind.includes("source")) return "source";
       if (kind.includes("concept")) return "concept";
@@ -275,7 +213,7 @@ export default function VaultPage() {
 
     const conceptSeeds = dedupedNodes
       .filter((node) => normalizeGraphKind(node.kind || "other") === "concept")
-      .slice(0, MAX_CONCEPT_SEEDS);
+      .slice(0, Math.min(MAX_CONCEPT_SEEDS, deferredGraphNodeLimit));
 
     const selectedNodeIds = new Set<string>(conceptSeeds.map((node) => node.id));
     if (selectedNodeIds.size > 0) {
@@ -295,21 +233,21 @@ export default function VaultPage() {
         .sort((a, b) => b[1] - a[1])
         .map(([nodeId]) => nodeId);
       for (const nodeId of rankedNeighbors) {
-        if (selectedNodeIds.size >= MAX_GRAPH_NODES) break;
+        if (selectedNodeIds.size >= deferredGraphNodeLimit) break;
         selectedNodeIds.add(nodeId);
       }
     }
     const selectedNodes =
       selectedNodeIds.size > 0
-        ? dedupedNodes.filter((node) => selectedNodeIds.has(node.id))
-        : dedupedNodes.slice(0, MAX_GRAPH_NODES);
+        ? dedupedNodes.filter((node) => selectedNodeIds.has(node.id)).slice(0, deferredGraphNodeLimit)
+        : dedupedNodes.slice(0, deferredGraphNodeLimit);
     const nodeIdSet = new Set(selectedNodes.map((node) => node.id));
     const edges = connectedEdges.filter((edge) => nodeIdSet.has(edge.source) && nodeIdSet.has(edge.target));
 
     const width = 900;
     const height = 520;
     const cx = width / 2;
-    const radiusByKind: Record<string, number> = {
+    const radiusByKind: Record<GraphKind, number> = {
       concept: Math.min(width, height) * 0.18,
       entity: Math.min(width, height) * 0.28,
       source: Math.min(width, height) * 0.36,
@@ -371,7 +309,7 @@ export default function VaultPage() {
       })
       .filter((edge): edge is NonNullable<typeof edge> => Boolean(edge));
     return { width, height, nodes: positioned, edges: visibleEdges, label, colorForKind };
-  }, [effectiveExplorer?.graph?.edges, effectiveExplorer?.graph?.nodes]);
+  }, [deferredGraphNodeLimit, effectiveExplorer?.graph?.edges, effectiveExplorer?.graph?.nodes]);
 
   return (
     <WorkspaceContainer>
@@ -456,49 +394,25 @@ export default function VaultPage() {
                     minSize={15}
                     className="flex h-full flex-col space-y-3 rounded-md border p-3"
                   >
-                    <div className="flex gap-2">
-                      <Button size="sm" variant={leftSection === "raw" ? "default" : "outline"} onClick={() => setLeftSection("raw")}>Raw Sources</Button>
-                      <Button size="sm" variant={leftSection === "knowledge" ? "default" : "outline"} onClick={() => setLeftSection("knowledge")}>Knowledge</Button>
-                      <Button size="sm" variant={leftSection === "files" ? "default" : "outline"} onClick={() => setLeftSection("files")}>Files</Button>
-                    </div>
+                    <p className="text-xs text-muted-foreground">/backend/.capybara-home/knowledge_vault/</p>
                     <div className="min-h-0 flex-1 overflow-y-auto space-y-1 text-xs">
-                      {(() => {
-                        const rootLabels: Record<string, string> = {
-                          raw: "01_raw",
-                          knowledge: "02_knowledge",
-                          files: "vault",
-                        };
-                        const isCollapsed = rootCollapsed[leftSection] ?? false;
-                        const activeTree =
-                          leftSection === "raw" ? rawTree : leftSection === "knowledge" ? knowledgeTree : filesTree;
-                        return (
-                          <>
-                            <button
-                              type="button"
-                              className="flex w-full items-center gap-1 rounded px-2 py-1 text-left font-medium hover:bg-muted"
-                              onClick={() =>
-                                setRootCollapsed((current) => ({
-                                  ...current,
-                                  [leftSection]: !isCollapsed,
-                                }))
-                              }
-                              aria-expanded={!isCollapsed}
-                              title={isCollapsed ? "Expand root" : "Collapse root"}
-                            >
-                              {isCollapsed ? (
-                                <ChevronRightIcon className="size-3.5" />
-                              ) : (
-                                <ChevronDownIcon className="size-3.5" />
-                              )}
-                              <FolderIcon className="size-3.5" />
-                              <span>{rootLabels[leftSection]}</span>
-                            </button>
-                            {!isCollapsed && renderTree(activeTree, 1)}
-                          </>
-                        );
-                      })()}
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-1 rounded px-2 py-1 text-left font-medium hover:bg-muted"
+                        onClick={() => setRootCollapsed((current) => !current)}
+                        aria-expanded={!rootCollapsed}
+                        title={rootCollapsed ? "Expand root" : "Collapse root"}
+                      >
+                        {rootCollapsed ? (
+                          <ChevronRightIcon className="size-3.5" />
+                        ) : (
+                          <ChevronDownIcon className="size-3.5" />
+                        )}
+                        <FolderIcon className="size-3.5" />
+                        <span>vault</span>
+                      </button>
+                      {!rootCollapsed && renderTree(filesTree, 1)}
                       {!explorerLoading &&
-                      (effectiveExplorer?.raw_sources?.length ?? 0) === 0 &&
                       (effectiveExplorer?.files?.length ?? 0) === 0 && (
                         <p className="text-muted-foreground px-1">No cached vault items yet.</p>
                       )}
@@ -550,6 +464,31 @@ export default function VaultPage() {
                               <DownloadIcon className="mr-1 size-3.5" />
                               Download
                             </Button>
+                            {vaultFile?.editable && !editorCollapsed ? (
+                              <Button
+                                size="icon-sm"
+                                variant="outline"
+                                onClick={() => {
+                                  if (!vaultFile?.path) return;
+                                  saveVaultFile.mutate(
+                                    { path: vaultFile.path, content: editableContent },
+                                    {
+                                      onSuccess: () => toast.success("Raw source updated."),
+                                      onError: (error) => toast.error(error.message),
+                                    },
+                                  );
+                                }}
+                                disabled={saveVaultFile.isPending}
+                                title="Save changes"
+                                aria-label="Save changes"
+                              >
+                                {saveVaultFile.isPending ? (
+                                  <Loader2Icon className="size-4 animate-spin" />
+                                ) : (
+                                  <SaveIcon className="size-4" />
+                                )}
+                              </Button>
+                            ) : null}
                             {vaultFile?.editable ? (
                               <Button
                                 size="sm"
@@ -635,32 +574,28 @@ export default function VaultPage() {
                             />
                           </ResizablePanel>
                         </ResizablePanelGroup>
-                        {vaultFile?.editable && !editorCollapsed ? (
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              if (!vaultFile?.path) return;
-                              saveVaultFile.mutate(
-                                { path: vaultFile.path, content: editableContent },
-                                {
-                                  onSuccess: () => toast.success("Raw source updated."),
-                                  onError: (error) => toast.error(error.message),
-                                },
-                              );
-                            }}
-                            disabled={saveVaultFile.isPending}
-                            className="self-start"
-                          >
-                            {saveVaultFile.isPending ? "Saving..." : "Save Changes"}
-                          </Button>
-                        ) : null}
                       </div>
                     ) : (
                       <div className="min-h-0 flex-1 space-y-2 text-xs">
-                        <p className="text-muted-foreground">
-                          <NetworkIcon className="mr-1 inline size-3.5" />
-                          Nodes {graphLayout.nodes.length} (trimmed) · Edges {graphLayout.edges.length}
-                        </p>
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-muted-foreground">
+                            <NetworkIcon className="mr-1 inline size-3.5" />
+                            Nodes {graphLayout.nodes.length} (trimmed) · Edges {graphLayout.edges.length}
+                          </p>
+                          <label className="flex items-center gap-2 text-muted-foreground">
+                            <span>Nodes: {graphNodeLimit}</span>
+                            <input
+                              type="range"
+                              min={10}
+                              max={160}
+                              step={10}
+                              value={graphNodeLimit}
+                              onChange={(event) => setGraphNodeLimit(Number(event.target.value))}
+                              className="w-32"
+                              aria-label="Knowledge graph node count"
+                            />
+                          </label>
+                        </div>
                         <div ref={graphContainerRef} className="h-full min-h-0 overflow-auto rounded border p-2">
                           <svg
                             viewBox={`0 0 ${graphLayout.width} ${graphLayout.height}`}
