@@ -121,6 +121,13 @@ class EvaluatorMiddleware(AgentMiddleware[EvaluatorState]):
             return False
         return bool(_extract_text(getattr(last, "content", "")).strip())
 
+    def _has_incomplete_todos(self, state: EvaluatorState) -> bool:
+        graph = state.get("todo_graph") or {}
+        nodes = graph.get("nodes") if isinstance(graph, dict) else None
+        if not isinstance(nodes, list) or not nodes:
+            return False
+        return any(node.get("status") != "completed" for node in nodes if isinstance(node, dict))
+
     def _pre_verify(self, state: EvaluatorState) -> list[str]:
         failures: list[str] = []
         graph = state.get("todo_graph") or {}
@@ -209,6 +216,11 @@ class EvaluatorMiddleware(AgentMiddleware[EvaluatorState]):
         if plan.get("evaluation_status") == "passed":
             return None
         if not self._is_terminal_ai_response(state):
+            return None
+        # Evaluator must not block todo DAG completion. Let todo recovery and
+        # execution middlewares drive todos to terminal state first.
+        if self._has_incomplete_todos(state):
+            append_runtime_event(runtime, {"source": "evaluator_middleware", "decision": "deferred_incomplete_todos"})
             return None
 
         attempts = int(state.get("eval_attempts", 0))

@@ -98,7 +98,18 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
         if options and len(options) > 0:
             message_parts.append("")  # blank line for spacing
             for i, option in enumerate(options, 1):
-                message_parts.append(f"  {i}. {option}")
+                if isinstance(option, dict):
+                    label = str(option.get("label") or "").strip()
+                    description = str(option.get("description") or "").strip()
+                    recommended = bool(option.get("recommended"))
+                    rendered_label = label or str(option).strip()
+                    prefix = " (Recommended)" if recommended else ""
+                    if description:
+                        message_parts.append(f"  {i}. {rendered_label}{prefix} — {description}")
+                    else:
+                        message_parts.append(f"  {i}. {rendered_label}{prefix}")
+                else:
+                    message_parts.append(f"  {i}. {option}")
 
         return "\n".join(message_parts)
 

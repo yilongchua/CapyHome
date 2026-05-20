@@ -446,7 +446,7 @@ class TestEnsureAgent:
         """_ensure_agent does not recreate if config key unchanged."""
         mock_agent = MagicMock()
         client._agent = mock_agent
-        client._agent_config_key = (None, True, False, False, "t1", None, True)
+        client._agent_config_key = (None, True, False, "work", False, False, "t1", None, True)
 
         config = client._get_runnable_config("t1")
         client._ensure_agent(config)
@@ -461,6 +461,14 @@ class TestEnsureAgent:
         assert cfg["current_turn_text"] == "Compare coffee methods"
         assert cfg["original_user_request"] == "Compare coffee methods"
 
+    def test_get_runnable_config_derives_plan_mode_from_explicit_mode(self, client):
+        config = client._get_runnable_config("t1", mode="work", plan_mode=True)
+        assert config["configurable"]["mode"] == "work"
+        assert config["configurable"]["is_plan_mode"] is True
+
+        config = client._get_runnable_config("t1", mode="work")
+        assert config["configurable"]["is_plan_mode"] is False
+
     def test_ensure_agent_passes_current_turn_text_to_prompt(self, client):
         config = client._get_runnable_config("t1", current_turn_text="Compare coffee methods")
 
@@ -474,6 +482,21 @@ class TestEnsureAgent:
             client._ensure_agent(config)
 
         assert mock_apply_prompt.call_args.kwargs["current_turn_text"] == "Compare coffee methods"
+
+    def test_ensure_agent_passes_mode_flags_to_prompt(self, client):
+        config = client._get_runnable_config("t1", mode="plan", background_followup=True)
+
+        with (
+            patch("src.client.create_chat_model"),
+            patch("src.client.create_agent", return_value=MagicMock()),
+            patch("src.client._build_middlewares", return_value=[]),
+            patch("src.client.apply_prompt_template", return_value="prompt") as mock_apply_prompt,
+            patch.object(client, "_get_tools", return_value=[]),
+        ):
+            client._ensure_agent(config)
+
+        assert mock_apply_prompt.call_args.kwargs["plan_mode"] is True
+        assert mock_apply_prompt.call_args.kwargs["background_followup"] is True
 
 
 # ---------------------------------------------------------------------------

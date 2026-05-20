@@ -6,7 +6,13 @@ from types import SimpleNamespace
 
 from langchain_core.messages import HumanMessage
 
-from src.agents.middlewares.planner_middleware import PlannerMiddleware, PlannerOutput
+from src.agents.middlewares.planner_middleware import (
+    ClarificationOption,
+    PlannerClarification,
+    PlannerMiddleware,
+    PlannerOutput,
+    _ensure_research_clarifications,
+)
 
 
 def _runtime(*, auto_mode: bool = False, plan_behavior: str = "plan_foreground") -> SimpleNamespace:
@@ -70,11 +76,36 @@ def test_plan_foreground_draft_pauses_before_lead_model(monkeypatch) -> None:
     assert update["plan"].get("awaiting_execution_approval") is True
 
 
-def test_auto_mode_approves_plan_without_pause(monkeypatch) -> None:
+def test_auto_mode_approves_plan_and_still_pauses_before_execution(monkeypatch) -> None:
     middleware = _planner(monkeypatch)
     state = {"messages": [HumanMessage(content="Analyze the Iran conflict")]}
     update = middleware.before_model(state, _runtime(auto_mode=True))
     assert update is not None
-    assert update.get("jump_to") is None
+    assert update.get("jump_to") == "end"
     assert update["plan"]["status"] == "approved"
     assert update["plan"].get("approved_at")
+
+
+def test_research_clarifications_normalize_recommended_first_and_option_count() -> None:
+    output = PlannerOutput(
+        domain="research",
+        clarifications=[
+            PlannerClarification(
+                question="Which timeframe should we use?",
+                options=[
+                    ClarificationOption(label="Last 3 years"),
+                    ClarificationOption(label="Last 12 months"),
+                    ClarificationOption(label="Since 2020"),
+                    ClarificationOption(label="This quarter"),
+                    ClarificationOption(label="Too many"),
+                ],
+            )
+        ],
+    )
+
+    clarifications = _ensure_research_clarifications("Research AI trends", output)
+
+    assert len(clarifications) >= 1
+    options = clarifications[0].options
+    assert 2 <= len(options) <= 4
+    assert options[0].recommended is True

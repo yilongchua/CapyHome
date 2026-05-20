@@ -16,9 +16,49 @@ _ALLOWED_WHEN_DRAFT = {
     "recall",
 }
 
+_ALLOWED_IN_PLAN_MODE = _ALLOWED_WHEN_DRAFT | {
+    "bash",
+    "ls",
+    "read_file",
+    "view_image",
+    "web_search",
+    "query_knowledge_vault",
+    "query_lightrag",
+    "search_internal_documents",
+}
+
+_BASH_MUTATION_TOKENS = (
+    ">",
+    ">>",
+    "tee ",
+    " rm ",
+    " mv ",
+    " cp ",
+    " chmod ",
+    " chown ",
+    " sed -i",
+    " perl -pi",
+    " git apply",
+    " git commit",
+    " git add",
+    " touch ",
+    " mkdir ",
+    " install ",
+)
+
 
 def _is_read_only_tool(tool_name: str) -> bool:
     return tool_name.startswith("read_") or tool_name.startswith("list_") or tool_name.startswith("get_")
+
+
+def _is_plan_mode(runtime: Any) -> bool:
+    context = getattr(runtime, "context", None) or {}
+    return str(context.get("mode") or "").strip().lower() == "plan"
+
+
+def _is_plan_safe_bash(command: str) -> bool:
+    lowered = f" {command.lower()} "
+    return not any(token in lowered for token in _BASH_MUTATION_TOKENS)
 
 
 class PlanExecutionGateState(AgentState):
@@ -53,6 +93,31 @@ class PlanExecutionGateMiddleware(AgentMiddleware[PlanExecutionGateState]):
     def _maybe_block(self, request: ToolCallRequest) -> Command | None:
         state = request.runtime.state if request.runtime is not None else {}
         plan = state.get("plan") if isinstance(state, dict) else None
+        tool_name = str(request.tool_call.get("name") or "")
+        tool_args = request.tool_call.get("args") or {}
+        in_plan_mode = _is_plan_mode(request.runtime)
+        if in_plan_mode:
+            if tool_name == "bash":
+                command = str(tool_args.get("command") or "")
+                if _is_plan_safe_bash(command):
+                    return None
+                return self._build_block_command(
+                    request,
+                    (
+                        "[plan_gate] Plan Mode allows bash only for read-only investigation. "
+                        "Use inspection commands such as rg, ls, cat, sed -n, pytest, or git status; do not mutate files or state."
+                    ),
+                )
+            if tool_name in _ALLOWED_IN_PLAN_MODE or _is_read_only_tool(tool_name):
+                return None
+            return self._build_block_command(
+                request,
+                (
+                    "[plan_gate] You are still in Plan Mode. Do not execute the work yet. "
+                    "Refine `plan.md`, update todos, gather read-only scope context, or ask clarification instead."
+                ),
+            )
+
         if not isinstance(plan, dict):
             return None
 
@@ -60,7 +125,6 @@ class PlanExecutionGateMiddleware(AgentMiddleware[PlanExecutionGateState]):
         if plan_status != "draft":
             return None
 
-        tool_name = str(request.tool_call.get("name") or "")
         clarification_pending = bool(plan.get("clarification_pending"))
 
         if clarification_pending and tool_name != "ask_clarification":

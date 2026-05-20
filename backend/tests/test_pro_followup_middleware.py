@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 
-def _make_runtime(thread_id: str = "thread-xyz") -> SimpleNamespace:
-    return SimpleNamespace(context={"thread_id": thread_id, "mode": "plan"})
+def _make_runtime(thread_id: str = "thread-xyz", *, mode: str = "work") -> SimpleNamespace:
+    return SimpleNamespace(context={"thread_id": thread_id, "mode": mode})
 
 
 class TestPlanFollowupFailureSurfacing:
@@ -135,11 +135,11 @@ class TestPlanFollowupFailureSurfacing:
         result = middleware.before_model({}, runtime)
 
         assert result is not None
-        assert result["execution_intent"]["mode"] == "plan"
+        assert result["execution_intent"]["mode"] == "work"
         assert result["execution_intent"]["allow_background_deepen"] is False
 
     def test_after_model_skips_background_followup_without_plan_context(self):
-        """Terminal plan-mode answers should not spawn deepening jobs when no plan/todos exist."""
+        """Terminal work-mode answers should not spawn deepening jobs when no plan/todos exist."""
         mod = self._mod
         middleware = mod.PlanFollowupMiddleware()
         runtime = _make_runtime("thread-no-plan")
@@ -148,6 +148,53 @@ class TestPlanFollowupFailureSurfacing:
                 SimpleNamespace(type="human", content="Check if drive is mounted."),
                 SimpleNamespace(type="ai", content="Yes", tool_calls=[]),
             ]
+        }
+
+        with (
+            patch("src.agents.middlewares.pro_followup_middleware.threading.Thread") as mock_thread,
+            patch("src.agents.middlewares.pro_followup_middleware.get_config", return_value={"metadata": {}}),
+        ):
+            result = middleware.after_model(state, runtime)
+
+        assert result is None
+        mock_thread.assert_not_called()
+
+    def test_after_model_uses_latest_real_user_prompt_not_synthetic_reminder(self):
+        mod = self._mod
+        middleware = mod.PlanFollowupMiddleware()
+        runtime = _make_runtime("thread-followup")
+        state = {
+            "plan": {"status": "completed"},
+            "todo_graph": {"nodes": [{"id": "todo-1", "status": "completed"}]},
+            "messages": [
+                SimpleNamespace(type="human", content="Find good bubble tea near town."),
+                SimpleNamespace(type="human", name="todo_reminder", content="<system_reminder> Todo DAG remains active. </system_reminder>"),
+                SimpleNamespace(type="ai", content="Here are two nearby options.", tool_calls=[]),
+            ],
+        }
+
+        with (
+            patch("src.agents.middlewares.pro_followup_middleware.threading.Thread") as mock_thread,
+            patch("src.agents.middlewares.pro_followup_middleware.get_config", return_value={"metadata": {}}),
+        ):
+            result = middleware.after_model(state, runtime)
+
+        assert result is not None
+        kwargs = mock_thread.call_args.kwargs["kwargs"]
+        assert "Find good bubble tea near town." in kwargs["summary_prompt"]
+        assert "<system_reminder>" not in kwargs["summary_prompt"]
+
+    def test_after_model_requires_completed_plan_and_todos(self):
+        mod = self._mod
+        middleware = mod.PlanFollowupMiddleware()
+        runtime = _make_runtime("thread-incomplete")
+        state = {
+            "plan": {"status": "executing"},
+            "todo_graph": {"nodes": [{"id": "todo-1", "status": "in_progress"}]},
+            "messages": [
+                SimpleNamespace(type="human", content="Investigate this."),
+                SimpleNamespace(type="ai", content="Partial answer", tool_calls=[]),
+            ],
         }
 
         with patch("src.agents.middlewares.pro_followup_middleware.threading.Thread") as mock_thread:

@@ -178,3 +178,27 @@ def test_build_prompt_has_no_soul_block_when_absent(monkeypatch):
     set_prompt_config(PromptConfig(componentized=True))
     result = prompt_module._build_prompt(False, 3, None, None)
     assert "<soul>" not in result
+
+
+def test_fetch_policy_no_longer_pushes_web_search_first(monkeypatch):
+    monkeypatch.setattr(prompt_module, "_get_memory_context", lambda agent_name=None, current_turn_text="": "")
+    monkeypatch.setattr(prompt_module, "get_agent_soul", lambda name: "")
+    monkeypatch.setattr(prompt_module, "get_skills_prompt_section", lambda _: "")
+
+    rendered = prompt_module.apply_prompt_template()
+    lowered = rendered.lower()
+
+    assert "should be attempted first" not in rendered
+    assert "use `web_search` only when fresh, external, or source-verifiable facts are actually needed" in lowered
+
+
+def test_plan_mode_prompt_overrides_fetch_policy(monkeypatch):
+    monkeypatch.setattr(prompt_module, "_get_memory_context", lambda agent_name=None, current_turn_text="": "")
+    monkeypatch.setattr(prompt_module, "get_agent_soul", lambda name: "")
+    monkeypatch.setattr(prompt_module, "get_skills_prompt_section", lambda _: "")
+
+    rendered = prompt_module.apply_prompt_template(plan_mode=True)
+    lowered = rendered.lower()
+
+    assert "expected outcome of plan mode is a plan artifact plus well-scoped todos" in lowered
+    assert "best bubble tea spots in central singapore" in lowered

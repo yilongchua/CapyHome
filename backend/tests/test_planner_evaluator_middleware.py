@@ -250,7 +250,7 @@ def test_planner_clears_clarification_pending_after_user_answer(tmp_path: Path):
     assert isinstance(update["plan"]["clarification_answered_at"], str)
 
 
-def test_evaluator_pre_verifier_injects_feedback_when_todos_incomplete(tmp_path: Path):
+def test_evaluator_defers_when_todos_incomplete(tmp_path: Path):
     middleware = EvaluatorMiddleware(
         router=_router(),
         requested_model="primary",
@@ -265,9 +265,7 @@ def test_evaluator_pre_verifier_injects_feedback_when_todos_incomplete(tmp_path:
         "thread_data": {"workspace_path": str(tmp_path)},
     }
     update = middleware.after_model(state, _runtime())
-    assert update is not None
-    assert update["eval_attempts"] == 1
-    assert "evaluator_feedback" == update["messages"][0].name
+    assert update is None
 
 
 def test_evaluator_marks_plan_passed_on_llm_pass(monkeypatch, tmp_path: Path):
