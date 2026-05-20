@@ -131,6 +131,9 @@ PROMPTS: list[dict[str, str]] = [
 # Embedded client derives the same fields via CapybaraClient._get_runnable_config.
 RUN_MODE = "plan"
 RUN_PLAN_BEHAVIOR = "plan_foreground"
+RUN_RECURSION_LIMIT = 3000
+# config.yaml models[].name — mlx-community/qwen3.6-35b-a3b @ http://192.168.1.21:1234/v1
+DEFAULT_MODEL_NAME = "qwen3.6-remote"
 
 
 def langgraph_run_context(
@@ -165,7 +168,7 @@ def run_config_snapshot(*, model_name: str, auto_mode: bool = True) -> dict[str,
         "subagent_enabled": True,
         "auto_mode": auto_mode,
         "model_name": model_name,
-        "recursion_limit": 1000,
+        "recursion_limit": RUN_RECURSION_LIMIT,
         "langgraph_alignment": "frontend/src/core/threads/hooks.ts#thread.submit.context",
     }
 
@@ -394,7 +397,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--delay-seconds", type=float, default=60.0, help="Delay after a run completes, immediately before submitting the next prompt.")
     parser.add_argument("--limit-prompts", type=int, default=None, help="Run only the first N prompts from each cycle. Useful for smoke tests.")
     parser.add_argument("--runtime", choices=["server", "embedded"], default="server", help="Execution runtime. Server mode matches the browser/LangGraph app.")
-    parser.add_argument("--model-name", default="qwen3.6-local", help="Configured model name to use for every prompt run.")
+    parser.add_argument(
+        "--model-name",
+        default=DEFAULT_MODEL_NAME,
+        help=f"config.yaml models[].name (default: {DEFAULT_MODEL_NAME})",
+    )
     parser.add_argument("--langgraph-url", default=DEFAULT_LANGGRAPH_URL, help="LangGraph server URL used by --runtime server.")
     parser.add_argument("--app-url", default=DEFAULT_APP_URL, help="Base app URL used to write chat_url metadata.")
     parser.add_argument("--gateway-url", default=DEFAULT_GATEWAY_URL, help="Gateway URL used for best-effort memory/thread cleanup.")
@@ -426,7 +433,11 @@ def main() -> int:
     total_runs = args.cycles * len(prompts)
     completed_runs = 0
     previous_run_completed = False
-    print(f"Starting {total_runs} prompt-tuning runs in {SCRIPT_DIR} using {args.runtime} runtime")
+    print(
+        f"Starting {total_runs} prompt-tuning runs in {SCRIPT_DIR} "
+        f"using {args.runtime} runtime, model={args.model_name}, "
+        f"recursion_limit={RUN_RECURSION_LIMIT}, mode={RUN_MODE}"
+    )
 
     for cycle_id in range(1, args.cycles + 1):
         print(f"\nCycle {cycle_id}/{args.cycles}")
