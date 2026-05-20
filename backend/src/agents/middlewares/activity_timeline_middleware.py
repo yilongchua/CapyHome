@@ -394,10 +394,36 @@ class ActivityTimelineMiddleware(AgentMiddleware[ActivityTimelineMiddlewareState
         activity_payload = self._flush_runtime_activity(request.runtime)
         return _merge_activity_into_command(result, activity_payload)
 
+    async def _awrap_tool_call_inner(self, request: ToolCallRequest, handler) -> ToolMessage | Command:
+        tool_name = request.tool_call.get("name")
+        append_runtime_event(
+            request.runtime,
+            {
+                "source": "activity_timeline_middleware",
+                "event": "tool_call_start",
+                "tool": tool_name,
+                "task_id": request.tool_call.get("id"),
+                "tool_input": _tool_summary(_as_dict(request.tool_call.get("args")) | {"tool_input": _as_str(_as_dict(request.tool_call.get("args")).get("query"))}),
+            },
+        )
+        result = await handler(request)
+        append_runtime_event(
+            request.runtime,
+            {
+                "source": "activity_timeline_middleware",
+                "event": "tool_call_end",
+                "tool": tool_name,
+                "task_id": request.tool_call.get("id"),
+                "tool_output_preview": _tool_output_preview(result),
+            },
+        )
+        activity_payload = self._flush_runtime_activity(request.runtime)
+        return _merge_activity_into_command(result, activity_payload)
+
     @override
     def wrap_tool_call(self, request: ToolCallRequest, handler) -> ToolMessage | Command:
         return self._wrap_tool_call_inner(request, handler)
 
     @override
     async def awrap_tool_call(self, request: ToolCallRequest, handler) -> ToolMessage | Command:
-        return self._wrap_tool_call_inner(request, handler)
+        return await self._awrap_tool_call_inner(request, handler)
