@@ -88,7 +88,73 @@ def test_write_todos_blocks_completed_while_plan_draft():
         tool_call_id="tc-draft",
     )
     message = result.update["messages"][0]
-    assert "[plan_gate]" in message.content
+    assert "[todo_update_rejected:draft_completion_blocked]" in message.content
+
+
+def test_write_todos_allows_completed_while_plan_executing():
+    runtime = _runtime(
+        {
+            "plan": {
+                "title": "Plan Title",
+                "summary": "Plan Summary",
+                "status": "executing",
+            },
+            "todo_graph": {
+                "nodes": [{"id": "a", "content": "Research", "status": "in_progress", "depends_on": []}],
+            },
+        }
+    )
+    result = write_todos_tool.func(
+        runtime=runtime,
+        todos=[{"id": "a", "status": "completed"}],
+        tool_call_id="tc-exec",
+    )
+    nodes = result.update["todo_graph"]["nodes"]
+    assert nodes[0]["status"] == "completed"
+
+
+def test_write_todos_blocks_mutation_when_plan_completed():
+    runtime = _runtime(
+        {
+            "plan": {
+                "title": "Plan Title",
+                "summary": "Plan Summary",
+                "status": "completed",
+            },
+            "todo_graph": {
+                "nodes": [{"id": "a", "content": "Research", "status": "completed", "depends_on": []}],
+            },
+        }
+    )
+    result = write_todos_tool.func(
+        runtime=runtime,
+        todos=[{"id": "a", "status": "pending"}],
+        tool_call_id="tc-completed",
+    )
+    message = result.update["messages"][0]
+    assert "[todo_update_rejected:completed_plan_frozen]" in message.content
+    assert result.update["todo_last_error_code"] == "completed_plan_frozen"
+
+
+def test_write_todos_validation_failure_returns_guidance():
+    runtime = _runtime(
+        {
+            "todo_graph": {
+                "nodes": [
+                    {"id": "a", "content": "A", "status": "pending", "depends_on": ["b"]},
+                    {"id": "b", "content": "B", "status": "pending", "depends_on": []},
+                ]
+            }
+        }
+    )
+    result = write_todos_tool.func(
+        runtime=runtime,
+        todos=[{"id": "b", "depends_on": ["a"]}],
+        tool_call_id="tc-invalid",
+    )
+    message = result.update["messages"][0]
+    assert "[todo_update_validation_failed:validation_failed]" in message.content
+    assert "Double check write_todos schema" in message.content
 
 
 def test_write_todos_syncs_plan(tmp_path):

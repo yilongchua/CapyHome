@@ -224,7 +224,17 @@ def _to_activity_event(runtime: Runtime, runtime_event: dict[str, Any]) -> Activ
 
     if line is None:
         # Best-effort fallback only for harness/runtime events we still want visible.
-        if source in {"planner_middleware", "plan_evaluator", "task_tool", "execution_trace_middleware", "activity_timeline_middleware"}:
+        if source in {
+            "planner_middleware",
+            "plan_evaluator",
+            "task_tool",
+            "execution_trace_middleware",
+            "activity_timeline_middleware",
+            "write_todos_tool",
+            "todo_failure_retry_middleware",
+            "dangling_tool_call_middleware",
+            "work_mode_middleware",
+        }:
             line = "Capybara is working on the next step..."
         else:
             return None

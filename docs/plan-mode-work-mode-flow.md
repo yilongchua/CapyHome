@@ -128,6 +128,28 @@ flowchart TD
 - Work mode advances by selecting one ready todo per loop, but that phase can still fan out into multiple subagents.
 - Subagents stream progress back into the same thread, which the frontend converts into subtask cards and activity timeline rows.
 
+## ADR: Mode-Aware Todo State Contract
+
+- Scope: `write_todos` transition policy by mode and plan status.
+- Goal: prevent premature completion in planning while allowing forward progress in execution.
+
+Rules:
+
+- Plan mode + `plan.status=draft`:
+  - Allowed: structural todo edits (add/remove/reorder/dependencies/content/owner), status updates to `pending`, `in_progress`, `blocked`.
+  - Disallowed by default: setting status to `completed`.
+- Work mode + `plan.status in {approved, executing}`:
+  - Allowed: normal execution transitions, including `completed`.
+- Completed plan + `plan.status=completed`:
+  - Frozen: todo mutation is blocked.
+  - Exception path: explicit re-plan creates a new active plan/todo graph.
+
+Recovery and resilience:
+
+- Work mode uses silent-forward loop safety:
+  - First N repeats continue normally.
+  - At threshold, one reconcile-only turn is injected (`write_todos` only), then normal execution resumes.
+
 ## Main Code References
 
 - [backend/src/agents/lead_agent/agent.py](/Users/ryan_chua/Desktop/capybara-home/backend/src/agents/lead_agent/agent.py:508)

@@ -22,6 +22,8 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
 from langchain_core.messages import ToolMessage
 
+from src.agents.middlewares.runtime_events import append_runtime_event
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,7 +35,7 @@ class DanglingToolCallMiddleware(AgentMiddleware[AgentState]):
     offending AIMessage so the LLM receives a well-formed conversation.
     """
 
-    def _build_patched_messages(self, messages: list) -> list | None:
+    def _build_patched_messages(self, messages: list, request: ModelRequest | None = None) -> list | None:
         """Return a new message list with patches inserted at the correct positions.
 
         For each AIMessage with dangling tool_calls (no corresponding ToolMessage),
@@ -81,6 +83,16 @@ class DanglingToolCallMiddleware(AgentMiddleware[AgentState]):
                             status="error",
                         )
                     )
+                    if request is not None and tc.get("name") == "write_todos":
+                        append_runtime_event(
+                            request.runtime,
+                            {
+                                "source": "dangling_tool_call_middleware",
+                                "event": "todo_update_dangling",
+                                "tool_call_id": tc_id,
+                                "tool_name": "write_todos",
+                            },
+                        )
                     patched_ids.add(tc_id)
                     patch_count += 1
 
@@ -93,7 +105,7 @@ class DanglingToolCallMiddleware(AgentMiddleware[AgentState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelCallResult:
-        patched = self._build_patched_messages(request.messages)
+        patched = self._build_patched_messages(request.messages, request)
         if patched is not None:
             request = request.override(messages=patched)
         return handler(request)
@@ -104,7 +116,7 @@ class DanglingToolCallMiddleware(AgentMiddleware[AgentState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelCallResult:
-        patched = self._build_patched_messages(request.messages)
+        patched = self._build_patched_messages(request.messages, request)
         if patched is not None:
             request = request.override(messages=patched)
         return await handler(request)

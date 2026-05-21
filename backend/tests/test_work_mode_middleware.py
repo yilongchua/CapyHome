@@ -37,13 +37,17 @@ def _runtime(
     thread_id: str = "thread-1",
     auto_mode: bool = False,
     model_name: str | None = None,
+    extra_context: dict | None = None,
 ) -> SimpleNamespace:
+    context = {
+        "thread_id": thread_id,
+        "auto_mode": auto_mode,
+        "model_name": model_name,
+    }
+    if extra_context:
+        context.update(extra_context)
     return SimpleNamespace(
-        context={
-            "thread_id": thread_id,
-            "auto_mode": auto_mode,
-            "model_name": model_name,
-        }
+        context=context
     )
 
 
@@ -311,6 +315,67 @@ class TestPhaseInstructionInjection:
         completed_events = [e for e in emitted if e.get("type") == "phase_completed"]
         assert len(completed_events) == 1
         assert completed_events[0]["todo_id"] == "t1"
+
+    def test_switches_to_reconcile_instruction_after_repeat_threshold(self):
+        mw = WorkModeMiddleware()
+        nodes = [_node("t1", "Analyze code", status="pending")]
+        phase_execution: dict | None = None
+
+        with patch(
+            "src.agents.middlewares.work_mode_middleware.get_stream_writer",
+            return_value=lambda e: None,
+        ), patch(
+            "src.agents.middlewares.work_mode_middleware._materialize_ready_ids",
+            return_value=["t1"],
+        ):
+            for i in range(1, 6):
+                result = mw.before_model(_state(nodes=nodes, phase_execution=phase_execution), _runtime())
+                assert result is not None
+                assert "Execute the following task now" in result["messages"][0].content
+                assert result["phase_execution"]["last_instruction_kind"] == "task"
+                assert result["phase_execution"]["repeat_counts"]["t1"] == i
+                phase_execution = result["phase_execution"]
+
+            result = mw.before_model(_state(nodes=nodes, phase_execution=phase_execution), _runtime())
+            assert result is not None
+            content = result["messages"][0].content
+            assert "Reconcile todo state now for todo id 't1' only." in content
+            assert "Do not call other tools in this turn." in content
+            assert result["phase_execution"]["last_instruction_kind"] == "reconcile"
+            assert result["phase_execution"]["forced_reconcile_done"]["t1"] is True
+
+            phase_execution = result["phase_execution"]
+            result = mw.before_model(_state(nodes=nodes, phase_execution=phase_execution), _runtime())
+            assert result is not None
+            assert "Execute the following task now" in result["messages"][0].content
+            assert result["phase_execution"]["last_instruction_kind"] == "task"
+
+    def test_forces_reconcile_after_dangling_write_todos_event(self):
+        mw = WorkModeMiddleware()
+        nodes = [_node("t1", "Analyze code", status="pending")]
+        phase_execution: dict | None = None
+        runtime = _runtime(
+            extra_context={
+                "_phase_a_runtime_events": [
+                    {
+                        "source": "dangling_tool_call_middleware",
+                        "event": "todo_update_dangling",
+                        "tool_name": "write_todos",
+                    }
+                ]
+            }
+        )
+        with patch(
+            "src.agents.middlewares.work_mode_middleware.get_stream_writer",
+            return_value=lambda e: None,
+        ), patch(
+            "src.agents.middlewares.work_mode_middleware._materialize_ready_ids",
+            return_value=["t1"],
+        ):
+            result = mw.before_model(_state(nodes=nodes, phase_execution=phase_execution), runtime)
+        assert result is not None
+        assert result["phase_execution"]["last_instruction_kind"] == "reconcile"
+        assert "Reconcile todo state now for todo id 't1' only." in result["messages"][0].content
 
 
 # ---------------------------------------------------------------------------

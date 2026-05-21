@@ -12,6 +12,7 @@ from langgraph.types import Command
 from langgraph.typing import ContextT
 
 from src.agents.middlewares.handoff_sync import ensure_plan_state, sync_handoff_files_from_state
+from src.agents.middlewares.runtime_events import append_runtime_event
 
 
 class TodoNodeInput(TypedDict, total=False):
@@ -30,6 +31,11 @@ class _TodoToolState(TypedDict, total=False):
     plan_history: NotRequired[list[dict[str, Any]] | None]
     todo_graph: NotRequired[dict | None]
     todos: NotRequired[list[dict[str, str]] | None]
+
+
+_REJECTED_DRAFT_COMPLETION = "draft_completion_blocked"
+_REJECTED_COMPLETED_PLAN_MUTATION = "completed_plan_frozen"
+_VALIDATION_FAILED = "validation_failed"
 
 
 def _utc_now_iso() -> str:
@@ -161,6 +167,21 @@ def _legacy_todos(nodes: list[dict[str, Any]]) -> list[dict[str, str]]:
     return [{"content": str(node["content"]), "status": str(node["status"])} for node in nodes]
 
 
+def _build_reject_command(*, tool_call_id: str, reason_code: str, message: str) -> Command:
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(
+                    content=f"[todo_update_rejected:{reason_code}] {message}",
+                    tool_call_id=tool_call_id,
+                )
+            ],
+            "todo_last_error_code": reason_code,
+            "todo_last_error_message": message,
+        }
+    )
+
+
 @tool("write_todos")
 def write_todos_tool(
     runtime: ToolRuntime[ContextT, _TodoToolState],
@@ -176,32 +197,71 @@ def write_todos_tool(
     state = runtime.state or {} if runtime else {}
     plan = state.get("plan") if isinstance(state, dict) else None
     plan_status = str(plan.get("status") or "").strip().lower() if isinstance(plan, dict) else ""
+    mode = str((getattr(runtime, "context", None) or {}).get("mode") or "").strip().lower() if runtime is not None else ""
+    if plan_status == "completed":
+        if runtime is not None:
+            append_runtime_event(
+                runtime,
+                {"source": "write_todos_tool", "event": "todo_update_rejected", "reason_code": _REJECTED_COMPLETED_PLAN_MUTATION, "mode": mode, "plan_status": plan_status},
+            )
+        return _build_reject_command(
+            tool_call_id=tool_call_id,
+            reason_code=_REJECTED_COMPLETED_PLAN_MUTATION,
+            message="Plan is completed and todo mutations are frozen. Start an explicit re-plan to modify todos.",
+        )
+
     if plan_status == "draft":
-        blocked_completed = [
-            str(item.get("id") or "").strip()
-            for item in todos
-            if str(item.get("status") or "").strip().lower() == "completed"
-        ]
+        blocked_completed = [str(item.get("id") or "").strip() for item in todos if str(item.get("status") or "").strip().lower() == "completed"]
         blocked_completed = [todo_id for todo_id in blocked_completed if todo_id]
         if blocked_completed:
-            return Command(
-                update={
-                    "messages": [
-                        ToolMessage(
-                            content=(
-                                "[plan_gate] Cannot mark todos completed while the plan is still draft. "
-                                f"Blocked ids: {', '.join(blocked_completed)}. "
-                                "Approve the plan via Execute Plan first, or mark todos blocked with a reason."
-                            ),
-                            tool_call_id=tool_call_id,
-                        )
-                    ]
-                }
+            if runtime is not None:
+                append_runtime_event(
+                    runtime,
+                    {"source": "write_todos_tool", "event": "todo_update_rejected", "reason_code": _REJECTED_DRAFT_COMPLETION, "mode": mode, "plan_status": plan_status, "blocked_ids": blocked_completed},
+                )
+            return _build_reject_command(
+                tool_call_id=tool_call_id,
+                reason_code=_REJECTED_DRAFT_COMPLETION,
+                message=(
+                    "Draft plan cannot mark todos completed. "
+                    f"Blocked ids: {', '.join(blocked_completed)}. "
+                    "In plan mode, use pending/in_progress/blocked and update structure; complete todos after plan approval in work mode."
+                ),
             )
 
     existing_nodes_raw = ((state.get("todo_graph") or {}).get("nodes") if isinstance(state, dict) else None)
     existing_nodes = existing_nodes_raw if isinstance(existing_nodes_raw, list) else []
-    merged_nodes = merge_todo_nodes(existing_nodes, todos)
+    try:
+        merged_nodes = merge_todo_nodes(existing_nodes, todos)
+    except ValueError as exc:
+        if runtime is not None:
+            append_runtime_event(
+                runtime,
+                {
+                    "source": "write_todos_tool",
+                    "event": "todo_update_validation_failed",
+                    "reason_code": _VALIDATION_FAILED,
+                    "mode": mode,
+                    "plan_status": plan_status,
+                    "error": str(exc),
+                },
+            )
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content=(
+                            f"[todo_update_validation_failed:{_VALIDATION_FAILED}] {exc}\n"
+                            "Double check write_todos schema. Example:\n"
+                            "{\"todos\":[{\"id\":\"todo-1\",\"status\":\"in_progress\"}]}"
+                        ),
+                        tool_call_id=tool_call_id,
+                    )
+                ],
+                "todo_last_error_code": _VALIDATION_FAILED,
+                "todo_last_error_message": str(exc),
+            }
+        )
     ready_ids = _materialize_ready_ids(merged_nodes)
     update_payload = {
         "todo_graph": {
@@ -216,6 +276,8 @@ def write_todos_tool(
                 tool_call_id=tool_call_id,
             )
         ],
+        "todo_last_error_code": None,
+        "todo_last_error_message": None,
     }
     if runtime is not None:
         merged_state = dict(runtime.state or {})
