@@ -15,7 +15,10 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
+from src.agents.middlewares.runtime_events import append_runtime_event
+
 _MAX_TODO_RECOVERY_ATTEMPTS = 10
+_MAX_SCHEMA_RECOVERY_ATTEMPTS = 1
 logger = logging.getLogger(__name__)
 
 _TODO_RECOVERY_PROMPT = """You are in work mode. Do not create a new plan.
@@ -33,6 +36,7 @@ class TodoFailureRetryState(AgentState):
 
     todo_graph: NotRequired[dict | None]
     todo_recovery_attempts: NotRequired[int]
+    todo_schema_recovery_attempts: NotRequired[int]
 
 
 def _has_incomplete_todos(state: TodoFailureRetryState) -> bool:
@@ -69,6 +73,32 @@ class TodoFailureRetryMiddleware(AgentMiddleware[TodoFailureRetryState]):
             return None
         if getattr(last, "tool_calls", None):
             return None
+
+        last_text = str(getattr(last, "content", "") or "")
+        if "[todo_update_validation_failed:" in last_text:
+            schema_attempts = int(state.get("todo_schema_recovery_attempts", 0))
+            if schema_attempts < _MAX_SCHEMA_RECOVERY_ATTEMPTS:
+                append_runtime_event(
+                    runtime,
+                    {"source": "todo_failure_retry_middleware", "event": "todo_update_validation_failed", "attempt": schema_attempts + 1},
+                )
+                reminder = HumanMessage(
+                    name="todo_failure_recovery",
+                    content=(
+                        "<system_reminder>\n"
+                        "Your previous write_todos payload was invalid. Retry now with a strict schema.\n"
+                        "Use this exact shape:\n"
+                        "{\"todos\":[{\"id\":\"todo-1\",\"status\":\"in_progress\"}]}\n"
+                        "Allowed status values: pending, in_progress, completed, blocked.\n"
+                        "Keep depends_on as a list of existing todo ids only.\n"
+                        "</system_reminder>"
+                    ),
+                )
+                return {
+                    "messages": [reminder],
+                    "todo_schema_recovery_attempts": schema_attempts + 1,
+                    "jump_to": "model",
+                }
 
         attempts = int(state.get("todo_recovery_attempts", 0))
         if attempts >= _MAX_TODO_RECOVERY_ATTEMPTS:

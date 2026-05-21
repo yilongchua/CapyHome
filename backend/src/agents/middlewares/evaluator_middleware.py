@@ -150,7 +150,9 @@ class EvaluatorMiddleware(AgentMiddleware[EvaluatorState]):
             if incomplete:
                 failures.append(
                     f"Plan has unfinished todos: {', '.join(incomplete)}. "
-                    "Call `write_todos` with these ids set to `status: completed` (or `blocked` with a reason) "
+                    "Use mode-aware todo reconciliation: in work mode set done items to `status: completed`; "
+                    "in plan draft mode keep items as `pending`/`in_progress`/`blocked` and refine structure. "
+                    "Call `write_todos` with explicit ids and statuses "
                     "before producing a final answer. If `write_todos` is unavailable, explicitly report that "
                     "and list the intended status updates in plain text."
                 )

@@ -43,11 +43,13 @@ from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 
 from src.agents.middlewares.plan_execution import format_clarification_context_for_work
+from src.agents.middlewares.runtime_events import RUNTIME_EVENTS_KEY, append_runtime_event
 from src.agents.middlewares.todo_dag_middleware import _materialize_ready_ids
 
 logger = logging.getLogger(__name__)
 
 _MAX_AUTO_ADAPTATION_ATTEMPTS = 2
+_WORK_MODE_REPEAT_THRESHOLD = 5
 _WORD_RE = re.compile(r"\b\w+\b")
 _COMPLEX_KEYWORDS = (
     "plan",
@@ -328,7 +330,8 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
             for n in nodes
             if isinstance(n, dict) and n.get("status") == "in_progress" and n.get("id")
         ]
-        if stale_in_progress_ids and not running_deferred:
+        can_self_heal_in_progress = plan_status in {"approved", "executing"}
+        if stale_in_progress_ids and not running_deferred and can_self_heal_in_progress:
             repaired_nodes: list[dict] = []
             for node in nodes:
                 if not isinstance(node, dict):
@@ -383,11 +386,17 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
             nid for nid in ready_ids
             if node_by_id.get(nid, {}).get("status") not in {"completed", "in_progress"}
         ]
+        has_in_progress = any(
+            isinstance(n, dict) and n.get("status") == "in_progress"
+            for n in nodes
+        )
 
         # ── Plan adaptation: nodes exist but none are ready ────────────────────
         # Exclude in_progress — a running todo is not a sign the plan is stuck.
-        pending_nodes = [n for n in nodes if n.get("status") not in {"completed", "blocked", "in_progress"}]
-        if not pending_ready and pending_nodes:
+        # Blocked items still represent unfinished work and should trigger adaptation
+        # when nothing is ready.
+        pending_nodes = [n for n in nodes if n.get("status") not in {"completed", "in_progress"}]
+        if not pending_ready and pending_nodes and not has_in_progress:
             return self._handle_plan_adapted(
                 state=state,
                 nodes=nodes,
@@ -416,6 +425,7 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
 
         # ── Emit phase_started and inject instruction ──────────────────────────
         next_todo = node_by_id[pending_ready[0]]
+        next_todo_id = str(next_todo.get("id") or "")
         phase_index = next((i for i, n in enumerate(nodes) if n["id"] == next_todo["id"]), 0)
         total_phases = len(nodes)
 
@@ -455,22 +465,66 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
                 "Write the final report to /mnt/user-data/workspace/ (e.g. report.md) and call `present_files` so the user receives it.\n"
                 "Before final write_file, self-check for duplicate table rows, repeated long paragraphs, heading numbering consistency, and required sections.\n"
             )
-        instruction = HumanMessage(
-            name="work_mode_instruction",
-            content=(
-                f"<work_mode_instruction>\n"
-                f"Execute the following task now: {todo_content}.{subagent_hint}{rationale_block}\n"
-                f"{clarification_block}"
-                f"{report_contract}"
-                f"When done, call write_todos to mark todo id '{next_todo['id']}' as completed.\n"
-                f"If write_todos is unexpectedly unavailable, state that explicitly and include the intended status update for todo id '{next_todo['id']}'.\n"
-                f"Do NOT output any text — the system will automatically assign the next phase.\n"
-                f"</work_mode_instruction>"
-            ),
+        existing_pe: dict = dict(state.get("phase_execution") or {})
+        repeat_counts_raw = existing_pe.get("repeat_counts") if isinstance(existing_pe.get("repeat_counts"), dict) else {}
+        repeat_counts: dict[str, int] = {}
+        for key, value in dict(repeat_counts_raw or {}).items():
+            try:
+                repeat_counts[str(key)] = int(value)
+            except (TypeError, ValueError):
+                continue
+        forced_reconcile_raw = existing_pe.get("forced_reconcile_done") if isinstance(existing_pe.get("forced_reconcile_done"), dict) else {}
+        forced_reconcile_done: dict[str, bool] = {str(key): bool(value) for key, value in dict(forced_reconcile_raw or {}).items()}
+        last_todo_id = str(existing_pe.get("last_todo_id") or "").strip()
+        repeat_count = repeat_counts.get(next_todo_id, 0) + 1 if last_todo_id == next_todo_id else 1
+        repeat_counts[next_todo_id] = repeat_count
+        threshold = _WORK_MODE_REPEAT_THRESHOLD
+        should_force_reconcile = (
+            repeat_count > threshold
+            and not forced_reconcile_done.get(next_todo_id, False)
         )
+        runtime_events = (getattr(runtime, "context", None) or {}).get(RUNTIME_EVENTS_KEY, [])
+        dangling_todo_update = any(
+            isinstance(evt, dict)
+            and evt.get("event") == "todo_update_dangling"
+            and str(evt.get("tool_name") or "") == "write_todos"
+            for evt in (runtime_events if isinstance(runtime_events, list) else [])
+        )
+        should_force_reconcile = should_force_reconcile or (dangling_todo_update and not forced_reconcile_done.get(next_todo_id, False))
+
+        instruction_body = (
+            f"Execute the following task now: {todo_content}.{subagent_hint}{rationale_block}\n"
+            f"{clarification_block}"
+            f"{report_contract}"
+            f"When done, call write_todos to mark todo id '{next_todo['id']}' as completed.\n"
+            f"If write_todos is unexpectedly unavailable, state that explicitly and include the intended status update for todo id '{next_todo['id']}'.\n"
+            f"Do NOT output any text — the system will automatically assign the next phase.\n"
+        )
+        instruction_kind = "task"
+        if should_force_reconcile:
+            forced_reconcile_done[next_todo_id] = True
+            instruction_kind = "reconcile"
+            append_runtime_event(
+                runtime,
+                {
+                    "source": "work_mode_middleware",
+                    "event": "todo_reconcile_forced",
+                    "todo_id": next_todo_id,
+                    "repeat_count": repeat_count,
+                    "trigger": "dangling_write_todos" if dangling_todo_update else "repeat_threshold",
+                },
+            )
+            instruction_body = (
+                f"Reconcile todo state now for todo id '{next_todo['id']}' only.\n"
+                f"Call write_todos immediately with an explicit status update for '{next_todo['id']}' "
+                "(`completed` if done, otherwise `in_progress` or `blocked` with a short reason).\n"
+                "Do not call other tools in this turn.\n"
+                "If write_todos is unexpectedly unavailable, state that explicitly and include the intended status update.\n"
+                "Do NOT output any text — the system will automatically assign the next phase.\n"
+            )
+        instruction = HumanMessage(name="work_mode_instruction", content=f"<work_mode_instruction>\n{instruction_body}</work_mode_instruction>")
 
         # ── Update phase_execution state ───────────────────────────────────────
-        existing_pe: dict = dict(state.get("phase_execution") or {})
         phase_results: list[dict] = list(existing_pe.get("phase_results") or [])
 
         existing_idx = next((i for i, r in enumerate(phase_results) if r.get("todo_id") == next_todo["id"]), None)
@@ -487,6 +541,8 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
             phase_results.append(new_entry)
 
         for todo_id in newly_completed:
+            repeat_counts.pop(todo_id, None)
+            forced_reconcile_done.pop(todo_id, None)
             idx = next((i for i, r in enumerate(phase_results) if r.get("todo_id") == todo_id), None)
             if idx is not None and phase_results[idx].get("status") != "completed":
                 phase_results[idx] = {
@@ -518,6 +574,10 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
                 "current_phase": phase_index,
                 "total_phases": total_phases,
                 "phase_results": phase_results,
+                "repeat_counts": repeat_counts,
+                "forced_reconcile_done": forced_reconcile_done,
+                "last_todo_id": next_todo_id,
+                "last_instruction_kind": instruction_kind,
             },
             "messages": [instruction],
         }
