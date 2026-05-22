@@ -92,13 +92,12 @@ export function LlmSettingsPage() {
 
   function buildEndpointKey(): string {
     const base = displayName.trim().toLowerCase().replace(/\s+/g, "-") || provider;
-    let key = base;
-    let idx = 1;
-    while (key in endpoints) {
+    if (!(base in endpoints)) return base;
+    let idx = 2;
+    while (`${base}-${idx}` in endpoints) {
       idx += 1;
-      key = `${base}-${idx}`;
     }
-    return key;
+    return `${base}-${idx}`;
   }
 
   function handleAdd() {

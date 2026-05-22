@@ -174,6 +174,7 @@ FastAPI application on port 8001 with health check at `GET /health`.
 | **Pipelines** (`/api/pipelines`) | `GET /` templates; `GET /runs` list runs (optional `thread_id`, `status`, `limit` filters); `POST /runs` create run; `POST /runs/{id}/start` start run |
 | **Uploads** (`/api/threads/{id}/uploads`) | `POST /` - upload files (auto-converts PDF/PPT/Excel/Word); `GET /list` - list; `DELETE /{filename}` - delete |
 | **Artifacts** (`/api/threads/{id}/artifacts`) | `GET /{path}` - serve artifacts; `?download=true` for file download |
+| **Onboarding** (`/api/onboarding`) | `POST /test-llm` probe OpenAI-compatible `/v1/models`; `POST /test-comfyui` hit `/system_stats`; `POST /test-generic` health-check arbitrary URL (rejects non-http and cloud-metadata hosts); `GET/PUT /llm-endpoints` read/write user LLM endpoints in `extensions_config.json` while preserving unknown top-level keys |
 
 Proxied through nginx: `/api/langgraph/*` → LangGraph, all other `/api/*` → Gateway.
 

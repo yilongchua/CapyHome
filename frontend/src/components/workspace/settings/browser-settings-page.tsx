@@ -63,9 +63,17 @@ export function BrowserSettingsPage() {
 
   const handleAddAsMcp = useCallback(() => {
     if (!customUrl.trim()) return;
+    const existing = mcpConfig?.mcp_servers ?? {};
+    const base = "playwright-sse";
+    let serverName = base;
+    if (serverName in existing) {
+      let idx = 2;
+      while (`${base}-${idx}` in existing) idx += 1;
+      serverName = `${base}-${idx}`;
+    }
     addMCPServer(
       {
-        serverName: "playwright-sse",
+        serverName,
         serverConfig: {
           enabled: true,
           description: "Playwright MCP server (SSE/HTTP mode)",
@@ -81,7 +89,7 @@ export function BrowserSettingsPage() {
         },
       },
     );
-  }, [customUrl, addMCPServer, resetTest]);
+  }, [customUrl, addMCPServer, resetTest, mcpConfig]);
 
   return (
     <SettingsSection
