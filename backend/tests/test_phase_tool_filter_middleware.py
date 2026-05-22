@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from src.agents.middlewares.phase_tool_filter_middleware import (
     _DRAFT_HIDDEN_TOOLS,
+    _WORK_HIDDEN_TOOLS,
     PhaseToolFilterMiddleware,
 )
 
@@ -55,7 +56,7 @@ def test_draft_plan_hides_execution_tools_from_catalog() -> None:
     assert "read_file" in visible_names
 
 
-def test_approved_plan_does_not_filter() -> None:
+def test_approved_plan_does_not_filter_execution_tools() -> None:
     middleware = PhaseToolFilterMiddleware()
     tools = [_named_tool("web_search"), _named_tool("task")]
     state = {"plan": {"status": "approved"}}
@@ -72,6 +73,53 @@ def test_approved_plan_does_not_filter() -> None:
     visible_names = {getattr(t, "name", None) for t in captured["tools"]}
     assert "web_search" in visible_names
     assert "task" in visible_names
+
+
+def test_work_mode_hides_scope_search() -> None:
+    """Work Mode / approved plan: scope_search is removed so the LLM doesn't
+    reach for it as a lightweight web_search substitute."""
+    middleware = PhaseToolFilterMiddleware()
+    tools = [
+        _named_tool("web_search"),
+        _named_tool("scope_search"),
+        _named_tool("query_knowledge_vault"),
+    ]
+    state = {"plan": {"status": "approved"}}
+    runtime = SimpleNamespace(context={"mode": "work"})
+    request = _model_request(tools=tools, state=state, runtime=runtime)
+
+    captured: dict[str, list] = {}
+
+    def handler(req):
+        captured["tools"] = list(req.tools)
+        return "ok"
+
+    middleware.wrap_model_call(request, handler)
+    visible_names = {getattr(t, "name", None) for t in captured["tools"]}
+    assert "scope_search" not in visible_names
+    assert "web_search" in visible_names
+    assert "query_knowledge_vault" in visible_names
+
+
+def test_work_mode_with_no_plan_hides_scope_search() -> None:
+    """Mirror of the yoga thread: mode=None, no plan in state. scope_search
+    must still be stripped so it can't be called outside Plan Mode."""
+    middleware = PhaseToolFilterMiddleware()
+    tools = [_named_tool("web_search"), _named_tool("scope_search")]
+    state = {}  # no plan
+    runtime = SimpleNamespace(context={})  # mode is not "plan"
+    request = _model_request(tools=tools, state=state, runtime=runtime)
+
+    captured: dict[str, list] = {}
+
+    def handler(req):
+        captured["tools"] = list(req.tools)
+        return "ok"
+
+    middleware.wrap_model_call(request, handler)
+    visible_names = {getattr(t, "name", None) for t in captured["tools"]}
+    assert "scope_search" not in visible_names
+    assert "web_search" in visible_names
 
 
 def test_plan_mode_without_plan_still_filters() -> None:
@@ -112,3 +160,8 @@ def test_hidden_set_includes_expected_search_and_write_tools() -> None:
     for tool_name in ("web_search", "query_knowledge_vault", "query_lightrag",
                       "search_internal_documents", "task", "write_file", "str_replace"):
         assert tool_name in _DRAFT_HIDDEN_TOOLS
+
+
+def test_work_hidden_set_includes_scope_search() -> None:
+    # scope_search must be hidden in Work Mode / approved-plan state.
+    assert "scope_search" in _WORK_HIDDEN_TOOLS

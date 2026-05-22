@@ -308,8 +308,41 @@ export default function VaultPage() {
         };
       })
       .filter((edge): edge is NonNullable<typeof edge> => Boolean(edge));
-    return { width, height, nodes: positioned, edges: visibleEdges, label, colorForKind };
+    return {
+      width,
+      height,
+      nodes: positioned,
+      edges: visibleEdges,
+      label,
+      colorForKind,
+      totalAvailable: dedupedNodes.length,
+      rawNodeCount: rawNodes.length,
+    };
   }, [deferredGraphNodeLimit, effectiveExplorer?.graph?.edges, effectiveExplorer?.graph?.nodes]);
+
+  const graphLegend = useMemo(
+    () => [
+      { kind: "concept", label: "Concept", color: "#1d4ed8" },
+      { kind: "entity", label: "Entity", color: "#7c3aed" },
+      { kind: "source", label: "Source", color: "#0f766e" },
+      { kind: "other", label: "Other", color: "#64748b" },
+    ],
+    [],
+  );
+
+  const graphKindCounts = useMemo(() => {
+    const counts = { concept: 0, entity: 0, source: 0, other: 0 };
+    for (const node of graphLayout.nodes) {
+      const kind = (node.kind || "other").toLowerCase();
+      if (kind.includes("concept")) counts.concept += 1;
+      else if (kind.includes("entity")) counts.entity += 1;
+      else if (kind.includes("source")) counts.source += 1;
+      else counts.other += 1;
+    }
+    return counts;
+  }, [graphLayout.nodes]);
+
+  const effectiveSliderMax = Math.max(10, Math.min(160, graphLayout.totalAvailable || 160));
 
   return (
     <WorkspaceContainer>
@@ -577,13 +610,21 @@ export default function VaultPage() {
                       </div>
                     ) : (
                       <div className="min-h-0 flex-1 space-y-2 text-xs">
-                        <div className="flex items-center justify-between gap-3">
+                        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
                           <p className="text-muted-foreground">
                             <NetworkIcon className="mr-1 inline size-3.5" />
-                            Nodes {graphLayout.nodes.length} (trimmed) · Edges {graphLayout.edges.length}
+                            Showing {graphLayout.nodes.length} of {graphLayout.totalAvailable} nodes
+                            {graphLayout.rawNodeCount > graphLayout.totalAvailable
+                              ? ` (deduped from ${graphLayout.rawNodeCount})`
+                              : ""}
+                            {" · "}Edges {graphLayout.edges.length}
                           </p>
                           <label className="flex items-center gap-2 text-muted-foreground">
-                            <span>Nodes: {graphNodeLimit}</span>
+                            <span>
+                              Max nodes:{" "}
+                              {Math.min(graphNodeLimit, effectiveSliderMax)}
+                              {graphNodeLimit > effectiveSliderMax ? ` (cap ${effectiveSliderMax})` : ""}
+                            </span>
                             <input
                               type="range"
                               min={10}
@@ -592,9 +633,25 @@ export default function VaultPage() {
                               value={graphNodeLimit}
                               onChange={(event) => setGraphNodeLimit(Number(event.target.value))}
                               className="w-32"
-                              aria-label="Knowledge graph node count"
+                              aria-label="Knowledge graph max node count"
+                              title="Maximum nodes to render. Actual count may be lower after dedup/connectivity filtering."
                             />
                           </label>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+                          <span className="font-medium">Legend:</span>
+                          {graphLegend.map((item) => (
+                            <span key={item.kind} className="flex items-center gap-1.5">
+                              <span
+                                className="inline-block size-2.5 rounded-full"
+                                style={{ backgroundColor: item.color }}
+                                aria-hidden
+                              />
+                              <span>
+                                {item.label} ({graphKindCounts[item.kind as keyof typeof graphKindCounts]})
+                              </span>
+                            </span>
+                          ))}
                         </div>
                         <div ref={graphContainerRef} className="h-full min-h-0 overflow-auto rounded border p-2">
                           <svg
