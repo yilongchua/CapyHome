@@ -51,6 +51,10 @@ class SummarizationConfig(BaseModel):
         default=None,
         description="Custom prompt template for generating summaries. If not provided, uses the default LangChain prompt.",
     )
+    max_context_tokens: int | None = Field(
+        default=None,
+        description="Maximum context window tokens for the model. Used by the idle-aware deferral logic to decide whether compaction can be safely postponed. Falls back to model profile -> model_extra -> default 128000.",
+    )
     modes: dict[str, "SummarizationModeOverride"] = Field(
         default_factory=dict,
         description="Optional per-mode overrides keyed by mode name: work, plan, dreamy. Legacy aliases fast/pro are also recognized.",
@@ -64,6 +68,7 @@ class SummarizationModeOverride(BaseModel):
     keep: ContextSize | None = Field(default=None)
     trim_tokens_to_summarize: int | None = Field(default=None)
     summary_prompt: str | None = Field(default=None)
+    max_context_tokens: int | None = Field(default=None)
 
 
 # Global configuration instance

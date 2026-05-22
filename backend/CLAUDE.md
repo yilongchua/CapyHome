@@ -512,12 +512,13 @@ For models with `supports_vision: true`:
 
 ## Documentation
 
-See `docs/` directory for detailed documentation:
-- [CONFIGURATION.md](docs/CONFIGURATION.md) - Configuration options
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Architecture details
-- [API.md](docs/API.md) - API reference
-- [SETUP.md](docs/SETUP.md) - Setup guide
-- [FILE_UPLOAD.md](docs/FILE_UPLOAD.md) - File upload feature
-- [PATH_EXAMPLES.md](docs/PATH_EXAMPLES.md) - Path types and usage
-- [summarization.md](docs/summarization.md) - Context summarization
-- [plan_mode_usage.md](docs/plan_mode_usage.md) - Plan mode with TodoList
+See `docs/agent-system/` directory for detailed documentation:
+- [CONFIGURATION.md](docs/agent-system/CONFIGURATION.md) - Configuration options
+- [ARCHITECTURE.md](docs/agent-system/ARCHITECTURE.md) - Architecture details
+- [API.md](docs/agent-system/API.md) - API reference
+- [SETUP.md](docs/agent-system/SETUP.md) - Setup guide
+- [FILE_UPLOAD.md](docs/agent-system/FILE_UPLOAD.md) - File upload feature
+- [PATH_EXAMPLES.md](docs/agent-system/PATH_EXAMPLES.md) - Path types and usage
+- [summarization.md](docs/agent-system/summarization.md) - Context summarization
+- [plan_mode_usage.md](docs/agent-system/plan_mode_usage.md) - Plan mode with TodoList
+- [lead-agent-harness-analysis.md](docs/agent-system/lead-agent-harness-analysis.md) - Lead Agent flow & Harness in-depth analysis

@@ -14,11 +14,19 @@ Two enhancements over the base SummarizationMiddleware:
    permanently lost, forcing the agent to re-activate skills mid-task.  This
    middleware identifies such messages and moves the most recent N of them to
    the preserved set before summarization runs.
+
+Additional enhancements (Phase A–E):
+- Degenerate summary detection guards *(Phase A)*
+- Structured markdown fallback summary *(Phase A)*
+- Idle-aware, count-only compaction deferral *(Phase B)*
+- Scaled, substantive-content anchor rescue *(Phase C)*
+- Compaction audit reports in ``.runtime/`` markdown files *(Phase D/E)*
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -29,7 +37,7 @@ from langgraph.config import get_config
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 
-from src.agents.memory.compaction_archive import append_compaction_entry
+from src.agents.memory.compaction_archive import append_compaction_entry, write_compaction_markdown
 from src.agents.middlewares.runtime_events import append_runtime_event
 
 logger = logging.getLogger(__name__)
@@ -48,6 +56,13 @@ _OPERATIONAL_MESSAGE_NAMES = {
     "permission_ask",
     "steering_reminder",
 }
+
+_DEGENERATE_MARKERS = (
+    "too long to summarize",
+    "no previous conversation",
+    "no prior context",
+    "no prior conversation",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +134,7 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
         preserve_recent_skill_tokens: int = 25_000,
         preserve_user_anchor_count: int = 1,
         preserve_recent_operational_count: int = 8,
+        max_context_tokens: int | None = None,
         **kwargs,
     ) -> None:
         # Capture trigger tuples before super().__init__ may raise a ValueError
@@ -140,6 +156,7 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
         self._preserve_recent_skill_tokens = max(0, preserve_recent_skill_tokens)
         self._preserve_user_anchor_count = max(0, preserve_user_anchor_count)
         self._preserve_recent_operational_count = max(0, preserve_recent_operational_count)
+        self._max_context_tokens = max_context_tokens
         self._last_trigger_type: str = "manual"
         # Threshold / observed values for the most recent trigger detection,
         # captured so the compaction trajectory event can carry "why now":
@@ -172,6 +189,50 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
         return await self._amaybe_summarize(state, runtime)
 
     # ------------------------------------------------------------------
+    # Phase B — idle-aware deferral helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_max_context_tokens(self) -> int | None:
+        """Resolve the model's max context tokens via a configurable fallback chain."""
+        if self._max_context_tokens is not None:
+            return self._max_context_tokens
+        try:
+            return self._get_profile_limits()
+        except Exception:
+            pass
+        try:
+            extra = getattr(getattr(self, "model", None), "model_extra", None) or {}
+            return extra.get("context_window") or extra.get("max_input_tokens")
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _is_new_user_input(messages: list[AnyMessage]) -> bool:
+        """True when the last message is a human message (start of a new task)."""
+        if not messages:
+            return False
+        return getattr(messages[-1], "type", None) == "human"
+
+    def _should_defer(self, messages: list[AnyMessage], total_tokens: int) -> bool:
+        """Decide whether compaction can be safely postponed.
+
+        Defer only when:
+        1. The trigger is *count-only* (messages), not tokens or fraction.
+        2. The system is mid‑task (not new user input).
+        3. Token usage is below 75% of the model's maximum context.
+        """
+        trigger_type = self._detect_trigger_type(messages, total_tokens)
+        if trigger_type != "messages":
+            return False
+        if self._is_new_user_input(messages):
+            return False
+        max_tokens = self._resolve_max_context_tokens()
+        if max_tokens is not None and total_tokens < max_tokens * 0.75:
+            return True
+        return False
+
+    # ------------------------------------------------------------------
     # Core summarization flow (sync + async)
     # ------------------------------------------------------------------
 
@@ -181,18 +242,35 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
 
         total_tokens = self.token_counter(messages)
         self._emit_context_tokens_event(runtime, total_tokens, len(messages))
-        force_compaction = self._should_force_compaction(state, runtime)
-        if not force_compaction and not self._should_summarize(messages, total_tokens):
+
+        force = self._should_force_compaction(state, runtime)
+        deferred = state.get("deferred_compaction", False)
+        had_deferred = bool(deferred)
+
+        # ── Decision: should we compact on this call? ──────────────
+        if force:
+            compact_now = True
+        elif deferred and self._is_new_user_input(messages):
+            compact_now = True
+        elif self._should_summarize(messages, total_tokens):
+            if self._should_defer(messages, total_tokens):
+                return {"deferred_compaction": True}
+            compact_now = True
+        else:
+            compact_now = False
+
+        if not compact_now:
             return None
 
+        # ── Normal compaction flow ─────────────────────────────────
         cutoff_index = self._determine_cutoff_index(messages)
-        if force_compaction and cutoff_index <= 0 and len(messages) > 1:
+        if force and cutoff_index <= 0 and len(messages) > 1:
             cutoff_index = max(1, len(messages) - 1)
         if cutoff_index <= 0:
             return None
 
         to_summarize, preserved = self._partition_with_skill_rescue(messages, cutoff_index)
-        self._last_trigger_type = "manual" if force_compaction else self._detect_trigger_type(messages, total_tokens)
+        self._last_trigger_type = "manual" if force else self._detect_trigger_type(messages, total_tokens)
         self._fire_hooks(state, to_summarize, preserved, runtime)
         self._summary_state_snapshot = state
         summary = self._create_summary(to_summarize)
@@ -201,6 +279,8 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
             summary=summary,
             compressed_count=len(to_summarize),
             kept_count=len(preserved),
+            to_summarize=to_summarize,
+            preserved=preserved,
         )
         self._summary_state_snapshot = None
         new_messages = self._build_new_messages(summary)
@@ -212,7 +292,9 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
                 *preserved,
             ]
         }
-        if force_compaction:
+        if had_deferred:
+            updates["deferred_compaction"] = False
+        if force:
             updates["force_compaction_once"] = False
         return updates
 
@@ -222,18 +304,33 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
 
         total_tokens = self.token_counter(messages)
         self._emit_context_tokens_event(runtime, total_tokens, len(messages))
-        force_compaction = self._should_force_compaction(state, runtime)
-        if not force_compaction and not self._should_summarize(messages, total_tokens):
+
+        force = self._should_force_compaction(state, runtime)
+        deferred = state.get("deferred_compaction", False)
+        had_deferred = bool(deferred)
+
+        if force:
+            compact_now = True
+        elif deferred and self._is_new_user_input(messages):
+            compact_now = True
+        elif self._should_summarize(messages, total_tokens):
+            if self._should_defer(messages, total_tokens):
+                return {"deferred_compaction": True}
+            compact_now = True
+        else:
+            compact_now = False
+
+        if not compact_now:
             return None
 
         cutoff_index = self._determine_cutoff_index(messages)
-        if force_compaction and cutoff_index <= 0 and len(messages) > 1:
+        if force and cutoff_index <= 0 and len(messages) > 1:
             cutoff_index = max(1, len(messages) - 1)
         if cutoff_index <= 0:
             return None
 
         to_summarize, preserved = self._partition_with_skill_rescue(messages, cutoff_index)
-        self._last_trigger_type = "manual" if force_compaction else self._detect_trigger_type(messages, total_tokens)
+        self._last_trigger_type = "manual" if force else self._detect_trigger_type(messages, total_tokens)
         self._fire_hooks(state, to_summarize, preserved, runtime)
         self._summary_state_snapshot = state
         summary = await self._acreate_summary(to_summarize)
@@ -242,6 +339,8 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
             summary=summary,
             compressed_count=len(to_summarize),
             kept_count=len(preserved),
+            to_summarize=to_summarize,
+            preserved=preserved,
         )
         self._summary_state_snapshot = None
         new_messages = self._build_new_messages(summary)
@@ -253,13 +352,28 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
                 *preserved,
             ]
         }
-        if force_compaction:
+        if had_deferred:
+            updates["deferred_compaction"] = False
+        if force:
             updates["force_compaction_once"] = False
         return updates
 
     # ------------------------------------------------------------------
-    # Skill rescue
+    # Phase A — summary quality guards
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_degenerate_summary(summary: str) -> bool:
+        """Check for degenerate placeholder summaries returned by the base class.
+
+        Catches ``"Previous conversation was too long to summarize."`` and
+        ``"No previous conversation history."`` — both produced without ever
+        calling the LLM when ``_trim_messages_for_summary`` empties the list.
+        """
+        normalized = summary.strip().lower()
+        if not normalized:
+            return True
+        return any(marker in normalized for marker in _DEGENERATE_MARKERS)
 
     def _is_failed_summary(self, summary: str) -> bool:
         normalized = summary.strip()
@@ -275,8 +389,8 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
         markers = (
             "no prior context",
             "no prior conversation",
-            "awaiting initial prompt",
             "session is fresh",
+            "awaiting initial prompt",
             "no artifacts, file paths, commands",
         )
         return any(marker in normalized for marker in markers)
@@ -296,30 +410,70 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
                 return True
         return False
 
+    # ------------------------------------------------------------------
+    # Phase A — structured deterministic fallback
+    # ------------------------------------------------------------------
+
     def _deterministic_fallback_summary(self, messages: list[AnyMessage]) -> str:
         state = self._summary_state_snapshot or {}
-        todos_block = "- No todo graph available."
+        parts: list[str] = [
+            "[summary_quality:fallback]",
+            "[summary_source:deterministic_state]",
+            "Model summarization failed; generated deterministic fallback summary.",
+            "",
+        ]
+
+        # ── Files Referenced ────────────────────────────────────────
+        file_set: set[str] = set()
+        for msg in messages:
+            content = str(getattr(msg, "content", "") or "")
+            for m in re.finditer(r"/mnt/user-data/[^\s)`'\"]+", content):
+                file_set.add(m.group())
+        if file_set:
+            parts.append("## Files Referenced")
+            for f in sorted(file_set)[:15]:
+                parts.append(f"- {f}")
+            parts.append("")
+
+        # ── Commands Executed (extract from AI message code blocks) ─
+        cmd_lines: list[str] = []
+        for msg in messages:
+            if getattr(msg, "type", None) == "ai":
+                content = str(getattr(msg, "content", "") or "")
+                for match in re.finditer(r"```(?:bash|sh)\s*\n(.*?)```", content, re.DOTALL):
+                    cmd = match.group(1).strip()
+                    if cmd:
+                        cmd_lines.append(cmd[:200])
+        if cmd_lines:
+            parts.append("## Commands Executed")
+            for c in cmd_lines[:8]:
+                parts.append(f"```\n{c}\n```")
+            parts.append("")
+
+        # ── Decisions & Progress (from todo graph) ─────────────────
         todo_graph = state.get("todo_graph") if isinstance(state, dict) else None
         if isinstance(todo_graph, dict):
             nodes = todo_graph.get("nodes")
             if isinstance(nodes, list) and nodes:
-                lines: list[str] = []
+                parts.append("## Decisions & Progress")
                 for node in nodes[:10]:
-                    if not isinstance(node, dict):
-                        continue
-                    todo_id = str(node.get("id") or "todo").strip()
-                    content = str(node.get("content") or "").strip() or "Untitled task"
-                    status = str(node.get("status") or "pending").strip()
-                    lines.append(f"- [{status}] {todo_id}: {content}")
-                if lines:
-                    todos_block = "\n".join(lines)
+                    if isinstance(node, dict):
+                        sid = node.get("id", "?")
+                        status = node.get("status", "?")
+                        content = str(node.get("content", ""))[:200]
+                        parts.append(f"- [{status}] {sid}: {content}")
+                parts.append("")
 
+        # ── Artifacts Created ───────────────────────────────────────
         artifacts = state.get("artifacts") if isinstance(state, dict) else None
-        artifact_lines: list[str] = []
-        if isinstance(artifacts, list):
-            artifact_lines = [f"- {str(path)}" for path in artifacts[-8:] if isinstance(path, str)]
-        artifacts_block = "\n".join(artifact_lines) if artifact_lines else "- No recent artifacts."
+        if isinstance(artifacts, list) and artifacts:
+            parts.append("## Artifacts Created")
+            for p in artifacts[-8:]:
+                if isinstance(p, str):
+                    parts.append(f"- {p}")
+            parts.append("")
 
+        # ── Latest Intent ───────────────────────────────────────────
         latest_user = ""
         latest_ai = ""
         for msg in reversed(messages):
@@ -329,21 +483,16 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
                 latest_ai = str(getattr(msg, "content", "")).strip()
             if latest_user and latest_ai:
                 break
-        latest_user = latest_user[:280] if latest_user else "N/A"
-        latest_ai = latest_ai[:280] if latest_ai else "N/A"
 
-        return (
-            "[summary_quality:fallback]\n"
-            "[summary_source:deterministic_state]\n"
-            "Model summarization failed; generated deterministic fallback summary.\n\n"
-            "## Latest Intent\n"
-            f"- User: {latest_user}\n"
-            f"- Assistant: {latest_ai}\n\n"
-            "## Todo Snapshot\n"
-            f"{todos_block}\n\n"
-            "## Artifact Snapshot\n"
-            f"{artifacts_block}\n"
-        )
+        parts.append("## Latest Intent")
+        parts.append(f"- User: {(latest_user[:500] or 'N/A')}")
+        parts.append(f"- Assistant: {(latest_ai[:500] or 'N/A')}")
+
+        return "\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Summary creation overrides
+    # ------------------------------------------------------------------
 
     def _create_summary(self, messages: list[AnyMessage]) -> str:  # type: ignore[override]
         try:
@@ -351,6 +500,14 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
         except Exception as exc:  # noqa: BLE001
             summary = f"Error generating summary: {exc}"
             self._last_summary_error = str(exc)
+
+        # Phase A: catch degenerate model-less returns early
+        if self._is_degenerate_summary(summary) and self._has_substantive_context(messages):
+            self._last_summary_error = "degenerate_summary: base class returned empty/placeholder summary"
+            self._last_summary_quality = "fallback"
+            self._last_summary_source = "deterministic_state"
+            return self._deterministic_fallback_summary(messages)
+
         if self._looks_like_empty_context_summary(summary) and self._has_substantive_context(messages):
             self._last_summary_error = "summary_quality_guard: empty-context summary contradicted by conversation state"
             self._last_summary_quality = "fallback"
@@ -373,6 +530,13 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
         except Exception as exc:  # noqa: BLE001
             summary = f"Error generating summary: {exc}"
             self._last_summary_error = str(exc)
+
+        if self._is_degenerate_summary(summary) and self._has_substantive_context(messages):
+            self._last_summary_error = "degenerate_summary: base class returned empty/placeholder summary"
+            self._last_summary_quality = "fallback"
+            self._last_summary_source = "deterministic_state"
+            return self._deterministic_fallback_summary(messages)
+
         if self._looks_like_empty_context_summary(summary) and self._has_substantive_context(messages):
             self._last_summary_error = "summary_quality_guard: empty-context summary contradicted by conversation state"
             self._last_summary_quality = "fallback"
@@ -388,6 +552,10 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
         self._last_summary_source = "model"
         self._last_summary_error = None
         return summary
+
+    # ------------------------------------------------------------------
+    # Partition rescue
+    # ------------------------------------------------------------------
 
     def _partition_with_skill_rescue(
         self,
@@ -424,15 +592,34 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
 
         return remaining, rescue_bundle + preserved
 
+    # ------------------------------------------------------------------
+    # Phase C — scaled, substantive-content anchor rescue
+    # ------------------------------------------------------------------
+
     def _rescue_user_anchor_messages(
         self,
         messages: list[AnyMessage],
     ) -> tuple[list[AnyMessage], list[AnyMessage]]:
-        """Keep earliest non-skill user message(s) as continuity anchors."""
-        if self._preserve_user_anchor_count <= 0 or not messages:
+        """Keep continuity anchors from the to-be-summarized window.
+
+        Scales the anchor count with the size of the compressed window:
+        - 1 anchor for small windows (< 15 messages)
+        - up to 5 anchors for large windows (60+ messages)
+
+        Pass 1: earliest qualifying human message (oldest, for continuity).
+        Pass 2: most content-rich human messages (by character length)
+        from the remaining candidates.
+        """
+        if not messages or self._preserve_user_anchor_count <= 0:
             return [], messages
 
+        # Scale anchor count: 1 per ~15 compressed messages, max 5,
+        # then capped by the configured preserve_user_anchor_count upper bound.
+        count = min(self._preserve_user_anchor_count, max(1, min(5, len(messages) // 15)))
+
         anchor_indices: list[int] = []
+
+        # Pass 1: earliest non-skill human message
         for i, msg in enumerate(messages):
             if not isinstance(msg, HumanMessage):
                 continue
@@ -442,14 +629,32 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
             if not content:
                 continue
             anchor_indices.append(i)
-            if len(anchor_indices) >= self._preserve_user_anchor_count:
-                break
+            break
+
+        # Pass 2: most substantive remaining human messages
+        candidates: list[tuple[int, int]] = []  # (content_length, index)
+        for i, msg in enumerate(messages):
+            if i in anchor_indices:
+                continue
+            if not isinstance(msg, HumanMessage):
+                continue
+            if getattr(msg, "name", None) == "active_skills":
+                continue
+            content = str(getattr(msg, "content", "")).strip()
+            if not content:
+                continue
+            candidates.append((len(content), i))
+
+        candidates.sort(key=lambda x: -x[0])
+        needed = max(0, count - len(anchor_indices))
+        for _, i in candidates[:needed]:
+            anchor_indices.append(i)
 
         if not anchor_indices:
             return [], messages
 
         anchor_set = set(anchor_indices)
-        anchors = [messages[i] for i in anchor_indices]
+        anchors = [messages[i] for i in sorted(anchor_indices)]
         remaining = [msg for i, msg in enumerate(messages) if i not in anchor_set]
         return anchors, remaining
 
@@ -578,6 +783,10 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
             },
         )
 
+    # ------------------------------------------------------------------
+    # Phase D/E — compaction event recording (JSONL + markdown report)
+    # ------------------------------------------------------------------
+
     def _record_compaction_event(
         self,
         *,
@@ -585,6 +794,8 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
         summary: str,
         compressed_count: int,
         kept_count: int,
+        to_summarize: list[AnyMessage] | None = None,
+        preserved: list[AnyMessage] | None = None,
     ) -> None:
         thread_id = _resolve_thread_id(runtime)
         payload = {
@@ -622,6 +833,17 @@ class CapybaraSummarizationMiddleware(SummarizationMiddleware):
                         "summary_error": self._last_summary_error,
                         "model_used": str(getattr(getattr(self, "model", None), "model_name", "") or ""),
                     },
+                )
+                # Phase D/E: write markdown audit report into .runtime/
+                write_compaction_markdown(
+                    thread_id=thread_id,
+                    trigger=self._last_trigger_type,
+                    compressed_count=compressed_count,
+                    kept_count=kept_count,
+                    summary_text=summary,
+                    to_summarize=to_summarize,
+                    preserved=preserved,
+                    state=self._summary_state_snapshot,
                 )
             except Exception:
                 logger.exception("Failed to persist compaction archive for thread %s", thread_id)

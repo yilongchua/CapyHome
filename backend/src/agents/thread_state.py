@@ -132,9 +132,9 @@ class ResumeMetaState(TypedDict, total=False):
     handoff_refs: list[str]
     # Fields added for interrupt-recovery: allow a fresh run to detect and fix stale
     # in-progress entries left over from an interrupted run.
-    in_progress_todo_ids: list[str]   # todos marked in_progress at interrupt time
-    retry_counts: dict[str, int]      # tool_call_id -> attempt count from retry_meta
-    running_subagent_ids: list[str]   # task IDs of deferred subagent calls in flight
+    in_progress_todo_ids: list[str]  # todos marked in_progress at interrupt time
+    retry_counts: dict[str, int]  # tool_call_id -> attempt count from retry_meta
+    running_subagent_ids: list[str]  # task IDs of deferred subagent calls in flight
 
 
 class ScratchpadEntry(TypedDict, total=False):
@@ -294,3 +294,4 @@ class ThreadState(AgentState):
     phase_execution: NotRequired[PhaseExecutionState | None]
     quality_gate: NotRequired[QualityGateState | None]
     handoff_meta: NotRequired[HandoffMetaState | None]
+    deferred_compaction: NotRequired[bool]
