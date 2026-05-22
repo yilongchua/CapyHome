@@ -94,15 +94,11 @@ def _normalize_runtime_mode(raw_mode: object) -> str:
         return "work"
     if mode in {"pro", "fast"}:
         raise ValueError(
-            "Invalid runtime mode '"
-            + mode
-            + "'. Supported modes are 'work' and 'plan'. Please update the client to send mode='plan' for planning runs.",
+            "Invalid runtime mode '" + mode + "'. Supported modes are 'work' and 'plan'. Please update the client to send mode='plan' for planning runs.",
         )
     if mode not in _ALLOWED_RUNTIME_MODES:
         raise ValueError(
-            "Invalid runtime mode '"
-            + mode
-            + "'. Supported modes are 'work' and 'plan'.",
+            "Invalid runtime mode '" + mode + "'. Supported modes are 'work' and 'plan'.",
         )
     return mode
 
@@ -152,11 +148,7 @@ def _create_summarization_middleware(*, mode: str = "", dreamy_mode: bool = Fals
 
     normalized_mode = "dreamy" if dreamy_mode else mode
     legacy_mode_aliases = {"work": "fast", "plan": "pro"}
-    mode_override = (
-        config.modes.get(normalized_mode)
-        or config.modes.get(legacy_mode_aliases.get(normalized_mode, normalized_mode))
-        or config.modes.get("default")
-    )
+    mode_override = config.modes.get(normalized_mode) or config.modes.get(legacy_mode_aliases.get(normalized_mode, normalized_mode)) or config.modes.get("default")
 
     # Prepare trigger parameter
     trigger = None
@@ -191,6 +183,10 @@ def _create_summarization_middleware(*, mode: str = "", dreamy_mode: bool = Fals
     summary_prompt = mode_override.summary_prompt if mode_override and mode_override.summary_prompt is not None else config.summary_prompt
     if summary_prompt is not None:
         kwargs["summary_prompt"] = summary_prompt
+
+    max_context_tokens = mode_override.max_context_tokens if mode_override and mode_override.max_context_tokens is not None else config.max_context_tokens
+    if max_context_tokens is not None:
+        kwargs["max_context_tokens"] = max_context_tokens
 
     hooks = [memory_flush_hook] if get_memory_config().enabled else []
     if dreamy_mode:
