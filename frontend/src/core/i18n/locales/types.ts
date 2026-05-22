@@ -273,6 +273,9 @@ export interface Translations {
       autoresearchCleanup: string;
       tools: string;
       notification: string;
+      llm: string;
+      browser: string;
+      comfyui: string;
       about: string;
     };
 
@@ -375,6 +378,63 @@ export interface Translations {
       testBody: string;
       notSupported: string;
       disableNotification: string;
+    };
+    llm: {
+      title: string;
+      description: string;
+      providerType: string;
+      providerOllama: string;
+      providerLmStudio: string;
+      providerCustom: string;
+      displayName: string;
+      displayNamePlaceholder: string;
+      baseUrl: string;
+      baseUrlPlaceholder: string;
+      apiKey: string;
+      apiKeyPlaceholder: string;
+      testConnection: string;
+      testing: string;
+      connectionFailed: string;
+      connectionSuccess: string;
+      discoveredModels: (count: number) => string;
+      addProvider: string;
+      saveProvider: string;
+      noEndpoints: string;
+      configuredEndpoints: string;
+      deleteConfirm: string;
+      endpointEnabled: string;
+      endpointDisabled: string;
+    };
+    browser: {
+      title: string;
+      description: string;
+      quickAddDescription: string;
+      quickAddButton: string;
+      quickAddSuccess: string;
+      quickAddError: string;
+      manualTitle: string;
+      manualDescription: string;
+      url: string;
+      urlPlaceholder: string;
+      testConnection: string;
+      testing: string;
+      connectionFailed: string;
+      connectionSuccess: string;
+      addAsMcp: string;
+    };
+    comfyui: {
+      title: string;
+      description: string;
+      baseUrl: string;
+      baseUrlPlaceholder: string;
+      testConnection: string;
+      testing: string;
+      connectionFailed: string;
+      connectionSuccess: string;
+      enableTool: string;
+      enableToolDescription: string;
+      toolEnabled: string;
+      toolDisabled: string;
     };
     acknowledge: {
       emptyTitle: string;

@@ -25,6 +25,7 @@ from src.gateway.routers import (
     mcp,
     memory,
     models,
+    onboarding,
     pipelines,
     runs,
     skills,
@@ -273,6 +274,10 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
                 "description": "Inject one-shot steering context into thread state before the next model turn",
             },
             {
+                "name": "onboarding",
+                "description": "Test connections to LLM, ComfyUI, and other external services from the settings UI",
+            },
+            {
                 "name": "health",
                 "description": "Health check and system status endpoints",
             },
@@ -364,6 +369,7 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
     app.include_router(approvals.router)
     app.include_router(feedback.router)
     app.include_router(integrations.router)
+    app.include_router(onboarding.router)
     app.include_router(generation.router)
     app.include_router(handoff.router)
     app.include_router(runs.router)
