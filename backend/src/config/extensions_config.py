@@ -59,6 +59,20 @@ class CommunityToolStateConfig(BaseModel):
     enabled: bool = Field(default=True, description="Whether this community tool is enabled")
 
 
+class UserLlmEndpointConfig(BaseModel):
+    """A single user-added LLM endpoint."""
+
+    enabled: bool = Field(default=True, description="Whether this endpoint is active")
+    provider: str = Field(..., description="Provider type: 'ollama', 'lm-studio', or 'custom'")
+    display_name: str = Field(..., description="Human-readable name for this endpoint")
+    base_url: str = Field(..., description="Base URL of the OpenAI-compatible endpoint")
+    api_key: str = Field(default="", description="Optional API key")
+    models: list[str] = Field(default_factory=list, description="Discovered model IDs")
+    default_model: str = Field(default="", description="Default model to use")
+    supports_thinking: bool = Field(default=False, description="Whether models on this endpoint support thinking")
+    supports_vision: bool = Field(default=False, description="Whether models on this endpoint support vision")
+
+
 class ExtensionsConfig(BaseModel):
     """Unified configuration for MCP servers and skills."""
 
@@ -75,6 +89,11 @@ class ExtensionsConfig(BaseModel):
         default_factory=dict,
         description="Map of community tool name to enabled/disabled override",
         alias="communityTools",
+    )
+    user_models: dict[str, UserLlmEndpointConfig] = Field(
+        default_factory=dict,
+        description="Map of user-added LLM endpoint name to configuration",
+        alias="userModels",
     )
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
