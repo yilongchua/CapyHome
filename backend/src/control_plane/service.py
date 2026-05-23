@@ -1170,12 +1170,12 @@ class ControlPlaneService:
 
         # On manual refresh, also prune compiled artifacts that the manifest
         # no longer references so the explorer/graph reflect actual state.
-        # Skip while an ingest is running — it may be mid-write with files
-        # that haven't yet been recorded to the manifest.
+        # Skip while *any* ingest runner is active — a peer may be mid-write
+        # with a compiled file it hasn't yet recorded to the manifest.
         if force_refresh:
-            with self._vault_ingest_lock:
-                ingest_running = self._vault_ingest_job.get("status") == "running"
-            if not ingest_running:
+            with manager._coord.counter_lock:
+                ingest_active = manager._coord.active_runners > 0
+            if not ingest_active:
                 try:
                     manager.cleanup_orphan_compiled_files()
                 except Exception:
@@ -1360,14 +1360,14 @@ class ControlPlaneService:
         return logger_obj
 
     def start_vault_ingest_job(self, *, force_reanalyze: bool = False) -> dict[str, Any]:
+        # Parallel ingest runs are allowed. Each call spawns its own worker
+        # thread; cross-runner safety is enforced by the shared queue and
+        # manifest locks owned by `_VaultCoordination`. We still keep a
+        # `_vault_ingest_job` mirror updated for the existing single-job UI
+        # status endpoint — it now reflects the most-recently-started job.
+        job_id = f"vault_ingest_{uuid4().hex[:12]}"
+        log_path = self._vault_ingest_log_path()
         with self._vault_ingest_lock:
-            if self._vault_ingest_job.get("status") == "running":
-                snapshot = dict(self._vault_ingest_job)
-                snapshot["accepted"] = False
-                snapshot["message"] = "A vault ingest job is already running."
-                return snapshot
-            job_id = f"vault_ingest_{uuid4().hex[:12]}"
-            log_path = self._vault_ingest_log_path()
             self._vault_ingest_job = self._new_vault_ingest_job_state()
             self._vault_ingest_job.update(
                 {
@@ -1388,13 +1388,16 @@ class ControlPlaneService:
         )
 
         def _runner() -> None:
+            manager = self._default_vault_manager()
+            coord = manager._coord
+            with coord.counter_lock:
+                coord.active_runners += 1
+                runner_count_at_start = coord.active_runners
             try:
-                manager = self._default_vault_manager()
-
-                # Phase 0 — rescue orphaned claims from prior runs (e.g. backend
-                # restart killed the worker thread mid-ingest). Any item still
-                # in "claimed" status at job start cannot belong to a live job
-                # because we hold the ingest lock and just transitioned to running.
+                # Phase 0 — rescue any claim whose lease has expired (parallel
+                # safe: live claims with unexpired leases stay with their
+                # current owner). Replaces the old "rescue all at job start"
+                # which is no longer correct now that other runners may exist.
                 try:
                     orphaned = manager.requeue_all_claimed_items(reason="orphaned_from_prior_run")
                     if orphaned:
@@ -1406,20 +1409,27 @@ class ControlPlaneService:
                 except Exception:
                     logger_obj.exception("vault_ingest_orphan_requeue_failed job_id=%s", job_id)
 
-                # Phase 0b — prune compiled artifacts not reachable from the
-                # current manifest. Past manifest resets/migrations can leave
-                # the compiled directories holding files for sources that no
-                # longer exist, which inflates the knowledge graph and search.
-                try:
-                    cleanup_summary = manager.cleanup_orphan_compiled_files()
-                    if cleanup_summary.get("total"):
-                        logger_obj.info(
-                            "vault_ingest_compiled_cleanup job_id=%s summary=%s",
-                            job_id,
-                            cleanup_summary,
-                        )
-                except Exception:
-                    logger_obj.exception("vault_ingest_compiled_cleanup_failed job_id=%s", job_id)
+                # Phase 0b — prune compiled artifacts unreachable from the
+                # manifest. Only safe when *this* is the only active runner,
+                # otherwise a peer might be mid-write with a compiled file it
+                # hasn't yet recorded to disk.
+                if runner_count_at_start == 1:
+                    try:
+                        cleanup_summary = manager.cleanup_orphan_compiled_files()
+                        if cleanup_summary.get("total"):
+                            logger_obj.info(
+                                "vault_ingest_compiled_cleanup job_id=%s summary=%s",
+                                job_id,
+                                cleanup_summary,
+                            )
+                    except Exception:
+                        logger_obj.exception("vault_ingest_compiled_cleanup_failed job_id=%s", job_id)
+                else:
+                    logger_obj.info(
+                        "vault_ingest_compiled_cleanup_skipped job_id=%s reason=concurrent_runners active=%d",
+                        job_id,
+                        runner_count_at_start,
+                    )
 
                 # Phase 1 — drain queued search results directly. Approval gating
                 # has been removed; the UI's Run Ingest button is the trigger.
@@ -1609,6 +1619,9 @@ class ControlPlaneService:
                             "updated_at": self._utcnow_iso(),
                         }
                     )
+            finally:
+                with coord.counter_lock:
+                    coord.active_runners = max(0, coord.active_runners - 1)
 
         thread = threading.Thread(
             target=_runner,

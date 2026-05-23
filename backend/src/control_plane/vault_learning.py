@@ -1699,6 +1699,30 @@ class VaultLearningManager:
         topic: str = "",
         queue_items: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        # The entire ingest pipeline runs inside a manifest transaction. With
+        # parallel ingest runners, two `ingest()` invocations on different
+        # threads would otherwise race on `_save_manifest` and silently drop
+        # each other's per-source updates. The lock is re-entrant so nested
+        # helper calls (`_record_trust_decision`, `compile_incremental`, …)
+        # that call `_save_manifest` inside this block reuse the same
+        # transaction; the txn reloads the manifest from disk on entry so we
+        # pick up commits made by any sibling runner that ran first.
+        with self._manifest_txn():
+            return self._ingest_locked(
+                urls=urls,
+                source=source,
+                topic=topic,
+                queue_items=queue_items,
+            )
+
+    def _ingest_locked(
+        self,
+        *,
+        urls: list[str],
+        source: str,
+        topic: str = "",
+        queue_items: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         # Strict embedding gate: do not ingest any sources unless /embeddings is reachable.
         search_service = UnifiedVaultSearchService(self.vault_root)
         try:
