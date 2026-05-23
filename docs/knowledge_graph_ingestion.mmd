@@ -1,0 +1,61 @@
+flowchart TD
+    A[User clicks Run Ingest in vault UI] --> B[POST /api/vault/ingest/start]
+    B --> C["ControlPlaneService.start_vault_ingest_job()<br/>spawn daemon thread"]
+
+    C --> P0["Phase 0: requeue_all_claimed_items<br/>(rescue orphans from prior crashes)"]
+    P0 --> P1["Phase 1: claim_search_queue_items<br/>status: queued → claimed"]
+
+    P1 --> ING["manager.ingest(queue_items=claimed)"]
+
+    ING --> PREF{"Embedding preflight<br/>/embeddings reachable?"}
+    PREF -- no --> REQ1["requeue claimed items<br/>reason=embedding_unavailable_retry"]
+    REQ1 --> END_F([job: deferred])
+
+    PREF -- yes --> LOOP{"for each<br/>queue item"}
+    LOOP --> REI["reingest_if_changed(url, queue_entry)"]
+
+    REI --> FETCH["Read pre-extracted markdown<br/>or HTTP GET url"]
+    FETCH --> HASH{"content_hash ==<br/>last hash?"}
+    HASH -- yes --> SKIP[/"status: skipped_unchanged"/]
+    HASH -- no --> TRUST{"trust_score<br/>>= threshold?"}
+    TRUST -- no --> REJ[/"status: rejected_for_trust"/]
+
+    TRUST -- yes --> ANALY["_analyze_source<br/>LLM (ANALYZE_SOURCE_PROMPT)<br/>or heuristic fallback"]
+    ANALY --> FILTER["_is_quality_entity filter<br/>(drop pronouns, stopwords,<br/>generic adjectives)"]
+    FILTER --> GEN["_generate_source_sections<br/>summary / claims / evidence"]
+
+    GEN --> WRITE_S["Write 02_compiled/sources/<br/>{source_id}.md<br/>+ frontmatter (source_refs,<br/>entity_refs, concept_refs)"]
+    WRITE_S --> WRITE_E["For each entity_ref:<br/>_update_reference_page →<br/>02_compiled/entities/{slug}.md"]
+    WRITE_E --> WRITE_C["For each concept_ref:<br/>_update_reference_page →<br/>02_compiled/concepts/{slug}.md"]
+    WRITE_C --> WRITE_SY["_update_synthesis_page →<br/>02_compiled/syntheses/"]
+    WRITE_SY --> MANI["Update manifest.sources[id]<br/>status=ingested,<br/>hash_history += hash"]
+    MANI --> ING_OK[/"status: ingested"/]
+
+    SKIP --> NEXT{more items?}
+    REJ --> NEXT
+    ING_OK --> NEXT
+    NEXT -- yes --> LOOP
+    NEXT -- no --> MARK
+
+    MARK["Bucket queue items by status:<br/>ingested / skipped_unchanged /<br/>rejected_for_trust / rejected_for_policy<br/>+ safety-net requeue for unhandled"]
+    MARK --> COMP["compile_incremental<br/>regenerate index.md for<br/>sources / entities / concepts /<br/>syntheses / queries"]
+
+    COMP --> P2["Phase 2: reprocess_existing_sources<br/>backfill missing entity/concept refs"]
+    P2 --> CACHE["Clear _vault_explorer_cache"]
+    CACHE --> END_OK([job: success])
+
+    END_OK -.-> POLL["Frontend useVaultExplorer polls<br/>GET /api/vault/explorer every 10s"]
+    POLL --> GRAPH["VaultLearningManager.get_graph(limit)<br/>walks 02_compiled/*/*.md,<br/>builds nodes + edges from frontmatter,<br/>ranks by degree, caps to limit"]
+    GRAPH --> RENDER["Frontend graphLayout:<br/>seed concept+entity nodes,<br/>expand 1-hop neighbors to sources,<br/>render SVG by kind"]
+
+    classDef phase fill:#1d4ed8,stroke:#1e3a8a,color:#fff
+    classDef terminal fill:#0f766e,stroke:#134e4a,color:#fff
+    classDef write fill:#7c3aed,stroke:#5b21b6,color:#fff
+    classDef gate fill:#b45309,stroke:#78350f,color:#fff
+    classDef fail fill:#b91c1c,stroke:#7f1d1d,color:#fff
+
+    class P0,P1,P2,ING,COMP,CACHE phase
+    class WRITE_S,WRITE_E,WRITE_C,WRITE_SY,MANI write
+    class PREF,HASH,TRUST,LOOP,NEXT gate
+    class REQ1,REJ fail
+    class END_F,END_OK,SKIP,ING_OK terminal
