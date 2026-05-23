@@ -185,7 +185,6 @@ export const enUS: Translations = {
     pipelines: "Scheduled Pipeline",
     approvals: "Approvals",
     vault: "Knowledge Vault",
-    integrations: "Integrations",
     dreamy: "Dreamy",
   },
 
@@ -230,7 +229,6 @@ export const enUS: Translations = {
     pipelines: "Scheduled Pipeline",
     approvals: "Approvals",
     vault: "Knowledge Vault",
-    integrations: "Integrations",
   },
 
   // Workspace
@@ -269,7 +267,6 @@ export const enUS: Translations = {
     pipelines: "Scheduled Pipeline",
     approvals: "Approvals",
     vault: "Knowledge Vault",
-    integrations: "Integrations",
   },
 
   // Tool calls

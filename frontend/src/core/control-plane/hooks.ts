@@ -24,7 +24,6 @@ import {
   getVaultExplorer,
   getVaultFile,
   getIntegrationStatus,
-  getIntegrationServicesStatus,
   getVaultStatus,
   listApprovals,
   listFeedback,
@@ -41,8 +40,6 @@ import {
   saveVaultFile,
   deleteVaultFile,
   searchVault,
-  setIntegrationServiceEnabled,
-  startIntegrationService,
   startAutoresearchObjective,
   startPipelineRun,
   startVaultIngest,
@@ -455,31 +452,6 @@ export function useIntegrationStatus() {
   return { integrationStatus: data ?? null, isLoading, error };
 }
 
-export function useIntegrationServicesStatus() {
-  const isVisible = useDocumentVisible();
-  const { data, isLoading, error } = useWorkspaceRefreshQuery({
-    queryKey: ["control-plane", "integration-services"],
-    queryFn: () => getIntegrationServicesStatus(),
-    refetchInterval: isVisible ? 30_000 : false,
-    refreshDomains: ["integrations"],
-  });
-  return { servicesStatus: data ?? null, isLoading, error };
-}
-
-export function useStartIntegrationService() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (serviceId: string) => startIntegrationService(serviceId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ["control-plane", "integration-services"],
-      });
-      void queryClient.invalidateQueries({ queryKey: ["control-plane", "integrations"] });
-      publishControlPlaneRefresh(["integrations"]);
-    },
-  });
-}
-
 export function useRunSchedulerJob() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -605,26 +577,6 @@ export function useDeleteAutoresearchObjective() {
       void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-status"] });
       void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-action-items"] });
       publishControlPlaneRefresh(["vault", "runs", "integrations"]);
-    },
-  });
-}
-
-export function useSetIntegrationServiceEnabled() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      serviceId,
-      enabled,
-    }: {
-      serviceId: string;
-      enabled: boolean;
-    }) => setIntegrationServiceEnabled(serviceId, enabled),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ["control-plane", "integration-services"],
-      });
-      void queryClient.invalidateQueries({ queryKey: ["control-plane", "integrations"] });
-      publishControlPlaneRefresh(["integrations"]);
     },
   });
 }

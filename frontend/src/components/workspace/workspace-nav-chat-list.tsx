@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenIcon, BotIcon, CalendarClockIcon, CheckCheckIcon, MessagesSquare, PlugZapIcon } from "lucide-react";
+import { BookOpenIcon, BotIcon, CalendarClockIcon, CheckCheckIcon, MessagesSquare } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -67,17 +67,6 @@ export function WorkspaceNavChatList() {
             <Link className="text-muted-foreground" href="/workspace/vault">
               <BookOpenIcon />
               <span>{t.sidebar.vault}</span>
-            </Link>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            isActive={pathname.startsWith("/workspace/integrations")}
-            asChild
-          >
-            <Link className="text-muted-foreground" href="/workspace/integrations">
-              <PlugZapIcon />
-              <span>{t.sidebar.integrations}</span>
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>
