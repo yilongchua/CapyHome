@@ -16,11 +16,11 @@ You can swap that id for any other thread and the layout is identical.
 
 ## 1. Where the artifacts live
 
-Every chat is sandboxed under `backend/.capybara-home/threads/{thread_id}/`.
+Every chat is sandboxed under `backend/.capyhome/threads/{thread_id}/`.
 For the reference thread:
 
 ```
-backend/.capybara-home/threads/fa33b3bb-8994-4529-8944-05e63cfcb40e/
+backend/.capyhome/threads/fa33b3bb-8994-4529-8944-05e63cfcb40e/
 ├── logs/
 │   └── trajectory/
 │       └── trajectory-1779458558-run-e7d64f5272.jsonl   # per-run event log
@@ -39,8 +39,8 @@ Supporting global stores (shared across threads):
 
 | Path | What it holds |
 |---|---|
-| `backend/.capybara-home/checkpoints.db` | LangGraph SQLite checkpointer — full state per turn |
-| `backend/.capybara-home/memory.json` | Global memory facts injected into prompts |
+| `backend/.capyhome/checkpoints.db` | LangGraph SQLite checkpointer — full state per turn |
+| `backend/.capyhome/memory.json` | Global memory facts injected into prompts |
 | `prompt-tunning/prompt_id_*/cycle_*_metadata.json` | Per-run metadata when the run was driven by `test_prompt.py` (chat_url, model, response_preview, copied prompt logs) |
 
 Folder layout is created by `ThreadDataMiddleware`; the `.prompts/` capture is
@@ -73,7 +73,7 @@ For a single chat, an audit should answer:
 
 ```bash
 THREAD=fa33b3bb-8994-4529-8944-05e63cfcb40e
-TDIR="backend/.capybara-home/threads/$THREAD"
+TDIR="backend/.capyhome/threads/$THREAD"
 ls "$TDIR"
 ```
 
@@ -185,7 +185,7 @@ even when the final response looked fine.
 For deeper audits you can dump per-turn state from the SQLite checkpointer:
 
 ```bash
-sqlite3 backend/.capybara-home/checkpoints.db \
+sqlite3 backend/.capyhome/checkpoints.db \
   "SELECT thread_id, checkpoint_id, type, length(checkpoint) \
      FROM checkpoints WHERE thread_id='$THREAD' ORDER BY checkpoint_id;"
 ```
@@ -219,7 +219,7 @@ thread id:
 ```bash
 audit_thread() {
   local thread="$1"
-  local tdir="backend/.capybara-home/threads/$thread"
+  local tdir="backend/.capyhome/threads/$thread"
   echo "== Thread $thread =="
   echo "-- plan --"
   [ -f "$tdir/user-data/workspace/plan.md" ] && head -20 "$tdir/user-data/workspace/plan.md"

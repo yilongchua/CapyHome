@@ -1,12 +1,12 @@
 # Lead Agent and Harness Architecture: In-Depth Analysis
 
-This document provides a comprehensive code analysis of the `lead_agent` flow and its harness within the Capybara Home system. It details the initialization process, the topological middleware registry, the lifecycle of planning and execution modes, the daemon-based handoff mechanism, and the verification/testing framework.
+This document provides a comprehensive code analysis of the `lead_agent` flow and its harness within the CapyHome system. It details the initialization process, the topological middleware registry, the lifecycle of planning and execution modes, the daemon-based handoff mechanism, and the verification/testing framework.
 
 ---
 
 ## 1. Architectural Overview & Execution Model
 
-The Capybara Home system employs a stateful, thread-based architecture built on top of LangGraph. All client interactions on a specific thread share a single, persistent state space (`ThreadState`), which is persisted via a LangGraph checkpointer.
+The CapyHome system employs a stateful, thread-based architecture built on top of LangGraph. All client interactions on a specific thread share a single, persistent state space (`ThreadState`), which is persisted via a LangGraph checkpointer.
 
 ```mermaid
 graph TD
@@ -158,13 +158,13 @@ sequenceDiagram
     participant Planner as PlannerMiddleware
     participant Handoff as work_run_handoff
     participant Daemon as Background Daemon Thread
-    participant Client as CapybaraClient (Work Mode)
+    participant Client as CapyHomeClient (Work Mode)
     
     Planner->>Handoff: Trigger spawn_work_mode_handoff()
     Handoff->>Daemon: Start background worker
     Planner-->>Client: Return plan approval confirmation to UI
     Note over Daemon: Wait for thread title to be set
-    Daemon->>Client: Instantiate CapybaraClient(mode="work")
+    Daemon->>Client: Instantiate CapyHomeClient(mode="work")
     Daemon->>Client: Call async achat() on same thread_id
     Client->>Client: Enter Work Mode Loop
 ```
@@ -173,7 +173,7 @@ sequenceDiagram
 The handoff logic (defined in `backend/src/agents/middlewares/work_run_handoff.py`) executes as follows:
 1. **Daemon Spawning**: A background daemon thread is started using Python's `threading.Thread(target=..., daemon=True)`. This unblocks the foreground plan-approval turn immediately, allowing the UI to return a success state to the user.
 2. **Title Synchronization**: The daemon waits for the thread's title to be generated (monitored via `TitleMiddleware`). This ensures the thread is fully registered in the workspace before work execution begins.
-3. **In-Memory Client Invocation**: The background thread instantiates a new `CapybaraClient` configured with:
+3. **In-Memory Client Invocation**: The background thread instantiates a new `CapyHomeClient` configured with:
    * `mode="work"`
    * `plan_behavior="work_interactive"`
    * Same `thread_id` and checkpointer context.

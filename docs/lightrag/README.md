@@ -1,6 +1,6 @@
 # LightRAG Integration — Archived Removal Notes
 
-> **Status: REMOVED** from the Capybara Home codebase. This folder is the
+> **Status: REMOVED** from the CapyHome codebase. This folder is the
 > complete archival record of the integration as it existed, plus a
 > step-by-step reimplementation guide if it is ever reintroduced.
 
@@ -9,7 +9,7 @@
 See [ANALYSIS.md](ANALYSIS.md) for the full rationale. Short version:
 
 1. The integration was a 109-line HTTP wrapper that pointed at an external
-   LightRAG server stack which Capybara Home does not ship.
+   LightRAG server stack which CapyHome does not ship.
 2. There was **no ingestion path** from the markdown knowledge vault into
    LightRAG — the wrapper queried a store nothing in this repo populated.
 3. The current `02_compiled/**/*.md` vault is already a typed knowledge

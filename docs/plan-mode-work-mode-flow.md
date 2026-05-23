@@ -60,7 +60,7 @@ flowchart TD
     subgraph Handoff["Plan to Work Handoff"]
         P6 --> H0[Read latest thread state]
         H0 --> H1[Ensure thread title exists]
-        H1 --> H2[Build a fresh CapybaraClient in work mode]
+        H1 --> H2[Build a fresh CapyHomeClient in work mode]
         H2 --> H3[Inject original request and resolved clarification context]
         H3 --> H4[Start a new work-mode run on the same thread]
         H4 --> H5[Persist plan handoff succeeded and set status to executing]
@@ -152,14 +152,14 @@ Recovery and resilience:
 
 ## Main Code References
 
-- [backend/src/agents/lead_agent/agent.py](/Users/ryan_chua/Desktop/capybara-home/backend/src/agents/lead_agent/agent.py:508)
-- [backend/src/agents/middlewares/planner_middleware.py](/Users/ryan_chua/Desktop/capybara-home/backend/src/agents/middlewares/planner_middleware.py:582)
-- [backend/src/agents/middlewares/work_run_handoff.py](/Users/ryan_chua/Desktop/capybara-home/backend/src/agents/middlewares/work_run_handoff.py:101)
-- [backend/src/agents/middlewares/work_mode_middleware.py](/Users/ryan_chua/Desktop/capybara-home/backend/src/agents/middlewares/work_mode_middleware.py:258)
-- [backend/src/tools/builtins/task_tool.py](/Users/ryan_chua/Desktop/capybara-home/backend/src/tools/builtins/task_tool.py:250)
-- [backend/src/agents/middlewares/plan_execution_gate_middleware.py](/Users/ryan_chua/Desktop/capybara-home/backend/src/agents/middlewares/plan_execution_gate_middleware.py:93)
-- [backend/src/agents/middlewares/plan_evaluator_middleware.py](/Users/ryan_chua/Desktop/capybara-home/backend/src/agents/middlewares/plan_evaluator_middleware.py:106)
-- [backend/src/agents/middlewares/evaluator_middleware.py](/Users/ryan_chua/Desktop/capybara-home/backend/src/agents/middlewares/evaluator_middleware.py:94)
-- [frontend/src/app/workspace/agents/[agent_name]/chats/[thread_id]/page.tsx](/Users/ryan_chua/Desktop/capybara-home/frontend/src/app/workspace/agents/[agent_name]/chats/[thread_id]/page.tsx:165)
-- [frontend/src/components/workspace/messages/message-list.tsx](/Users/ryan_chua/Desktop/capybara-home/frontend/src/components/workspace/messages/message-list.tsx:50)
-- [frontend/src/components/workspace/messages/subtask-card.tsx](/Users/ryan_chua/Desktop/capybara-home/frontend/src/components/workspace/messages/subtask-card.tsx:44)
+- [backend/src/agents/lead_agent/agent.py](/Users/ryan_chua/Desktop/CapyHome/backend/src/agents/lead_agent/agent.py:508)
+- [backend/src/agents/middlewares/planner_middleware.py](/Users/ryan_chua/Desktop/CapyHome/backend/src/agents/middlewares/planner_middleware.py:582)
+- [backend/src/agents/middlewares/work_run_handoff.py](/Users/ryan_chua/Desktop/CapyHome/backend/src/agents/middlewares/work_run_handoff.py:101)
+- [backend/src/agents/middlewares/work_mode_middleware.py](/Users/ryan_chua/Desktop/CapyHome/backend/src/agents/middlewares/work_mode_middleware.py:258)
+- [backend/src/tools/builtins/task_tool.py](/Users/ryan_chua/Desktop/CapyHome/backend/src/tools/builtins/task_tool.py:250)
+- [backend/src/agents/middlewares/plan_execution_gate_middleware.py](/Users/ryan_chua/Desktop/CapyHome/backend/src/agents/middlewares/plan_execution_gate_middleware.py:93)
+- [backend/src/agents/middlewares/plan_evaluator_middleware.py](/Users/ryan_chua/Desktop/CapyHome/backend/src/agents/middlewares/plan_evaluator_middleware.py:106)
+- [backend/src/agents/middlewares/evaluator_middleware.py](/Users/ryan_chua/Desktop/CapyHome/backend/src/agents/middlewares/evaluator_middleware.py:94)
+- [frontend/src/app/workspace/agents/[agent_name]/chats/[thread_id]/page.tsx](/Users/ryan_chua/Desktop/CapyHome/frontend/src/app/workspace/agents/[agent_name]/chats/[thread_id]/page.tsx:165)
+- [frontend/src/components/workspace/messages/message-list.tsx](/Users/ryan_chua/Desktop/CapyHome/frontend/src/components/workspace/messages/message-list.tsx:50)
+- [frontend/src/components/workspace/messages/subtask-card.tsx](/Users/ryan_chua/Desktop/CapyHome/frontend/src/components/workspace/messages/subtask-card.tsx:44)

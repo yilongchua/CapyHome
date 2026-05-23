@@ -1,4 +1,4 @@
-# LightRAG vs. Capybara Home Knowledge Vault — In-Depth Analysis
+# LightRAG vs. CapyHome Knowledge Vault — In-Depth Analysis
 
 > Captured at the point of removal. References file paths and line numbers
 > as they existed before the removal commit.
@@ -65,7 +65,7 @@ expressed as Obsidian-compatible markdown instead of a graph DB.
 
 ### Storage layout
 
-`backend/.capybara-home/knowledge_vault/`:
+`backend/.capyhome/knowledge_vault/`:
 
 - `00_schema/` — VAULT_SCHEMA, RESEARCH_POLICY, QUERY_RETENTION_POLICY.
 - `01_raw/sources/YYYY/MM/{source-id}/` — raw fetched content.
@@ -162,7 +162,7 @@ Five concrete frictions, each independently expensive:
    entity+relation extractor on the same chunks. Roughly 2× the
    per-source LLM bill unless one was turned off — and turning off
    `_analyze_source` breaks the markdown vault.
-3. **External stack.** No LightRAG compose file shipped with capybara.
+3. **External stack.** No LightRAG compose file shipped with capyhome.
    `local-stack.sh` expected `$HOME/Desktop/LightRAG/` to exist with
    both `docker-compose.yml` and
    `docker-compose.infinity-standalone.yaml`. Adding LightRAG + Neo4j +

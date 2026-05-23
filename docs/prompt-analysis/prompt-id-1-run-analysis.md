@@ -464,7 +464,7 @@ Decision after rerun:
 Use this prompt locally for each improvement cycle:
 
 ```text
-You are improving the Capybara Home prompt stack using the local `prompt-tunning/` evaluation corpus.
+You are improving the CapyHome prompt stack using the local `prompt-tunning/` evaluation corpus.
 
 Objective:
 Find the next highest-leverage prompt improvement that reduces bad orchestration behavior without hurting harder research tasks.
