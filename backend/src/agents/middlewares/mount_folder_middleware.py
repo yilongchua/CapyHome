@@ -23,11 +23,11 @@ VIRTUAL_MOUNT_PATH = "/mnt/user-data/mounted"
 VIRTUAL_ANALYSE_PATH = "/mnt/user-data/workspace/.analyse"
 
 
-class DreamyMountState(AgentState):
+class MountFolderState(AgentState):
     thread_data: NotRequired[ThreadDataState | None]
 
 
-class DreamyMountMiddleware(AgentMiddleware[DreamyMountState]):
+class MountFolderMiddleware(AgentMiddleware[MountFolderState]):
     """Inject mounted folder info into agent context for work mode only.
 
     Reads dreamy_mount.json, registers the real path under the virtual path
@@ -39,7 +39,7 @@ class DreamyMountMiddleware(AgentMiddleware[DreamyMountState]):
     lead-agent prompt instructions instead of per-turn injection.
     """
 
-    state_schema = DreamyMountState
+    state_schema = MountFolderState
 
     def _mount_block(self, mounted_path_str: str) -> str:
         lines = [
@@ -55,7 +55,7 @@ class DreamyMountMiddleware(AgentMiddleware[DreamyMountState]):
         return "\n".join(lines)
 
     @override
-    def before_agent(self, state: DreamyMountState, runtime: Runtime) -> dict | None:
+    def before_agent(self, state: MountFolderState, runtime: Runtime) -> dict | None:
         context = runtime.context if isinstance(runtime.context, dict) else {}
         mode = str(context.get("mode") or "").strip().lower() or "work"
         thread_id = context.get("thread_id")
