@@ -18,7 +18,7 @@ from src.agents.middlewares.dangling_tool_call_middleware import DanglingToolCal
 from src.agents.middlewares.dreamy_bootstrap_middleware import DreamyBootstrapMiddleware
 from src.agents.middlewares.dreamy_execution_middleware import DreamyExecutionMiddleware
 from src.agents.middlewares.dreamy_intent_middleware import DreamyIntentMiddleware
-from src.agents.middlewares.dreamy_mount_middleware import DreamyMountMiddleware
+from src.agents.middlewares.mount_folder_middleware import MountFolderMiddleware
 from src.agents.middlewares.dreamy_poc_middleware import DreamyPocMiddleware
 from src.agents.middlewares.dreamy_watchdog_middleware import DreamyWatchdogMiddleware
 from src.agents.middlewares.evaluator_middleware import EvaluatorMiddleware
@@ -571,7 +571,7 @@ def _build_middleware_registry(
         MiddlewareSpec("dreamy_poc", lambda: DreamyPocMiddleware(), after={"dreamy_bootstrap", "thread_data", "dreamy_watchdog"}),
         MiddlewareSpec("dreamy_execution", lambda: DreamyExecutionMiddleware(), after={"dreamy_poc", "thread_data", "sandbox", "dreamy_watchdog"}),
         MiddlewareSpec("uploads", lambda: UploadsMiddleware(), after={"thread_data"}),
-        MiddlewareSpec("dreamy_mount", lambda: DreamyMountMiddleware(), after={"uploads", "thread_data"}),
+        MiddlewareSpec("mount_folder", lambda: MountFolderMiddleware(), after={"uploads", "thread_data"}),
         MiddlewareSpec("sandbox", lambda: SandboxMiddleware(), after={"thread_data", "dreamy_intent", "dreamy_bootstrap"}),
         MiddlewareSpec("autoresearch", lambda: AutoresearchMiddleware(), after={"sandbox"}),
         MiddlewareSpec("write_file_artifact", lambda: WriteFileArtifactMiddleware(), after={"sandbox"}),
