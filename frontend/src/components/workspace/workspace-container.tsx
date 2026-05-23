@@ -120,6 +120,5 @@ function nameOfSegment(
   if (segment === "pipelines") return t.breadcrumb.pipelines;
   if (segment === "approvals") return t.breadcrumb.approvals;
   if (segment === "vault") return t.breadcrumb.vault;
-  if (segment === "integrations") return t.breadcrumb.integrations;
   return segment[0]?.toUpperCase() + segment.slice(1);
 }

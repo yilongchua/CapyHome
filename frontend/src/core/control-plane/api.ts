@@ -6,9 +6,6 @@ import type {
   CreatePipelineRunRequest,
   FeedbackEvent,
   FolderSyncManifest,
-  IntegrationServiceStartResponse,
-  IntegrationServiceToggleResponse,
-  IntegrationServicesStatusResponse,
   IntegrationStatusResponse,
   PipelineRun,
   PipelineTemplate,
@@ -25,7 +22,6 @@ import type {
   CleanupPipelineRunsResponse,
   AutoresearchObjective,
   SelfImproverDraftReport,
-  StartupJob,
   VaultSearchResponse,
   VaultSaveRequest,
   VaultActionItemsResponse,
@@ -465,78 +461,6 @@ export async function getIntegrationStatus(): Promise<IntegrationStatusResponse>
     );
   }
   return response.json() as Promise<IntegrationStatusResponse>;
-}
-
-export async function getIntegrationServicesStatus(): Promise<IntegrationServicesStatusResponse> {
-  const response = await fetch(`${getBackendBaseURL()}/api/integrations/services`);
-  if (!response.ok) {
-    await parseError(
-      response,
-      `Failed to load integration services status: ${response.statusText}`,
-    );
-  }
-  return response.json() as Promise<IntegrationServicesStatusResponse>;
-}
-
-export async function startIntegrationService(
-  serviceId: string,
-): Promise<IntegrationServiceStartResponse> {
-  const response = await fetch(
-    `${getBackendBaseURL()}/api/integrations/services/${serviceId}/start`,
-    { method: "POST" },
-  );
-  if (!response.ok) {
-    await parseError(
-      response,
-      `Failed to start integration service: ${response.statusText}`,
-    );
-  }
-  return response.json() as Promise<IntegrationServiceStartResponse>;
-}
-
-export async function setIntegrationServiceEnabled(
-  serviceId: string,
-  enabled: boolean,
-): Promise<IntegrationServiceToggleResponse> {
-  const response = await fetch(
-    `${getBackendBaseURL()}/api/integrations/services/${serviceId}/set-enabled`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled }),
-    },
-  );
-  if (!response.ok) {
-    await parseError(
-      response,
-      `Failed to set integration service state: ${response.statusText}`,
-    );
-  }
-  return response.json() as Promise<IntegrationServiceToggleResponse>;
-}
-
-export async function getStartupJob(jobId: string): Promise<StartupJob> {
-  const response = await fetch(
-    `${getBackendBaseURL()}/api/integrations/startup-jobs/${jobId}`,
-  );
-  if (!response.ok) {
-    await parseError(response, `Failed to load startup job: ${response.statusText}`);
-  }
-  return response.json() as Promise<StartupJob>;
-}
-
-export async function startAllIntegrationServices(): Promise<IntegrationServiceStartResponse> {
-  const response = await fetch(
-    `${getBackendBaseURL()}/api/integrations/services/start-all`,
-    { method: "POST" },
-  );
-  if (!response.ok) {
-    await parseError(
-      response,
-      `Failed to start all integration services: ${response.statusText}`,
-    );
-  }
-  return response.json() as Promise<IntegrationServiceStartResponse>;
 }
 
 export async function runSchedulerJob(jobId: string): Promise<PipelineRun> {

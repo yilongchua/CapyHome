@@ -144,7 +144,6 @@ export interface Translations {
     pipelines: string;
     approvals: string;
     vault: string;
-    integrations: string;
     dreamy: string;
   };
 
@@ -182,7 +181,6 @@ export interface Translations {
     pipelines: string;
     approvals: string;
     vault: string;
-    integrations: string;
   };
 
   // Workspace
@@ -218,7 +216,6 @@ export interface Translations {
     pipelines: string;
     approvals: string;
     vault: string;
-    integrations: string;
   };
 
   // Tool calls
