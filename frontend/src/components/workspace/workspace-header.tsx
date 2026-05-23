@@ -13,18 +13,50 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useI18n } from "@/core/i18n/hooks";
+import { useLocalSettings } from "@/core/settings";
 import { env } from "@/env";
 import { cn } from "@/lib/utils";
+
+const DEFAULT_ICON = {
+  src: "/capybara-logo.webp",
+  width: 32,
+  height: 32,
+  alt: "Capybara Home",
+};
+
+const PLAN_MODE_ICON = {
+  src: "/plan-mode-icon.webp",
+  width: 297,
+  height: 223,
+  alt: "Plan mode",
+};
+
+const WORK_MODE_ICON = {
+  src: "/work-mode-icon.webp",
+  width: 342,
+  height: 204,
+  alt: "Work mode",
+};
 
 export function WorkspaceHeader({ className }: { className?: string }) {
   const { t } = useI18n();
   const { state } = useSidebar();
   const pathname = usePathname();
+  const [settings] = useLocalSettings();
+
+  const isNewChat = pathname === "/workspace/chats/new";
+  const navIcon = isNewChat
+    ? settings.context.mode === "plan"
+      ? PLAN_MODE_ICON
+      : WORK_MODE_ICON
+    : DEFAULT_ICON;
   return (
     <>
       <div
         className={cn(
-          "group/workspace-header flex h-12 flex-col justify-center",
+          "group/workspace-header flex flex-col",
+          isNewChat && "border-border border-b-2",
+          (state === "collapsed" || !isNewChat) && "h-12 justify-center",
           className,
         )}
       >
@@ -32,26 +64,51 @@ export function WorkspaceHeader({ className }: { className?: string }) {
           <div className="group-has-data-[collapsible=icon]/sidebar-wrapper:-translate-y flex w-full cursor-pointer items-center justify-center">
             <div className="block group-hover/workspace-header:hidden">
               <Image
-                src="/capybara-logo.png"
-                alt="Capybara Home"
-                width={24}
-                height={24}
-                className="size-6 object-contain"
+                src={navIcon.src}
+                alt={navIcon.alt}
+                width={navIcon.width}
+                height={navIcon.height}
+                className="h-6 w-auto object-contain"
                 priority
               />
             </div>
             <SidebarTrigger className="hidden pl-2 group-hover/workspace-header:block" />
+          </div>
+        ) : isNewChat ? (
+          <div className="relative">
+            {env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true" ? (
+              <Link href="/" className="block">
+                <Image
+                  src={navIcon.src}
+                  alt={navIcon.alt}
+                  width={navIcon.width}
+                  height={navIcon.height}
+                  className="block h-auto w-full object-cover"
+                  priority
+                />
+              </Link>
+            ) : (
+              <Image
+                src={navIcon.src}
+                alt={navIcon.alt}
+                width={navIcon.width}
+                height={navIcon.height}
+                className="block h-auto w-full object-cover"
+                priority
+              />
+            )}
+            <SidebarTrigger className="bg-background/70 hover:bg-background absolute top-1.5 right-1.5 backdrop-blur-sm" />
           </div>
         ) : (
           <div className="flex items-center justify-between gap-2">
             {env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true" ? (
               <Link href="/" className="ml-2 flex items-center gap-2">
                 <Image
-                  src="/capybara-logo.png"
-                  alt="Capybara Home"
-                  width={32}
-                  height={32}
-                  className="size-8 object-contain"
+                  src={navIcon.src}
+                  alt={navIcon.alt}
+                  width={navIcon.width}
+                  height={navIcon.height}
+                  className="h-8 w-auto object-contain"
                   priority
                 />
                 <span className="text-primary font-sans text-base font-bold tracking-tight">
@@ -61,11 +118,11 @@ export function WorkspaceHeader({ className }: { className?: string }) {
             ) : (
               <div className="ml-2 flex cursor-default items-center gap-2">
                 <Image
-                  src="/capybara-logo.png"
-                  alt="Capybara Home"
-                  width={32}
-                  height={32}
-                  className="size-8 object-contain"
+                  src={navIcon.src}
+                  alt={navIcon.alt}
+                  width={navIcon.width}
+                  height={navIcon.height}
+                  className="h-8 w-auto object-contain"
                   priority
                 />
                 <span className="text-primary font-sans text-base font-bold tracking-tight">

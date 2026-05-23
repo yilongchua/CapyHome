@@ -791,7 +791,20 @@ function ChatPageContent({
           </header>
           <main className="flex min-h-0 max-w-full grow flex-col">
             <div className="flex size-full justify-center">
-              <div className="flex size-full flex-col">
+              <div
+                className="flex size-full flex-col bg-center bg-no-repeat"
+                style={
+                  isNewThread
+                    ? {
+                        backgroundImage:
+                          settings.context.mode === "plan"
+                            ? "url('/plan-mode-chat.webp')"
+                            : "url('/work-mode-chat.webp')",
+                        backgroundSize: "100% 100%",
+                      }
+                    : undefined
+                }
+              >
                 {handoffBanner && !isNewThread && (
                   <div className="px-4 pt-14 pb-2">
                     <div className="bg-background/80 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 backdrop-blur">
