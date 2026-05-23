@@ -30,7 +30,6 @@ import {
   SelectContent,
   SelectGroup,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { CodeEditor } from "@/components/workspace/code-editor";
@@ -50,6 +49,11 @@ import { Tooltip } from "../tooltip";
 
 import { useDirectory } from "./context";
 import { PlanViewer } from "./plan-viewer";
+
+function truncateFilename(name: string): string {
+  if (name.length <= 12) return name;
+  return `${name.slice(0, 9)}...${name.slice(-5)}`;
+}
 
 export function ArtifactFileDetail({
   className,
@@ -214,11 +218,16 @@ export function ArtifactFileDetail({
         <div className="flex items-center gap-2">
           <ArtifactTitle>
             {isWriteFile ? (
-              <div className="px-2">{getFileName(filepath)}</div>
+              <div className="px-2" title={getFileName(filepath)}>
+                {truncateFilename(getFileName(filepath))}
+              </div>
             ) : (
               <Select value={filepath} onValueChange={select}>
-                <SelectTrigger className="border-none bg-transparent! shadow-none select-none focus:outline-0 active:outline-0">
-                  <SelectValue placeholder="Select a file" />
+                <SelectTrigger
+                  className="border-none bg-transparent! shadow-none select-none focus:outline-0 active:outline-0"
+                  title={getFileName(filepath)}
+                >
+                  <span>{truncateFilename(getFileName(filepath))}</span>
                 </SelectTrigger>
                 <SelectContent className="select-none">
                   <SelectGroup>
