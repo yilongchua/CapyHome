@@ -323,7 +323,7 @@ const ChatBox: React.FC<{
                     className="mx-1 w-2 bg-muted/85 opacity-100 transition-colors hover:bg-muted"
                   />
                   <ResizablePanel defaultSize={58} minSize={24} id="workspace-directory-preview">
-                    <div className="size-full overflow-y-auto rounded-md border">
+                    <div className="size-full overflow-y-auto rounded-md">
                       {selectedFile ? (
                         <ArtifactFileDetail
                           className="size-full"
