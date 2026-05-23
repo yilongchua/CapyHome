@@ -18,7 +18,7 @@ import { env } from "@/env";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_ICON = {
-  src: "/capybara-logo.webp",
+  src: "/Logo.png",
   width: 32,
   height: 32,
   alt: "Capybara Home",

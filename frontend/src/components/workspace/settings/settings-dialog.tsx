@@ -11,6 +11,7 @@ import {
   BotIcon,
   GlobeIcon,
   ImageIcon,
+  PuzzleIcon,
   Share2Icon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -25,6 +26,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { AboutSettingsPage } from "@/components/workspace/settings/about-settings-page";
 import { AppearanceSettingsPage } from "@/components/workspace/settings/appearance-settings-page";
 import { AutoresearchCleanupSettingsPage } from "@/components/workspace/settings/autoresearch-cleanup-settings-page";
+import { BrowserExtensionSettingsPage } from "@/components/workspace/settings/browser-extension-settings-page";
 import { BrowserSettingsPage } from "@/components/workspace/settings/browser-settings-page";
 import { ComfyuiSettingsPage } from "@/components/workspace/settings/comfyui-settings-page";
 import { EmbeddingSettingsPage } from "@/components/workspace/settings/embedding-settings-page";
@@ -46,6 +48,7 @@ type SettingsSection =
   | "llm"
   | "embedding"
   | "browser"
+  | "browserExtension"
   | "comfyui"
   | "about";
 
@@ -102,6 +105,11 @@ export function SettingsDialog(props: SettingsDialogProps) {
         icon: Share2Icon,
       },
       { id: "browser", label: t.settings.sections.browser, icon: GlobeIcon },
+      {
+        id: "browserExtension",
+        label: t.settings.sections.browserExtension,
+        icon: PuzzleIcon,
+      },
       { id: "comfyui", label: t.settings.sections.comfyui, icon: ImageIcon },
       { id: "about", label: t.settings.sections.about, icon: InfoIcon },
     ],
@@ -115,6 +123,7 @@ export function SettingsDialog(props: SettingsDialogProps) {
       t.settings.sections.llm,
       t.settings.sections.embedding,
       t.settings.sections.browser,
+      t.settings.sections.browserExtension,
       t.settings.sections.comfyui,
       t.settings.sections.about,
     ],
@@ -125,7 +134,7 @@ export function SettingsDialog(props: SettingsDialogProps) {
       onOpenChange={(open) => props.onOpenChange?.(open)}
     >
       <DialogContent
-        className="flex h-[75vh] max-h-[calc(100vh-2rem)] flex-col sm:max-w-5xl md:max-w-6xl"
+        className="flex h-[90vh] max-h-[calc(100vh-2rem)] flex-col sm:max-w-[76.8rem] md:max-w-[86.4rem]"
         aria-describedby={undefined}
       >
         <DialogHeader className="gap-1">
@@ -170,6 +179,9 @@ export function SettingsDialog(props: SettingsDialogProps) {
               {activeSection === "llm" && <LlmSettingsPage />}
               {activeSection === "embedding" && <EmbeddingSettingsPage />}
               {activeSection === "browser" && <BrowserSettingsPage />}
+              {activeSection === "browserExtension" && (
+                <BrowserExtensionSettingsPage />
+              )}
               {activeSection === "comfyui" && <ComfyuiSettingsPage />}
               {activeSection === "about" && <AboutSettingsPage />}
             </div>

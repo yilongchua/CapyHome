@@ -318,6 +318,7 @@ export const enUS: Translations = {
       llm: "LLM Providers",
       embedding: "Embedding Models",
       browser: "Browser Tool",
+      browserExtension: "Browser Extension",
       comfyui: "ComfyUI",
       about: "About",
     },
@@ -475,6 +476,57 @@ export const enUS: Translations = {
       connectionFailed: "Connection failed",
       connectionSuccess: "Server is reachable",
       addAsMcp: "Add as MCP Server",
+    },
+    browserExtension: {
+      title: "Browser Extension",
+      description:
+        "Install the Knowledge Vault Clipper to save articles, selections, or full pages from your browser straight into Capybara Home's vault.",
+      aboutTitle: "Knowledge Vault Clipper",
+      aboutDescription:
+        "A Chrome/Chromium extension that captures the current page as Markdown and enqueues it into your vault ingestion pipeline. Works with Article, Selection, or Full Page modes — plus a hands-free auto-clip mode.",
+      autoClipTitle: "Auto-clip is on by default",
+      autoClipDefaultBadge: "Default",
+      autoClipDescription:
+        "Whenever you stay on a public page long enough, the extension snapshots it and enqueues it into your knowledge vault automatically — no clicking required. You can opt out anytime from the extension popup.",
+      autoClipDwellNote:
+        "Triggers after ~10s of dwell time on the page (configurable, minimum 4s).",
+      autoClipBlocklistNote:
+        "Sensitive hosts (Gmail, account/login pages, localhost) are blocked by default — edit the blocklist in the popup.",
+      autoClipDedupNote:
+        "Each URL is auto-clipped at most once per 24h to keep your vault clean.",
+      autoClipOptOutNote:
+        "To opt out completely, open the extension popup and toggle Auto-clip pages off.",
+      queueSignTitle: "How you'll know it was queued",
+      queueSignBody:
+        "Every successful clip flashes a green ✓ badge on the toolbar icon for a few seconds, fires a desktop notification (\"Saved to Knowledge Vault\"), and shows a confirmation pill inside the popup. A red ! badge appears if the backend rejected the clip.",
+      installTitle: "Install in 4 steps",
+      step1Title: "Navigate to Chrome's extensions page",
+      step1Description:
+        "Paste this URL into a new Chrome tab (Chrome blocks websites from opening chrome:// URLs directly).",
+      step2Title: "Toggle Developer mode",
+      step2Description:
+        "In the top-right corner of the extensions page, switch Developer mode on. This unlocks the Load unpacked button you'll need next.",
+      step3Title: "Load unpacked from the repo",
+      step3Description:
+        "Click Load unpacked and select the knowledge-vault-clipper folder inside this repository. The Capybara icon should appear in your toolbar — pin it for quick access.",
+      step4Title: "Verify the API base",
+      step4Description:
+        "Open the extension popup and confirm the API Base matches the backend you're running (default: http://127.0.0.1:8001). Auto-clip will start working on the next eligible page you visit.",
+      copyPath: "Copy path",
+      copyUrl: "Copy URL",
+      copied: "Copied",
+      usageTitle: "How to clip",
+      usageClick:
+        "Click the toolbar icon, choose a clip mode, and press Clip Current Page.",
+      usageRightClick:
+        "Right-click a page or text selection for a one-click Save to Knowledge Vault.",
+      usageShortcut: "Keyboard shortcut on any page:",
+      shortcutMac: "⌘+Shift+V",
+      shortcutWin: "Alt+Shift+V",
+      shortcutOr: "or",
+      troubleshootingTitle: "Not working?",
+      troubleshootingBody:
+        "Internal browser pages (chrome://, about:, the Chrome Web Store) block content scripts so clipping will fail there. Make sure the backend is running on the API Base shown in the popup, and check the extension's service worker logs from chrome://extensions for errors.",
     },
     comfyui: {
       title: "ComfyUI",
