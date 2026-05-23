@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 
 import {
   DEFAULT_LOCAL_SETTINGS,
@@ -6,6 +6,8 @@ import {
   saveLocalSettings,
   type LocalSettings,
 } from "./local";
+
+const SETTINGS_CHANGE_EVENT = "capybara-home:local-settings-change";
 
 export function useLocalSettings(): [
   LocalSettings,
@@ -22,6 +24,12 @@ export function useLocalSettings(): [
     }
     setMounted(true);
   }, [mounted]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onChange = () => setState(getLocalSettings());
+    window.addEventListener(SETTINGS_CHANGE_EVENT, onChange);
+    return () => window.removeEventListener(SETTINGS_CHANGE_EVENT, onChange);
+  }, []);
   const setter = useCallback(
     (
       key: keyof LocalSettings,
@@ -46,6 +54,9 @@ export function useLocalSettings(): [
           },
         };
         saveLocalSettings(newState);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent(SETTINGS_CHANGE_EVENT));
+        }
         return newState;
       });
     },
