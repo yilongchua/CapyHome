@@ -1,4 +1,4 @@
-# Reimplementing LightRAG in Capybara Home
+# Reimplementing LightRAG in CapyHome
 
 > If you decide to reintroduce LightRAG later, do **not** simply copy the
 > old code back. The old integration was a query-only wrapper against an

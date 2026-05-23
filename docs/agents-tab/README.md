@@ -6,7 +6,7 @@
 
 ---
 
-## 1. What "Agents" means in Capybara Home
+## 1. What "Agents" means in CapyHome
 
 A **custom agent** is a per-user named persona that sits on top of the same Lead Agent runtime. It is **not** a separate LangGraph graph — it is a triple of:
 
@@ -16,7 +16,7 @@ A **custom agent** is a per-user named persona that sits on top of the same Lead
 
 When a chat thread is started with `agent_name=<name>`, the lead agent factory (`make_lead_agent` in `backend/src/agents/lead_agent/agent.py`) loads that agent's config, resolves a (possibly overridden) model, restricts tools to the agent's groups, and injects the agent's SOUL.md into the system prompt. Everything else (sandbox, memory, middlewares, sub-agents) is identical to a default lead-agent run.
 
-Custom agents are stored under the per-install Capybara Home data dir:
+Custom agents are stored under the per-install CapyHome data dir:
 
 ```
 {base_dir}/agents/{agent-name-lowercase}/
@@ -25,7 +25,7 @@ Custom agents are stored under the per-install Capybara Home data dir:
     memory.json          # per-agent memory (written by MemoryMiddleware)
 ```
 
-`base_dir` is whatever `get_paths().base_dir` resolves to (defaults to `backend/.capybara-home`). The path helpers live in `backend/src/config/paths.py`:
+`base_dir` is whatever `get_paths().base_dir` resolves to (defaults to `backend/.capyhome`). The path helpers live in `backend/src/config/paths.py`:
 
 - `paths.agents_dir` → `{base_dir}/agents`
 - `paths.agent_dir(name)` → `{base_dir}/agents/{name.lower()}`

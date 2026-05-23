@@ -45,7 +45,7 @@ flowchart TD
     subgraph Handoff["Plan to Work Handoff"]
         P6 --> H0[Read latest thread state]
         H0 --> H1[Ensure thread title exists]
-        H1 --> H2[Build a fresh CapybaraClient in work mode]
+        H1 --> H2[Build a fresh CapyHomeClient in work mode]
         H2 --> H3[Inject original request and resolved clarification context]
         H3 --> H4[Start a new work-mode run on the same thread]
         H4 --> H5[Persist plan handoff succeeded and set status to executing]
