@@ -7,6 +7,7 @@ export interface Subtask {
   description: string;
   group_title?: string;
   latestMessage?: AIMessage;
+  messages?: AIMessage[];
   prompt: string;
   result?: string;
   error?: string;

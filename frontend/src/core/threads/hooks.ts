@@ -15,7 +15,7 @@ import { getBackendBaseURL } from "@/core/config";
 import { api } from "@/core/dreamy/api";
 import { uuid } from "@/core/utils/uuid";
 
-import { getAPIClient } from "../api";
+import { clearThreadClientCache, getAPIClient } from "../api";
 import { useI18n } from "../i18n/hooks";
 import type { FileInMessage } from "../messages/utils";
 import type { LocalSettings } from "../settings";
@@ -32,12 +32,6 @@ import {
 } from "../workspace-refresh";
 
 import {
-  getCachedThreadMessages,
-  invalidateCachedThreadMessages,
-  setCachedThreadMessages,
-} from "./thread-message-cache";
-
-import {
   deleteAllThreads as deleteAllThreadsWithCleanup,
   deleteThread as deleteThreadWithCleanup,
 } from "./api";
@@ -50,6 +44,11 @@ import {
   shouldEnqueueMessage,
   updateById,
 } from "./queue";
+import {
+  getCachedThreadMessages,
+  invalidateCachedThreadMessages,
+  setCachedThreadMessages,
+} from "./thread-message-cache";
 import type { AgentThread, AgentThreadState, PlanState } from "./types";
 
 export type ToolEndEvent = {
@@ -687,8 +686,23 @@ export function useThreadStream({
               : t,
           ),
       );
+      syntheticActivitySeqRef.current += 1;
+      appendActivityLiveEvent({
+        id: `synthetic-activity:title-generated:${event.thread_id}:${syntheticActivitySeqRef.current}`,
+        run_id: currentRunIdRef.current ?? "run-unknown",
+        seq: syntheticActivitySeqRef.current,
+        timestamp: Date.now() / 1000,
+        actor: "system",
+        kind: "title_generation_completed",
+        line: `Title generated: "${event.title}"`,
+        payload: {
+          source: "title_middleware",
+          title: event.title,
+          thread_id: event.thread_id,
+        },
+      });
     },
-    [queryClient],
+    [appendActivityLiveEvent, queryClient],
   );
 
   const handleThinkingChunk = useCallback(
@@ -747,6 +761,7 @@ export function useThreadStream({
         id: event.task_id,
         status: "in_progress",
         latestMessage: event.message,
+        messages: [event.message],
         subagent_type: subagentType,
         description,
         group_title: groupTitle,
@@ -782,7 +797,6 @@ export function useThreadStream({
         },
       });
       if (!event.trace?.event_type) return;
-      const tracePayload = event.trace.payload;
       const traceRunId =
         typeof event.trace.run_id === "string" ? event.trace.run_id : undefined;
       const traceId =
@@ -1140,7 +1154,7 @@ export function useThreadStream({
       }
     },
     onFinish(state) {
-      const stateValues = state.values as AgentThreadState;
+      const stateValues = state.values;
       listeners.current.onFinish?.(stateValues);
       const finishedThreadId = threadIdRef.current;
       const finalMessages =
@@ -1338,6 +1352,20 @@ export function useThreadStream({
               },
             ]
           : [];
+        const selectedMode = options?.mode ?? context.mode ?? "work";
+        const runConfigurable = {
+          ...context,
+          thinking_enabled: true,
+          is_plan_mode: selectedMode === "plan",
+          mode: selectedMode,
+          subagent_enabled: true,
+          plan_behavior: selectedMode === "plan" ? "plan_foreground" : "work_interactive",
+          auto_mode: context.auto_mode ?? false,
+          thread_id: threadId,
+          current_turn_text: text,
+          original_user_request: text,
+        };
+
         await thread.submit(
           {
             messages: outboundMessages,
@@ -1347,19 +1375,16 @@ export function useThreadStream({
             streamSubgraphs: false,
             streamResumable: true,
             checkpoint: options?.checkpoint,
-            config: { recursion_limit: 1000 },
+            config: {
+              recursion_limit: 1000,
+              configurable: {
+                ...runConfigurable,
+                ...extraContext,
+              },
+            },
             context: {
               ...extraContext,
-              ...context,
-              thinking_enabled: true,
-              is_plan_mode: (options?.mode ?? context.mode) === "plan",
-              mode: options?.mode ?? context.mode ?? "work",
-              subagent_enabled: true,
-              plan_behavior: (options?.mode ?? context.mode) === "plan" ? "plan_foreground" : "work_interactive",
-              auto_mode: context.auto_mode ?? false,
-              thread_id: threadId,
-              current_turn_text: text,
-              original_user_request: text,
+              ...runConfigurable,
             },
           },
         );
@@ -1678,7 +1703,24 @@ export function useThreadStream({
 
     stopInProgressRef.current = true;
     try {
-      await thread.stop();
+      try {
+        await thread.stop();
+      } finally {
+        const stopThreadId = threadIdRef.current;
+        if (stopThreadId) {
+          const response = await fetch(`${getBackendBaseURL()}${api.threads.hardStop(stopThreadId)}`, {
+            method: "POST",
+          });
+          if (!response.ok) {
+            throw new Error(await response.text());
+          }
+          clearThreadClientCache(stopThreadId);
+          invalidateCachedThreadMessages(queryClient, stopThreadId);
+          publishWorkspaceRefresh([`thread:${stopThreadId}`], {
+            source: "thread-hard-stop",
+          });
+        }
+      }
       toast.message("Run stopped.");
     } catch (error) {
       if (isBenignStopAbortError(error)) {
@@ -1689,7 +1731,7 @@ export function useThreadStream({
     } finally {
       stopInProgressRef.current = false;
     }
-  }, [thread]);
+  }, [queryClient, thread]);
 
   const cachedThreadId = onStreamThreadId ?? threadIdRef.current ?? undefined;
   const cachedSnapshot =

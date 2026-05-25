@@ -30,6 +30,18 @@ from src.agents.activity_timeline import (
 from src.agents.middlewares.runtime_events import append_runtime_event, drain_runtime_events
 
 _TOOL_INPUT_BY_TASK_ID_KEY = "_activity_tool_input_by_task_id"
+_LONG_RUNNING_TOOL_NAMES = frozenset(
+    {
+        "bash",
+        "write_file",
+        "str_replace",
+        "read_file",
+        "web_search",
+        "query_knowledge_vault",
+        "task",
+        "write_todos",
+    }
+)
 
 
 class ActivityTimelineMiddlewareState(AgentState):
@@ -70,6 +82,15 @@ def _as_str(value: Any) -> str | None:
 
 def _tool_summary(payload: dict[str, Any]) -> str | None:
     return _as_str(payload.get("tool_summary")) or _as_str(payload.get("tool_input")) or _as_str(payload.get("description"))
+
+
+def _tool_input_preview(args: Any) -> str | None:
+    args_dict = _as_dict(args)
+    for key in ("query", "command", "path", "file_path", "filepath", "url", "description", "prompt"):
+        value = _as_str(args_dict.get(key))
+        if value:
+            return value[:280]
+    return _as_str(args)[:280] if isinstance(args, str) else None
 
 
 def _subagent_label(payload: dict[str, Any]) -> str:
@@ -127,6 +148,65 @@ def _tool_output_preview(result: ToolMessage | Command) -> str | None:
     return None
 
 
+def _tool_label(tool_name: str) -> str:
+    labels = {
+        "bash": "Running shell command",
+        "read_file": "Reading file",
+        "write_file": "Writing file",
+        "str_replace": "Editing file",
+        "web_search": "Searching the web",
+        "query_knowledge_vault": "Searching knowledge vault",
+        "task": "Starting delegated task",
+        "write_todos": "Updating todo list",
+        "present_files": "Preparing files",
+    }
+    return labels.get(tool_name, f"Running {tool_name}")
+
+
+def _format_tool_activity_line(tool_name: str, tool_input: str | None, *, completed: bool) -> str:
+    label = _tool_label(tool_name)
+    if tool_name in {"write_file", "str_replace", "read_file"} and tool_input:
+        if not completed:
+            return f"{label}: {tool_input}..."
+        verb = "Wrote" if tool_name == "write_file" and completed else "Edited" if tool_name == "str_replace" and completed else "Read" if completed else label
+        return f"{verb}: {tool_input}"
+    if tool_name == "write_todos":
+        return "Updated todo list" if completed else "Updating todo list..."
+    if tool_input:
+        suffix = "" if completed else "..."
+        return f"{label}: {tool_input}{suffix}"
+    return f"{label}{'' if completed else '...'}" if completed else f"{label}..."
+
+
+def _format_todo_activity_line(event_type: str, payload: dict[str, Any]) -> str:
+    reason_code = _as_str(payload.get("reason_code"))
+    if event_type == "todo_update_validation_failed":
+        error = _as_str(payload.get("error"))
+        return f"Todo update failed validation: {error}" if error else "Todo update failed validation"
+    if event_type == "todo_update_rejected":
+        if reason_code:
+            return f"Todo update rejected: {reason_code}"
+        return "Todo update rejected"
+    return "Updating todo list..."
+
+
+def _format_plan_evaluator_line(event_type: str, payload: dict[str, Any]) -> str:
+    if event_type == "ok":
+        return "Plan evaluator approved the plan"
+    if event_type == "issues_no_revision":
+        return "Plan evaluator found issues and kept the current plan"
+    if event_type == "revision_invalid":
+        return "Plan evaluator ignored an invalid revision"
+    if event_type == "revised":
+        count = payload.get("new_todo_count")
+        if isinstance(count, int):
+            return f"Plan evaluator revised the plan with {count} todo(s)"
+        return "Plan evaluator revised the plan"
+    if event_type == "timeout_skipped":
+        return "Plan evaluator timed out; continuing with the current plan"
+    return "Plan evaluator is reviewing the plan..."
+
+
 def _to_activity_event(runtime: Runtime, runtime_event: dict[str, Any]) -> ActivityEvent | None:
     event_type = str(runtime_event.get("event") or runtime_event.get("decision") or runtime_event.get("signal") or "")
     payload = dict(runtime_event)
@@ -150,9 +230,12 @@ def _to_activity_event(runtime: Runtime, runtime_event: dict[str, Any]) -> Activ
         actor = "system"
 
     if event_type == "tool_call_start":
-        # Emit a single consolidated row on tool_call_end (query/command + response).
         _remember_tool_input(runtime, task_id, _as_str(payload.get("tool_input")))
-        return None
+        tool = _as_str(payload.get("tool")) or "tool"
+        if tool not in _LONG_RUNNING_TOOL_NAMES:
+            return None
+        tool_input = _as_str(payload.get("tool_input"))
+        line = _format_tool_activity_line(tool, tool_input, completed=False)
     elif event_type == "tool_call_end":
         tool = _as_str(payload.get("tool")) or "tool"
         tool_input = _recall_tool_input(runtime, task_id) or _as_str(payload.get("tool_input"))
@@ -162,9 +245,9 @@ def _to_activity_event(runtime: Runtime, runtime_event: dict[str, Any]) -> Activ
             line = "Waiting for plan approval before running tools"
             summary = tool_output[:280]
         elif tool_input:
-            line = f"{tool}: {tool_input}"
+            line = _format_tool_activity_line(tool, tool_input, completed=True)
         else:
-            line = f"{tool} executed"
+            line = _format_tool_activity_line(tool, None, completed=True)
         if summary is None:
             summary = tool_output
     elif event_type == "model_response":
@@ -173,10 +256,27 @@ def _to_activity_event(runtime: Runtime, runtime_event: dict[str, Any]) -> Activ
             return None
         else:
             line = "CapyHome is working on finalizing the response..."
-    elif event_type in {"plan_created", "skipped_trivial", "llm_classified_trivial", "parse_failed_fallback"}:
-        line = "CapyHome is working on creating the implementation plan..."
+    elif event_type == "title_generation_start":
+        line = "Generating chat title..."
+    elif event_type == "planning_started":
+        line = "Planner is evaluating request complexity..."
+    elif event_type == "plan_created":
+        todo_count = payload.get("todo_count")
+        line = f"Plan created with {todo_count} todo(s)" if isinstance(todo_count, int) else "Plan created"
+    elif event_type == "skipped_trivial":
+        line = "Planner classified this as a simple request"
+    elif event_type == "skipped_direct_answer":
+        line = "Planner will answer directly without a separate plan"
+    elif event_type == "llm_classified_trivial":
+        line = "Planner confirmed this does not need a separate plan"
+    elif event_type == "parse_failed_fallback":
+        line = "Planner is using a fallback plan structure"
     elif event_type == "plan_auto_approved":
-        line = "Plan auto-approved — starting execution"
+        line = "Plan auto-approved - starting execution"
+    elif source == "plan_evaluator":
+        line = _format_plan_evaluator_line(event_type, payload)
+    elif source == "write_todos_tool":
+        line = _format_todo_activity_line(event_type, payload)
     elif event_type == "task_started":
         actor = "baby_capy"
         group_kind = group_kind or "subagent_task"
@@ -219,8 +319,6 @@ def _to_activity_event(runtime: Runtime, runtime_event: dict[str, Any]) -> Activ
         line = "CapyHome is thinking..."
     elif event_type == "background_followup_started":
         line = "CapyHome is working on deeper background analysis..."
-    elif event_type == "planning_started":
-        line = "CapyHome is thinking..."
 
     if line is None:
         # Best-effort fallback only for harness/runtime events we still want visible.
@@ -234,6 +332,7 @@ def _to_activity_event(runtime: Runtime, runtime_event: dict[str, Any]) -> Activ
             "todo_failure_retry_middleware",
             "dangling_tool_call_middleware",
             "work_mode_middleware",
+            "title_middleware",
         }:
             line = "CapyHome is working on the next step..."
         else:
@@ -428,7 +527,7 @@ class ActivityTimelineMiddleware(AgentMiddleware[ActivityTimelineMiddlewareState
                 "event": "tool_call_start",
                 "tool": tool_name,
                 "task_id": request.tool_call.get("id"),
-                "tool_input": _tool_summary(_as_dict(request.tool_call.get("args")) | {"tool_input": _as_str(_as_dict(request.tool_call.get("args")).get("query"))}),
+                "tool_input": _tool_input_preview(request.tool_call.get("args")),
             },
         )
         result = handler(request)
@@ -454,7 +553,7 @@ class ActivityTimelineMiddleware(AgentMiddleware[ActivityTimelineMiddlewareState
                 "event": "tool_call_start",
                 "tool": tool_name,
                 "task_id": request.tool_call.get("id"),
-                "tool_input": _tool_summary(_as_dict(request.tool_call.get("args")) | {"tool_input": _as_str(_as_dict(request.tool_call.get("args")).get("query"))}),
+                "tool_input": _tool_input_preview(request.tool_call.get("args")),
             },
         )
         result = await handler(request)

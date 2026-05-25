@@ -853,6 +853,7 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
             return {"complexity_tier": "moderate"}
 
         # Emit planning_started immediately — fires within ~100ms of request arrival
+        append_runtime_event(runtime, {"source": "planner_middleware", "event": "planning_started"})
         try:
             writer = get_stream_writer()
             writer({"type": "planning_started", "source": "planner_middleware"})
@@ -975,10 +976,22 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
 
         fanout_block = ""
         if fanout_ids:
+            node_by_id = {
+                str(node.get("id") or "").strip(): str(node.get("content") or "").strip()
+                for node in nodes
+                if isinstance(node, dict)
+            }
+            candidate_lines = [
+                f"- {todo_id}: {node_by_id.get(todo_id) or 'todo objective'}"
+                for todo_id in fanout_ids
+            ]
+            fanout_candidates_text = "\n".join(candidate_lines)
             fanout_block = (
-                "\nFanout candidates (independent — eligible for parallel execution once approved): "
-                f"{fanout_ids}\n"
+                "\nFanout candidates (independent — eligible for parallel execution once approved):\n"
+                f"{fanout_candidates_text}\n"
                 "Execution remains gated until explicit plan approval.\n"
+                "Do not dispatch one giant subagent prompt that covers multiple candidates.\n"
+                "Delegate one narrow objective per subagent task, then run multiple tasks in parallel.\n"
                 "When synthesizing fanout results, merge by unique topic/claim, deduplicate overlapping sections, and preserve a single clean heading hierarchy.\n"
             )
 

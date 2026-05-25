@@ -14,6 +14,16 @@ class HandoffsConfig(BaseModel):
         default=".runtime",
         description="Relative directory under thread workspace for runtime artifacts.",
     )
+    work_handoff_retry_attempts: int = Field(
+        default=3,
+        ge=0,
+        description="Extra automatic retries for work-mode handoff after the first failed attempt.",
+    )
+    work_handoff_recursion_limit: int = Field(
+        default=1000,
+        ge=50,
+        description="Recursion limit used by spawned work-mode handoff runs.",
+    )
 
 
 _handoffs_config: HandoffsConfig = HandoffsConfig()

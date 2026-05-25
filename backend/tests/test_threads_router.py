@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from pathlib import Path
 
 import pytest
@@ -12,10 +13,12 @@ from src.gateway.routers import threads
 
 
 class _ThreadsClient:
-    def __init__(self, existing_thread_ids: set[str] | None = None, failing_thread_ids: set[str] | None = None):
+    def __init__(self, existing_thread_ids: set[str] | None = None, failing_thread_ids: set[str] | None = None, values: dict | None = None):
         self.deleted: list[str] = []
         self.existing_thread_ids = existing_thread_ids or set()
         self.failing_thread_ids = failing_thread_ids or set()
+        self.values = values or {}
+        self.updated: list[dict] = []
 
     async def delete(self, thread_id: str):
         if thread_id in self.failing_thread_ids:
@@ -29,6 +32,14 @@ class _ThreadsClient:
         items = sorted(self.existing_thread_ids)
         page = items[offset : offset + limit]
         return [{"thread_id": thread_id} for thread_id in page]
+
+    async def get_state(self, thread_id: str):  # noqa: ARG002
+        return {"values": self.values}
+
+    async def update_state(self, thread_id: str, values: dict):  # noqa: ARG002
+        self.updated.append(values)
+        self.values.update(values)
+        return {"values": self.values}
 
 
 class _Client:
@@ -112,3 +123,65 @@ def test_delete_all_threads_deletes_each_thread_and_reports_failures(paths: Path
     assert not paths.thread_dir("thread-a").exists()
     assert paths.thread_dir("thread-b").exists()
     assert not paths.thread_dir("thread-c").exists()
+
+
+def test_hard_stop_patches_dangling_tool_calls(monkeypatch: pytest.MonkeyPatch):
+    executor_module = importlib.import_module("src.subagents.executor")
+    client = _ThreadsClient(
+        values={
+            "messages": [
+                {"id": "h1", "type": "human", "content": "run"},
+                {
+                    "id": "a1",
+                    "type": "ai",
+                    "content": "",
+                    "tool_calls": [
+                        {"id": "tc-1", "name": "write_todos", "args": {}},
+                        {"id": "tc-present", "name": "present_files", "args": {}},
+                    ],
+                },
+            ],
+            "work_mode": {"active": True, "current_phase_index": 2},
+        }
+    )
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(client))
+    monkeypatch.setattr(executor_module, "cancel_background_tasks_for_thread", lambda thread_id: 2)
+
+    response = asyncio.run(threads.hard_stop_thread("thread-1"))
+
+    assert response.cancelled_subagents == 2
+    assert response.patched_tool_calls == 1
+    assert response.state_patched is True
+    updated = client.updated[0]
+    assert updated["work_mode"]["active"] is False
+    assert updated["work_mode"]["stopped"] is True
+    patched_messages = updated["messages"]
+    assert patched_messages[-1]["type"] == "tool"
+    assert patched_messages[-1]["tool_call_id"] == "tc-1"
+    assert "[run_stopped]" in patched_messages[-1]["content"]
+
+
+def test_hard_stop_does_not_duplicate_existing_tool_results(monkeypatch: pytest.MonkeyPatch):
+    executor_module = importlib.import_module("src.subagents.executor")
+    client = _ThreadsClient(
+        values={
+            "messages": [
+                {"id": "h1", "type": "human", "content": "run"},
+                {
+                    "id": "a1",
+                    "type": "ai",
+                    "content": "",
+                    "tool_calls": [{"id": "tc-1", "name": "write_todos", "args": {}}],
+                },
+                {"id": "t1", "type": "tool", "tool_call_id": "tc-1", "name": "write_todos", "content": "done"},
+            ]
+        }
+    )
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(client))
+    monkeypatch.setattr(executor_module, "cancel_background_tasks_for_thread", lambda thread_id: 0)
+
+    response = asyncio.run(threads.hard_stop_thread("thread-1"))
+
+    assert response.patched_tool_calls == 0
+    assert response.state_patched is False
+    assert client.updated == []

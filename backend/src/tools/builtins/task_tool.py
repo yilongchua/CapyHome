@@ -1,6 +1,7 @@
 """Task tool for delegating work to subagents."""
 
 import logging
+import re
 import time
 import uuid
 from dataclasses import replace
@@ -139,6 +140,91 @@ def _build_group_title(subagent_type: str, description: str) -> str:
     return f"{_normalize_subagent_label(subagent_type)}: {description}"
 
 
+def _source_research_prompt_is_broad(prompt: str) -> bool:
+    text = str(prompt or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    numbered_sections = len(re.findall(r"(?m)^\s*\d+\.\s+", text))
+    bullet_sections = len(re.findall(r"(?m)^\s*[-*]\s+", text))
+    scope_markers = sum(
+        1
+        for marker in (
+            "comprehensive",
+            "end-to-end",
+            "all of the following",
+            "focus on:",
+            "return a comprehensive",
+        )
+        if marker in lowered
+    )
+    return len(text) > 900 or numbered_sections >= 3 or bullet_sections >= 6 or scope_markers >= 2
+
+
+def _tokens(value: str) -> set[str]:
+    return {token for token in re.findall(r"[a-z0-9]+", value.lower()) if len(token) > 2}
+
+
+def _ready_todo_scope_hint(runtime: ToolRuntime[ContextT, ThreadState] | None, *, description: str) -> str | None:
+    if runtime is None or not isinstance(getattr(runtime, "state", None), dict):
+        return None
+    todo_graph = runtime.state.get("todo_graph")
+    if not isinstance(todo_graph, dict):
+        return None
+    ready_ids = [str(item).strip() for item in (todo_graph.get("ready_ids") or []) if str(item).strip()]
+    nodes = todo_graph.get("nodes")
+    if not isinstance(nodes, list):
+        return None
+    nodes_by_id: dict[str, dict] = {}
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or "").strip()
+        if node_id:
+            nodes_by_id[node_id] = node
+    candidates: list[str] = []
+    for todo_id in ready_ids:
+        node = nodes_by_id.get(todo_id)
+        if not node:
+            continue
+        status = str(node.get("status") or "").strip().lower()
+        if status == "completed":
+            continue
+        content = str(node.get("content") or "").strip()
+        if content:
+            candidates.append(content)
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) == 0:
+        return None
+
+    # Multiple ready todos can be executed in parallel. Only rewrite a broad
+    # source-researcher prompt when its short description clearly names one.
+    description_tokens = _tokens(description)
+    if not description_tokens:
+        return None
+    scored = [
+        (len(description_tokens & _tokens(candidate)), candidate)
+        for candidate in candidates
+    ]
+    scored.sort(key=lambda item: item[0], reverse=True)
+    best_score, best_candidate = scored[0]
+    second_score = scored[1][0] if len(scored) > 1 else 0
+    if best_score >= 2 and best_score >= second_score + 2:
+        return best_candidate
+    return None
+
+
+def _rewrite_source_research_prompt(prompt: str, objective: str) -> str:
+    objective_line = objective.strip()
+    return (
+        "Research one narrow objective only.\n\n"
+        f"Objective: {objective_line}\n\n"
+        "Do not expand to adjacent objectives. Gather 3-5 high-signal sources and return concise source notes "
+        "with clear citations and freshness."
+    )
+
+
 @tool("task", parse_docstring=True)
 def task_tool(
     runtime: ToolRuntime[ContextT, ThreadState],
@@ -216,6 +302,19 @@ def task_tool(
 
     normalized_description = _normalize_description(description)
     normalized_subagent_type = _normalize_subagent_label(subagent_type)
+    rewritten_scope = False
+    if normalized_subagent_type == "source-researcher" and _source_research_prompt_is_broad(prompt):
+        scope_hint = _ready_todo_scope_hint(runtime, description=description)
+        if scope_hint:
+            prompt = _rewrite_source_research_prompt(prompt, scope_hint)
+            normalized_description = _normalize_description(scope_hint[:120])
+            rewritten_scope = True
+        else:
+            return (
+                "Task rejected: source-researcher accepts one narrow objective only. "
+                "Split the request into smaller scoped task calls (one evidence dimension per task) and retry."
+            )
+
     group_title = _build_group_title(normalized_subagent_type, normalized_description)
 
     # Extract parent context from runtime
@@ -302,12 +401,13 @@ def task_tool(
             "group_id": str(task_id),
             "group_kind": "subagent_task",
             "group_title": group_title,
+            "scope_rewritten": rewritten_scope,
         },
         thinking={
             "source": "summary",
             "content": make_summary_fallback(
                 event_type="task_started",
-                payload={"description": description, "subagent_type": subagent_type},
+                payload={"description": normalized_description, "subagent_type": subagent_type},
             ),
         },
         turn_id=str(tool_call_id),
@@ -321,6 +421,7 @@ def task_tool(
             "task_id": task_id,
             "description": normalized_description,
             "subagent_type": normalized_subagent_type,
+            "scope_rewritten": rewritten_scope,
             "group_id": str(task_id),
             "group_kind": "subagent_task",
             "group_title": group_title,
@@ -337,8 +438,10 @@ def task_tool(
             "task_id": str(task_id),
             "turn_id": str(tool_call_id),
             "assistant_message_id": str(assistant_message_id) if assistant_message_id is not None else None,
-            "description": description,
+            "description": normalized_description,
+            "original_description": description,
             "subagent_type": normalized_subagent_type,
+            "scope_rewritten": rewritten_scope,
             "group_id": str(task_id),
             "group_kind": "subagent_task",
             "group_title": group_title,

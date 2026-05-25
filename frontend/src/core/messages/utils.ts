@@ -36,6 +36,14 @@ const SYNTHETIC_HUMAN_MESSAGE_NAMES = new Set([
   "active_skills",
 ]);
 
+export function isSyntheticHumanMessage(message: Message) {
+  return (
+    message.type === "human" &&
+    typeof message.name === "string" &&
+    SYNTHETIC_HUMAN_MESSAGE_NAMES.has(message.name)
+  );
+}
+
 type MessageGroup =
   | HumanMessageGroup
   | AssistantProcessingGroup
@@ -69,12 +77,22 @@ export function groupMessages<T>(
     return null;
   }
 
+  let suppressBackgroundFollowup = false;
+
   for (const message of messages) {
-    if (message.type === "human" && message.name && SYNTHETIC_HUMAN_MESSAGE_NAMES.has(message.name)) {
+    if (isSyntheticHumanMessage(message)) {
+      if (message.name === "plan_followup_prompt") {
+        suppressBackgroundFollowup = true;
+      }
+      continue;
+    }
+
+    if (suppressBackgroundFollowup && message.type !== "human") {
       continue;
     }
 
     if (message.type === "human") {
+      suppressBackgroundFollowup = false;
       groups.push({ id: message.id, type: "human", messages: [message] });
       continue;
     }
@@ -268,6 +286,48 @@ export function hasToolCalls(message: Message) {
   return (
     message.type === "ai" && message.tool_calls && message.tool_calls.length > 0
   );
+}
+
+const NON_BLOCKING_TOOL_CALL_NAMES = new Set([
+  "ask_clarification",
+  "present_files",
+]);
+
+export function hasPendingToolResultsInCurrentTurn(messages: Message[]) {
+  let lastHumanIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.type === "human" && !isSyntheticHumanMessage(message)) {
+      lastHumanIndex = index;
+      break;
+    }
+  }
+
+  const pendingToolCallIds = new Set<string>();
+  for (let index = lastHumanIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message || isSyntheticHumanMessage(message)) {
+      continue;
+    }
+
+    if (message.type === "ai") {
+      for (const toolCall of message.tool_calls ?? []) {
+        if (
+          toolCall.id &&
+          !NON_BLOCKING_TOOL_CALL_NAMES.has(String(toolCall.name))
+        ) {
+          pendingToolCallIds.add(toolCall.id);
+        }
+      }
+      continue;
+    }
+
+    if (message.type === "tool" && message.tool_call_id) {
+      pendingToolCallIds.delete(message.tool_call_id);
+    }
+  }
+
+  return pendingToolCallIds.size > 0;
 }
 
 export function hasPresentFiles(message: Message) {

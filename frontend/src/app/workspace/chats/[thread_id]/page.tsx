@@ -34,6 +34,7 @@ import {
   useGenerationCompletions,
 } from "@/core/generation/hooks";
 import { useI18n } from "@/core/i18n/hooks";
+import { hasPendingToolResultsInCurrentTurn } from "@/core/messages/utils";
 import { useModels } from "@/core/models/hooks";
 import { useLocalSettings } from "@/core/settings";
 import {
@@ -296,6 +297,10 @@ function ChatPageContent({
   const { runningRun } = useRejoinRunningRun(isNewThread ? null : threadId, thread, {
     pollBump: runPollBump,
   });
+  const hasPendingToolResults = useMemo(
+    () => hasPendingToolResultsInCurrentTurn(thread.messages),
+    [thread.messages],
+  );
 
   const handleStop = useCallback(async () => {
     await queueControls.stop();
@@ -319,11 +324,10 @@ function ChatPageContent({
     }
     const planStatus = String(plan.status ?? "").toLowerCase();
     const awaitingApproval = plan.awaiting_execution_approval === true || planStatus === "draft";
-    const approvedButIdle =
-      planStatus === "approved" &&
-      !plan.execution_started_at &&
-      !thread.values.work_mode?.active;
-    if (!awaitingApproval && !approvedButIdle) {
+    // Show the Execute Plan popup only while a plan still needs explicit user
+    // approval. Previously we also showed for "approved but idle", which could
+    // repeatedly resurface the popup after users had already approved/executed.
+    if (!awaitingApproval) {
       return null;
     }
     const todos = Array.isArray(thread.values.todos) ? thread.values.todos : [];
@@ -350,10 +354,10 @@ function ChatPageContent({
     () => planEventKey(effectivePlanCreatedEvent),
     [effectivePlanCreatedEvent, planEventKey],
   );
-  const planReviewHref = useMemo(() => {
-    const planPath = effectivePlanCreatedEvent?.plan_path ?? "/mnt/user-data/workspace/plan.md";
-    return urlOfArtifact({ filepath: planPath, threadId, isMock });
-  }, [effectivePlanCreatedEvent?.plan_path, isMock, threadId]);
+  const planReviewPath = useMemo(
+    () => effectivePlanCreatedEvent?.plan_path ?? "/mnt/user-data/workspace/plan.md",
+    [effectivePlanCreatedEvent?.plan_path],
+  );
 
   useEffect(() => {
     if (!effectivePlanEventKey) {
@@ -877,7 +881,7 @@ function ChatPageContent({
                   {effectivePlanCreatedEvent && !clarificationPending && !isNewThread && effectivePlanEventKey !== hiddenPlanEventKey && !(effectivePlanCreatedEvent.auto_approved && settings.context.auto_mode === true) && (
                     <ExecutePlanPopup
                       event={effectivePlanCreatedEvent}
-                      planHref={planReviewHref}
+                      planPath={planReviewPath}
                       onExecute={handleExecutePlan}
                       onDismiss={handleKeepEditingPlan}
                       isExecuting={isExecutingPlan}
@@ -907,7 +911,7 @@ function ChatPageContent({
                     threadId={threadId}
                     newChatHref="/workspace/chats/new"
                     autoFocus={isNewThread}
-                    status={thread.isLoading ? "streaming" : "ready"}
+                    status={thread.isLoading || hasPendingToolResults ? "streaming" : "ready"}
                     context={settings.context}
                     extraHeader={
                       isNewThread && (

@@ -21,7 +21,10 @@ import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
 import { ShineBorder } from "@/components/ui/shine-border";
 import { useI18n } from "@/core/i18n/hooks";
-import { hasToolCalls } from "@/core/messages/utils";
+import {
+  extractReasoningContentFromMessage,
+  hasToolCalls,
+} from "@/core/messages/utils";
 import { useRehypeSplitWordsIntoSpans } from "@/core/rehype";
 import { useLocalSettings } from "@/core/settings";
 import { streamdownPluginsWithWordAnimation } from "@/core/streamdown";
@@ -31,7 +34,7 @@ import {
   resolveToolIconKey,
   type ToolIconKey,
 } from "@/core/tools/presentation";
-import { explainLastToolCall } from "@/core/tools/utils";
+import { explainLastToolCall, explainToolCall } from "@/core/tools/utils";
 import { cn } from "@/lib/utils";
 
 import { CapyHomeRunner } from "../chat-ui/capyhome-runner";
@@ -64,8 +67,12 @@ export function SubtaskCard({
     );
   }, [settings.toolPresentation.iconByTool, task.latestMessage, task.subagent_type]);
   const taskLabel = useMemo(
-    () => task.group_title?.trim() || `${task.subagent_type}: ${task.description}`,
+    () => task.group_title?.trim() ?? `${task.subagent_type}: ${task.description}`,
     [task.description, task.group_title, task.subagent_type],
+  );
+  const completionLabel = useMemo(
+    () => `${task.subagent_type} completed`,
+    [task.subagent_type],
   );
   const taskIconNode = useMemo(() => {
     const iconByType: Record<ToolIconKey, ReactElement> = {
@@ -88,6 +95,30 @@ export function SubtaskCard({
         : <CapyHomeRunner actor="baby_capy" size="sm" taskDescription={taskLabel} />;
     }
   }, [isStaleRunning, task.status, taskLabel]);
+  const liveToolCallLines = useMemo(() => {
+    const messages = task.messages?.length ? task.messages : task.latestMessage ? [task.latestMessage] : [];
+    return messages
+      .flatMap((message) => (hasToolCalls(message) ? (message.tool_calls ?? []) : []))
+      .slice(-6)
+      .map((toolCall) => {
+        const toolName = String(toolCall.name || "tool");
+        return `${toolName}: ${explainToolCall(toolCall, t)}`;
+      });
+  }, [task.latestMessage, task.messages, t]);
+  const liveReasoning = useMemo(() => {
+    const messages = task.messages?.length ? task.messages : task.latestMessage ? [task.latestMessage] : [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const reasoning = extractReasoningContentFromMessage(messages[index]!);
+      if (typeof reasoning !== "string") {
+        continue;
+      }
+      const trimmed = reasoning.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+    return null;
+  }, [task.latestMessage, task.messages]);
   return (
     <ChainOfThought
       className={cn("relative w-full gap-2 rounded-lg border py-0", className)}
@@ -126,6 +157,10 @@ export function SubtaskCard({
                           {taskLabel}
                         </Shimmer>
                       )
+                  ) : task.status === "completed" ? (
+                    <span className="text-muted-foreground line-through decoration-muted-foreground/70">
+                      {taskLabel}
+                    </span>
                   ) : (
                     taskLabel
                   )
@@ -152,7 +187,9 @@ export function SubtaskCard({
                         ? explainLastToolCall(task.latestMessage, t)
                         : task.status === "in_progress" && isStaleRunning
                           ? "Waiting for run execution..."
-                        : t.subtasks[task.status]}
+                        : task.status === "completed"
+                          ? completionLabel
+                          : t.subtasks[task.status]}
                     </FlipDisplay>
                   </div>
                 )}
@@ -190,10 +227,36 @@ export function SubtaskCard({
                 {explainLastToolCall(task.latestMessage, t)}
               </ChainOfThoughtStep>
             )}
+          {liveToolCallLines.length > 0 && (
+            <ChainOfThoughtStep
+              label={task.status === "in_progress" ? "Live tool calls" : "Subagent tool calls"}
+              icon={<HammerIcon className="size-4" />}
+            >
+              <div className="space-y-1 text-sm">
+                {liveToolCallLines.map((line, index) => (
+                  <div key={`${index}-${line}`} className="break-words">
+                    {line}
+                  </div>
+                ))}
+              </div>
+            </ChainOfThoughtStep>
+          )}
+          {liveReasoning && (
+            <ChainOfThoughtStep
+              label={task.status === "in_progress" ? "Live reasoning" : "Subagent reasoning"}
+              icon={<BotIcon className="size-4" />}
+            >
+              <MarkdownContent
+                content={liveReasoning}
+                isLoading={false}
+                rehypePlugins={rehypePlugins}
+              />
+            </ChainOfThoughtStep>
+          )}
           {task.status === "completed" && (
             <>
               <ChainOfThoughtStep
-                label={t.subtasks.completed}
+                label={completionLabel}
                 icon={<CheckCircleIcon className="size-4" />}
               ></ChainOfThoughtStep>
               <ChainOfThoughtStep

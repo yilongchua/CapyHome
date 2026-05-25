@@ -1,23 +1,32 @@
 "use client";
 
 import { PlayIcon, XIcon } from "lucide-react";
+import { useCallback } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useDirectory } from "@/components/workspace/artifacts/context";
 import type { PlanCreatedEvent } from "@/core/threads/hooks";
 
 export function ExecutePlanPopup({
   event,
-  planHref,
+  planPath,
   onExecute,
   onDismiss,
   isExecuting = false,
 }: {
   event: PlanCreatedEvent;
-  planHref: string;
+  planPath: string;
   onExecute: () => void;
   onDismiss: () => void;
   isExecuting?: boolean;
 }) {
+  const { select, setOpen } = useDirectory();
+
+  const handleOpenPlan = useCallback(() => {
+    select(planPath);
+    setOpen(true);
+  }, [planPath, select, setOpen]);
+
   return (
     <div className="pointer-events-none absolute right-0 bottom-full left-0 z-20 mb-3 flex items-end justify-center">
       <div className="pointer-events-auto w-full max-w-(--container-width-md) rounded-2xl border bg-background/90 p-4 shadow-lg backdrop-blur-md">
@@ -26,34 +35,17 @@ export function ExecutePlanPopup({
             <p className="text-sm font-semibold leading-tight">
               Plan ready: {event.title}
             </p>
-            {event.summary && (
-              <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">
-                {event.summary}
-              </p>
-            )}
-            {event.todo_count > 0 && (
-              <p className="text-muted-foreground mt-1 text-xs">
-                {event.todo_count} task{event.todo_count !== 1 ? "s" : ""}
-                {event.first_todos.length > 0 && (
-                  <span className="ml-1 opacity-70">
-                    · {event.first_todos[0]}
-                    {event.todo_count > 1 && `, +${event.todo_count - 1} more`}
-                  </span>
-                )}
-              </p>
-            )}
-            <p className="mt-2 text-xs">
+            <h3 className="mt-2 text-sm font-semibold leading-tight">
               Please review{" "}
-              <a
-                href={planHref}
-                target="_blank"
-                rel="noreferrer"
-                className="underline underline-offset-4"
+              <button
+                type="button"
+                onClick={handleOpenPlan}
+                className="cursor-pointer underline underline-offset-4"
               >
                 plan.md
-              </a>
+              </button>
               .
-            </p>
+            </h3>
           </div>
           <Button
             size="icon-sm"

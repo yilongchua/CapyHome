@@ -216,6 +216,133 @@ def test_task_tool_emits_running_and_completed_events(monkeypatch):
     assert all(e.get("trace_already_streamed") is True for e in runtime_events)
 
 
+def test_source_researcher_broad_prompt_is_rewritten_to_ready_todo(monkeypatch):
+    config = SubagentConfig(
+        name="source-researcher",
+        description="source researcher",
+        system_prompt="Research prompt",
+        max_turns=5,
+        timeout_seconds=10,
+    )
+    runtime = _make_runtime()
+    runtime.state["todo_graph"] = {
+        "ready_ids": ["todo-2"],
+        "nodes": [
+            {"id": "todo-1", "content": "already done", "status": "completed"},
+            {"id": "todo-2", "content": "Analyze SG EV incentives only", "status": "pending"},
+        ],
+    }
+    events = []
+    runtime_events = []
+    captured = {}
+
+    class DummyExecutor:
+        def __init__(self, **kwargs):
+            captured["executor_kwargs"] = kwargs
+
+        def execute_async(self, prompt, task_id=None):
+            captured["prompt"] = prompt
+            return task_id or "generated-task-id"
+
+    monkeypatch.setattr(task_tool_module, "SubagentStatus", FakeSubagentStatus)
+    monkeypatch.setattr(task_tool_module, "SubagentExecutor", DummyExecutor)
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
+    monkeypatch.setattr(task_tool_module, "get_skills_prompt_section", lambda: "")
+    monkeypatch.setattr(
+        task_tool_module,
+        "get_background_task_result",
+        lambda _: _make_result(FakeSubagentStatus.COMPLETED, result="narrow research complete"),
+    )
+    monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
+    monkeypatch.setattr(task_tool_module, "append_runtime_event", lambda _runtime, event: runtime_events.append(event))
+    monkeypatch.setattr(task_tool_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr("src.tools.get_available_tools", lambda **kwargs: [])
+
+    broad_prompt = (
+        "Research EV in Singapore. Focus on:\n"
+        "1. Brands\n2. Models\n3. Battery\n4. Charging\n5. Incentives\n6. Used trap\n"
+        "Return a comprehensive report."
+    )
+    output = task_tool_module.task_tool.func(
+        runtime=runtime,
+        description="EV mega brief",
+        prompt=broad_prompt,
+        subagent_type="source-researcher",
+        tool_call_id="tc-rewrite",
+    )
+
+    assert output == "Task Succeeded. Result: narrow research complete"
+    assert "Objective: Analyze SG EV incentives only" in captured["prompt"]
+    non_trace_events = [event for event in events if event.get("type") != "trace_event.v1"]
+    assert non_trace_events[0]["scope_rewritten"] is True
+    assert non_trace_events[0]["description"].startswith("Analyze SG EV incentives only")
+    assert runtime_events[0]["description"] == "Analyze SG EV incentives only"
+    assert runtime_events[0]["original_description"] == "EV mega brief"
+
+
+def test_source_researcher_rejects_broad_prompt_when_multiple_ready_todos_are_ambiguous(monkeypatch):
+    config = SubagentConfig(
+        name="source-researcher",
+        description="source researcher",
+        system_prompt="Research prompt",
+        max_turns=5,
+        timeout_seconds=10,
+    )
+    runtime = _make_runtime()
+    runtime.state["todo_graph"] = {
+        "ready_ids": ["todo-1", "todo-2"],
+        "nodes": [
+            {"id": "todo-1", "content": "Research SG EV incentives", "status": "pending"},
+            {"id": "todo-2", "content": "Research SG EV charging", "status": "pending"},
+        ],
+    }
+
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
+
+    broad_prompt = (
+        "Research EV in Singapore. Focus on:\n"
+        "1. Brands\n2. Models\n3. Battery\n4. Charging\n5. Incentives\n6. Used trap\n"
+        "Return a comprehensive report."
+    )
+    output = task_tool_module.task_tool.func(
+        runtime=runtime,
+        description="EV mega brief",
+        prompt=broad_prompt,
+        subagent_type="source-researcher",
+        tool_call_id="tc-ambiguous",
+    )
+
+    assert output.startswith("Task rejected: source-researcher accepts one narrow objective only.")
+
+
+def test_source_researcher_rejects_broad_prompt_without_narrow_scope_hint(monkeypatch):
+    config = SubagentConfig(
+        name="source-researcher",
+        description="source researcher",
+        system_prompt="Research prompt",
+        max_turns=5,
+        timeout_seconds=10,
+    )
+    runtime = _make_runtime()
+    runtime.state["todo_graph"] = {"ready_ids": [], "nodes": []}
+
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
+
+    broad_prompt = (
+        "Focus on:\n1. brands\n2. models\n3. battery\n4. charging\n5. incentives\n6. verdict\n"
+        "Return a comprehensive report."
+    )
+    output = task_tool_module.task_tool.func(
+        runtime=runtime,
+        description="EV mega brief",
+        prompt=broad_prompt,
+        subagent_type="source-researcher",
+        tool_call_id="tc-reject",
+    )
+
+    assert output.startswith("Task rejected: source-researcher accepts one narrow objective only.")
+
+
 def test_task_tool_forwards_parent_agent_tool_groups(monkeypatch):
     config = _make_subagent_config()
     runtime = _make_runtime()

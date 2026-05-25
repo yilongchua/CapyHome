@@ -29,6 +29,7 @@ export function mergeSubtask(
     ...fromContext,
     id: fromMessages.id,
     latestMessage: fromContext.latestMessage ?? fromMessages.latestMessage,
+    messages: fromContext.messages ?? fromMessages.messages,
     status: fromContext.status ?? fromMessages.status,
     result: fromContext.result ?? fromMessages.result,
     error: fromContext.error ?? fromMessages.error,

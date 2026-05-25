@@ -23,7 +23,7 @@ import { useThread } from "../messages/context";
 
 import { ChatActivityPanel } from "./chat-activity-panel";
 
-const ARTIFACTS_POLL_INTERVAL_MS = 5 * 60_000;
+const ARTIFACTS_POLL_INTERVAL_MS = 60_000;
 const DIRECTORY_ARTIFACT_ROOTS = [
   "/mnt/user-data/workspace/",
   "/mnt/user-data/mounted/",
@@ -82,6 +82,23 @@ const ChatBox: React.FC<{
   const [activeTab, setActiveTab] = useState<"activity" | "directory">("activity");
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(true);
   const [isDirectoryExplorerCollapsed, setIsDirectoryExplorerCollapsed] = useState(true);
+  const loadArtifacts = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `${getBackendBaseURL()}/api/threads/${threadId}/artifacts-list`,
+      );
+      if (!response.ok) {
+        throw new Error("Failed to list thread directory files");
+      }
+      const payload = (await response.json()) as { files?: string[] };
+      setSandboxOutputFiles(
+        (payload.files ?? []).filter((file) => isDirectoryArtifactPath(file)),
+      );
+    } catch {
+      // Keep current state on transient failures.
+    }
+  }, [threadId]);
+
   const stableThreadId = sanitizeThreadId(threadId);
   const tabsActivityTriggerId = `chatbox-tabs-trigger-activity-${stableThreadId}`;
   const tabsDirectoryTriggerId = `chatbox-tabs-trigger-directory-${stableThreadId}`;
@@ -172,19 +189,10 @@ const ChatBox: React.FC<{
       }
       inFlight = true;
       try {
-        const response = await fetch(
-          `${getBackendBaseURL()}/api/threads/${threadId}/artifacts-list`,
-        );
-        if (!response.ok) {
-          throw new Error("Failed to list thread directory files");
-        }
-        const payload = (await response.json()) as { files?: string[] };
+        await loadArtifacts();
         if (!active) {
           return;
         }
-        setSandboxOutputFiles(
-          (payload.files ?? []).filter((file) => isDirectoryArtifactPath(file)),
-        );
       } catch {
         // Keep current directory view on transient poll failures.
       } finally {
@@ -204,25 +212,11 @@ const ChatBox: React.FC<{
         window.clearTimeout(timer);
       }
     };
-  }, [activeTab, directoryOpen, isPanelCollapsed, threadId]);
+  }, [activeTab, directoryOpen, isPanelCollapsed, loadArtifacts]);
 
-  const handleArtifactsRefresh = async () => {
-    try {
-      const response = await fetch(
-        `${getBackendBaseURL()}/api/threads/${threadId}/artifacts-list`,
-      );
-      if (!response.ok) {
-        throw new Error("Failed to list thread directory files");
-      }
-      const payload = (await response.json()) as { files?: string[] };
-      setSandboxOutputFiles(
-        (payload.files ?? []).filter((file) => isDirectoryArtifactPath(file)),
-      );
-    } catch {
-      // Keep current state if manual refresh fails.
-    }
-  };
-
+  const handleArtifactsRefresh = useCallback(async () => {
+    await loadArtifacts();
+  }, [loadArtifacts]);
 
   const handleCollapse = () => {
     isOuterPanelCollapsingRef.current = true;

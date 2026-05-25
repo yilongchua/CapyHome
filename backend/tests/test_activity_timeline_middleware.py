@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 
 from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
+import src.agents.middlewares.message_selection as message_selection
 from src.agents.middlewares.activity_timeline_middleware import ActivityTimelineMiddleware
 from src.agents.middlewares.runtime_events import append_runtime_event
 
@@ -143,3 +145,107 @@ def test_tool_wrap_persists_plan_gate_activity(monkeypatch) -> None:
     events = update.get("activity_timeline", {}).get("events", [])
     assert len(events) >= 1
     assert any(event.get("kind") == "plan_gate_blocked" for event in events)
+
+
+def test_status_events_are_activity_only_and_user_readable(monkeypatch) -> None:
+    runtime = _runtime()
+    middleware = ActivityTimelineMiddleware()
+    state = {"messages": []}
+
+    append_runtime_event(
+        runtime,
+        {
+            "source": "title_middleware",
+            "event": "title_generation_start",
+            "title_model": "test-model",
+        },
+    )
+    append_runtime_event(
+        runtime,
+        {
+            "source": "planner_middleware",
+            "event": "planning_started",
+        },
+    )
+    append_runtime_event(
+        runtime,
+        {
+            "source": "planner_middleware",
+            "decision": "plan_created",
+            "todo_count": 3,
+        },
+    )
+    append_runtime_event(
+        runtime,
+        {
+            "source": "plan_evaluator",
+            "decision": "revised",
+            "new_todo_count": 4,
+        },
+    )
+    append_runtime_event(
+        runtime,
+        {
+            "source": "write_todos_tool",
+            "event": "todo_update_validation_failed",
+            "error": "Todo dependency graph contains a cycle.",
+        },
+    )
+
+    streamed: list[dict] = []
+    import src.agents.middlewares.activity_timeline_middleware as module
+
+    monkeypatch.setattr(module, "stream_activity_event", lambda event: streamed.append(event))
+
+    update = middleware.before_model(state, runtime)
+    assert update is not None
+    assert set(update).issubset({"activity_timeline"})
+    assert "messages" not in update
+
+    lines = [event.get("line") for event in update["activity_timeline"]["events"]]
+    assert "Generating chat title..." in lines
+    assert "Planner is evaluating request complexity..." in lines
+    assert "Plan created with 3 todo(s)" in lines
+    assert "Plan evaluator revised the plan with 4 todo(s)" in lines
+    assert "Todo update failed validation: Todo dependency graph contains a cycle." in lines
+    assert len(streamed) == len(lines)
+
+
+def test_tool_wrap_surfaces_file_operation_progress_without_adding_messages(monkeypatch) -> None:
+    runtime = _runtime()
+    middleware = ActivityTimelineMiddleware()
+    request = ToolCallRequest(
+        tool_call={
+            "name": "write_file",
+            "args": {"path": "/mnt/user-data/workspace/report.md", "content": "# Report"},
+            "id": "call-file",
+            "type": "tool_call",
+        },
+        tool=None,
+        runtime=runtime,
+        state={},
+    )
+
+    def _handler(_req: ToolCallRequest) -> Command:
+        return Command(update={})
+
+    streamed: list[dict] = []
+    import src.agents.middlewares.activity_timeline_middleware as module
+
+    monkeypatch.setattr(module, "stream_activity_event", lambda event: streamed.append(event))
+
+    result = middleware.wrap_tool_call(request, _handler)
+    assert isinstance(result, Command)
+    update = result.update or {}
+    assert "messages" not in update
+
+    events = update.get("activity_timeline", {}).get("events", [])
+    lines = [event.get("line") for event in events]
+    assert "Writing file: /mnt/user-data/workspace/report.md..." in lines
+    assert "Wrote: /mnt/user-data/workspace/report.md" in lines
+    assert len(streamed) == len(events)
+
+
+def test_prompt_selection_does_not_ingest_activity_timeline_state() -> None:
+    source = inspect.getsource(message_selection)
+    assert "activity_timeline" not in source

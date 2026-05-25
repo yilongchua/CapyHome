@@ -2,6 +2,7 @@ export const api = {
   threads: {
     steer: (threadId: string) => `/api/threads/${threadId}/steer`,
     compact: (threadId: string) => `/api/threads/${threadId}/compact`,
+    hardStop: (threadId: string) => `/api/threads/${threadId}/hard-stop`,
     handoff: (threadId: string) => `/api/threads/${threadId}/handoff`,
     executePlan: (threadId: string) => `/api/threads/${threadId}/plan/execute`,
     suggestions: (threadId: string) => `/api/threads/${threadId}/suggestions`,

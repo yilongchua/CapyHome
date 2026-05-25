@@ -1,4 +1,5 @@
 import type { BaseStream } from "@langchain/langgraph-sdk/react";
+import { CheckCircle2Icon, CircleDashedIcon, Loader2Icon, XCircleIcon } from "lucide-react";
 import { useEffect, useMemo } from "react";
 
 import {
@@ -10,7 +11,13 @@ import {
   ReasoningContent,
   ReasoningTrigger,
 } from "@/components/ai-elements/reasoning";
-import { asActivityTimelineState, mergeActivityEvents, useActivityContext } from "@/core/activity";
+import {
+  asActivityTimelineState,
+  buildProgressOperations,
+  mergeActivityEvents,
+  type ProgressOperation,
+  useActivityContext,
+} from "@/core/activity";
 import type { LiveGenerationNotice } from "@/core/generation/hooks";
 import { useI18n } from "@/core/i18n/hooks";
 import {
@@ -19,9 +26,12 @@ import {
   extractTextFromMessage,
   groupMessages,
   hasContent,
+  hasPendingToolResultsInCurrentTurn,
   hasPresentFiles,
   hasReasoning,
   hasReasoningInCurrentTurn,
+  hasToolCalls,
+  isSyntheticHumanMessage,
 } from "@/core/messages/utils";
 import { useRehypeSplitWordsIntoSpans } from "@/core/rehype";
 import type { Subtask } from "@/core/tasks";
@@ -46,6 +56,33 @@ import { MessageGroup } from "./message-group";
 import { MessageListItem } from "./message-list-item";
 import { MessageListSkeleton } from "./skeleton";
 import { SubtaskCard } from "./subtask-card";
+
+function ProgressOperationRow({ operation }: { operation: ProgressOperation }) {
+  const isActive = operation.status === "active";
+  const isFailed = operation.status === "failed";
+  const isStale = operation.status === "stale";
+  return (
+    <div className="text-muted-foreground flex items-start gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs">
+      {isActive ? (
+        <Loader2Icon className="mt-0.5 size-3.5 shrink-0 animate-spin" />
+      ) : isFailed ? (
+        <XCircleIcon className="mt-0.5 size-3.5 shrink-0 text-red-500" />
+      ) : isStale ? (
+        <CircleDashedIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+      ) : (
+        <CheckCircle2Icon className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+      )}
+      <div className={cn("min-w-0 flex-1", isFailed && "text-red-600")}>
+        <div className="whitespace-normal break-words">{operation.label}</div>
+        {operation.detail && (
+          <div className="mt-0.5 line-clamp-2 text-[11px] opacity-75">
+            {operation.detail}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function buildSubtaskUpdates(
   messages: BaseStream<AgentThreadState>["messages"],
@@ -123,6 +160,7 @@ function normalizeSubtask(task: Partial<Subtask> & { id: string }): Subtask {
     group_title: task.group_title,
     prompt: task.prompt ?? "",
     latestMessage: task.latestMessage,
+    messages: task.messages,
     result: task.result,
     error: task.error,
     started_at: task.started_at,
@@ -183,6 +221,11 @@ export function MessageList({
   const { tasks: contextTasks, setTasks } = useSubtaskContext();
   const { liveEvents: liveActivityEvents } = useActivityContext();
   const messages = thread.messages;
+  const hasPendingToolResults = useMemo(
+    () => hasPendingToolResultsInCurrentTurn(messages),
+    [messages],
+  );
+  const isChatWorking = thread.isLoading || hasPendingToolResults;
   const persistedReasoningInCurrentTurn = useMemo(
     () => hasReasoningInCurrentTurn(messages),
     [messages],
@@ -209,9 +252,7 @@ export function MessageList({
     return null;
   }, [messages]);
   const disableForkActions =
-    thread.isLoading ||
-    Boolean(isMock) ||
-    env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true";
+    isChatWorking || Boolean(isMock) || env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true";
   const subtaskUpdates = useMemo(() => buildSubtaskUpdates(messages), [messages]);
   const subtasksById = useMemo(() => {
     const next: Record<string, Subtask> = {};
@@ -225,6 +266,26 @@ export function MessageList({
     return next;
   }, [subtaskUpdates]);
   const currentTaskDescription = useCurrentTaskDescription(messages, subtasksById);
+  const hasFinalAssistantMessage = useMemo(() => {
+    let latestHumanIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.type === "human" && !isSyntheticHumanMessage(message)) {
+        latestHumanIndex = index;
+        break;
+      }
+    }
+    for (let index = messages.length - 1; index > latestHumanIndex; index -= 1) {
+      const message = messages[index];
+      if (
+        message?.type === "ai" &&
+        (hasPresentFiles(message) || (hasContent(message) && !hasToolCalls(message)))
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }, [messages]);
   const allActivityEvents = useMemo(
     () =>
       mergeActivityEvents(
@@ -250,30 +311,78 @@ export function MessageList({
       return isStartLike && !isEndLike && recent;
     });
   }, [allActivityEvents]);
-  const activeActivityLine = useMemo(() => {
-    for (let i = allActivityEvents.length - 1; i >= 0; i--) {
-      const line = allActivityEvents[i]?.line?.trim();
-      if (line) {
-        return line;
+  const progressInsertMessageId = useMemo(() => {
+    if (!hasFinalAssistantMessage) {
+      return null;
+    }
+    let latestHumanIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.type === "human" && !isSyntheticHumanMessage(message)) {
+        latestHumanIndex = index;
+        break;
       }
     }
-    return undefined;
-  }, [allActivityEvents]);
-  const activityLinesByAssistantMessageId = useMemo(() => {
-    const byId: Record<string, string[]> = {};
-    for (const event of allActivityEvents) {
-      if (!event.assistant_message_id || !event.line) {
-        continue;
+    for (let index = messages.length - 1; index > latestHumanIndex; index -= 1) {
+      const message = messages[index];
+      if (message?.type === "ai" && hasPresentFiles(message) && message.id) {
+        return message.id;
       }
-      const next = byId[event.assistant_message_id] ?? [];
-      if (next[next.length - 1] === event.line) {
-        byId[event.assistant_message_id] = next;
-        continue;
-      }
-      byId[event.assistant_message_id] = [...next, event.line];
     }
-    return byId;
-  }, [allActivityEvents]);
+    for (let index = messages.length - 1; index > latestHumanIndex; index -= 1) {
+      const message = messages[index];
+      if (
+        message?.type === "ai" &&
+        (hasPresentFiles(message) || (hasContent(message) && !hasToolCalls(message))) &&
+        message.id
+      ) {
+        return message.id;
+      }
+    }
+    return null;
+  }, [hasFinalAssistantMessage, messages]);
+  const progressRunId = useMemo(() => {
+    if (progressInsertMessageId) {
+      for (let index = allActivityEvents.length - 1; index >= 0; index -= 1) {
+        const event = allActivityEvents[index];
+        if (event?.assistant_message_id === progressInsertMessageId) {
+          return event.run_id;
+        }
+      }
+    }
+    return allActivityEvents[allActivityEvents.length - 1]?.run_id ?? null;
+  }, [allActivityEvents, progressInsertMessageId]);
+  const progressOperations = useMemo(() => {
+    const operations = buildProgressOperations(allActivityEvents);
+    if (!progressRunId) {
+      return [];
+    }
+    const finalResponseTimestamp = allActivityEvents.reduce<number | null>((latest, event) => {
+      if (event.run_id !== progressRunId || event.kind.toLowerCase() !== "model_response") {
+        return latest;
+      }
+      if (latest === null) {
+        return event.timestamp;
+      }
+      return event.timestamp > latest ? event.timestamp : latest;
+    }, null);
+
+    return operations
+      .filter((operation) => operation.runId === progressRunId)
+      .map((operation) => {
+        if (
+          operation.status === "active" &&
+          finalResponseTimestamp !== null &&
+          operation.startedAt <= finalResponseTimestamp
+        ) {
+          return {
+            ...operation,
+            status: "stale" as const,
+          };
+        }
+        return operation;
+      });
+  }, [allActivityEvents, progressRunId]);
 
   useEffect(() => {
     if (subtaskUpdates.length === 0) {
@@ -307,6 +416,7 @@ export function MessageList({
           previousTask.result === mergedTask.result &&
           previousTask.error === mergedTask.error &&
           previousTask.latestMessage === mergedTask.latestMessage &&
+          previousTask.messages === mergedTask.messages &&
           previousTask.started_at === mergedTask.started_at &&
           previousTask.updated_at === mergedTask.updated_at &&
           previousTask.completed_at === mergedTask.completed_at
@@ -335,16 +445,12 @@ export function MessageList({
         {groupMessages(messages, (group) => {
           if (group.type === "human" || group.type === "assistant") {
             return group.messages.map((msg) => {
-              const inlineLines =
-                msg.type === "ai" && msg.id
-                  ? (activityLinesByAssistantMessageId[msg.id] ?? [])
-                  : [];
               return (
                 <div key={`${group.id}/${msg.id}`} className="space-y-2">
-                  {inlineLines.length > 0 && (
-                    <div className="text-muted-foreground rounded-md border bg-muted/30 px-3 py-2 text-xs">
-                      {inlineLines.slice(-4).map((line, index) => (
-                        <div key={`${msg.id}-line-${index}`}>{line}</div>
+                  {msg.id === progressInsertMessageId && progressOperations.length > 0 && (
+                    <div className="space-y-1.5">
+                      {progressOperations.map((operation) => (
+                        <ProgressOperationRow key={operation.operationId} operation={operation} />
                       ))}
                     </div>
                   )}
@@ -441,6 +547,14 @@ export function MessageList({
             }
             return (
               <div className="w-full" key={group.id}>
+                {group.messages[0]?.id === progressInsertMessageId &&
+                  progressOperations.length > 0 && (
+                    <div className="mb-2 space-y-1.5">
+                      {progressOperations.map((operation) => (
+                        <ProgressOperationRow key={operation.operationId} operation={operation} />
+                      ))}
+                    </div>
+                  )}
                 {group.messages[0] && hasContent(group.messages[0]) && (
                   <MarkdownContent
                     content={extractContentFromMessage(group.messages[0])}
@@ -486,15 +600,22 @@ export function MessageList({
                 .map((toolCall) => toolCall.id!);
               for (const taskId of messageTaskIds) {
                 const task = mergeSubtask(subtasksById[taskId], contextTasks[taskId]);
-                if (!task) {
+                const renderedTask =
+                  hasFinalAssistantMessage && task?.status === "in_progress"
+                    ? subtasksById[taskId] ?? task
+                    : task;
+                if (!renderedTask) {
                   continue;
                 }
                 results.push(
                   <SubtaskCard
                     key={"task-group-" + taskId}
-                    task={task}
-                    isLoading={thread.isLoading}
-                    isStaleRunning={task.status === "in_progress" && !hasRecentLiveRunSignal}
+                    task={renderedTask}
+                    isLoading={thread.isLoading && renderedTask.status === "in_progress"}
+                    isStaleRunning={
+                      renderedTask.status === "in_progress" &&
+                      (!thread.isLoading || !hasRecentLiveRunSignal || hasFinalAssistantMessage)
+                    }
                   />,
                 );
               }
@@ -516,10 +637,23 @@ export function MessageList({
             />
           );
         })}
-        {thread.isLoading && (
-          <div className="text-muted-foreground rounded-md border bg-muted/20 px-3 py-2 text-xs">
-            {activeActivityLine ?? (
-              <CapyHomeRunner className="my-0 text-xs" taskDescription={currentTaskDescription} />
+        {(isChatWorking || (!hasFinalAssistantMessage && progressOperations.length > 0)) && (
+          <div className="space-y-1.5">
+            {!hasFinalAssistantMessage && progressOperations.length > 0 ? (
+              progressOperations.map((operation) => (
+                <ProgressOperationRow key={operation.operationId} operation={operation} />
+              ))
+            ) : (
+              <div className="text-muted-foreground rounded-md border bg-muted/20 px-3 py-2 text-xs">
+                {thread.isLoading ? (
+                  <CapyHomeRunner className="my-0 text-xs" taskDescription={currentTaskDescription} />
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <CircleDashedIcon className="size-3.5 shrink-0" />
+                    <span>Waiting for tool or subagent result...</span>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}

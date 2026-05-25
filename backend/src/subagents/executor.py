@@ -59,6 +59,8 @@ class SubagentResult:
     started_at: datetime | None = None
     completed_at: datetime | None = None
     ai_messages: list[dict[str, Any]] | None = None
+    thread_id: str | None = None
+    cancel_requested: bool = False
 
     def __post_init__(self):
         """Initialize mutable defaults."""
@@ -300,6 +302,12 @@ class SubagentExecutor:
             final_state = None
             async with asyncio.timeout(self.config.timeout_seconds):
                 async for chunk in agent.astream(state, config=run_config, context=context, stream_mode="values"):  # type: ignore[arg-type]
+                    if result.cancel_requested:
+                        logger.info(f"[trace={self.trace_id}] Subagent {self.config.name} cancelled during stream")
+                        result.status = SubagentStatus.FAILED
+                        result.error = "Subagent stopped by user."
+                        result.completed_at = datetime.now()
+                        return result
                     final_state = chunk
 
                     # Extract AI messages from the current state
@@ -322,6 +330,13 @@ class SubagentExecutor:
                             if not is_duplicate:
                                 result.ai_messages.append(message_dict)
                                 logger.info(f"[trace={self.trace_id}] Subagent {self.config.name} captured AI message #{len(result.ai_messages)}")
+
+            if result.cancel_requested:
+                logger.info(f"[trace={self.trace_id}] Subagent {self.config.name} cancelled before finalization")
+                result.status = SubagentStatus.FAILED
+                result.error = "Subagent stopped by user."
+                result.completed_at = datetime.now()
+                return result
 
             logger.info(f"[trace={self.trace_id}] Subagent {self.config.name} completed async execution")
 
@@ -440,6 +455,7 @@ class SubagentExecutor:
             task_id=task_id,
             trace_id=self.trace_id,
             status=SubagentStatus.PENDING,
+            thread_id=self.thread_id,
         )
 
         logger.info(f"[trace={self.trace_id}] Subagent {self.config.name} starting async execution, task_id={task_id}, timeout={self.config.timeout_seconds}s")
@@ -462,6 +478,12 @@ class SubagentExecutor:
                     # Wait for execution with timeout
                     exec_result = execution_future.result(timeout=self.config.timeout_seconds)
                     with _background_tasks_lock:
+                        current = _background_tasks.get(task_id)
+                        if current is not None and current.cancel_requested:
+                            current.status = SubagentStatus.FAILED
+                            current.error = current.error or "Subagent stopped by user."
+                            current.completed_at = current.completed_at or datetime.now()
+                            return
                         _background_tasks[task_id].status = exec_result.status
                         _background_tasks[task_id].result = exec_result.result
                         _background_tasks[task_id].error = exec_result.error
@@ -507,6 +529,28 @@ def list_background_tasks() -> list[SubagentResult]:
     """
     with _background_tasks_lock:
         return list(_background_tasks.values())
+
+
+def cancel_background_tasks_for_thread(thread_id: str) -> int:
+    """Mark active background subagent tasks for a thread as stopped.
+
+    Python cannot safely kill a running LLM/tool call inside a worker thread, so
+    this is a cooperative hard stop: active task_tool pollers see a terminal
+    failed result immediately, and the executor exits at the next stream yield.
+    """
+    cancelled = 0
+    with _background_tasks_lock:
+        for result in _background_tasks.values():
+            if result.thread_id != thread_id:
+                continue
+            if result.status in {SubagentStatus.COMPLETED, SubagentStatus.FAILED, SubagentStatus.TIMED_OUT}:
+                continue
+            result.cancel_requested = True
+            result.status = SubagentStatus.FAILED
+            result.error = "Subagent stopped by user."
+            result.completed_at = datetime.now()
+            cancelled += 1
+    return cancelled
 
 
 def cleanup_background_task(task_id: str) -> None:
