@@ -28,25 +28,51 @@ def _extract_status_code(exc: Exception) -> int | None:
     return None
 
 
+def _thread_id_candidates(thread_id: str) -> list[str]:
+    candidates: list[str] = []
+    for candidate in (thread_id, thread_id.strip("/").split("/")[-1]):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
 def _delete_thread_directory(thread_id: str) -> bool:
-    thread_dir = get_paths().thread_dir(thread_id)
-    if not thread_dir.exists():
-        return False
-    shutil.rmtree(thread_dir)
-    return True
+    files_deleted = False
+    for candidate in _thread_id_candidates(thread_id):
+        try:
+            thread_dir = get_paths().thread_dir(candidate)
+        except ValueError:
+            continue
+        if thread_dir.exists():
+            shutil.rmtree(thread_dir)
+            files_deleted = True
+    return files_deleted
 
 
 async def _delete_langgraph_thread(thread_id: str) -> bool:
     from langgraph_sdk import get_client
 
     client = get_client(url=_langgraph_url())
-    try:
-        await client.threads.delete(thread_id)
-        return True
-    except Exception as exc:
-        if _extract_status_code(exc) == 404:
-            return False
-        raise
+    first_error: Exception | None = None
+    saw_not_found = False
+
+    for candidate in _thread_id_candidates(thread_id):
+        try:
+            await client.threads.delete(candidate)
+            return True
+        except Exception as exc:
+            if _extract_status_code(exc) == 404:
+                saw_not_found = True
+                continue
+            if first_error is None:
+                first_error = exc
+            continue
+
+    if first_error is not None:
+        raise first_error
+    if saw_not_found:
+        return False
+    return False
 
 
 async def _list_thread_ids(limit: int = 100) -> list[str]:

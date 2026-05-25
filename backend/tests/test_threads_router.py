@@ -76,6 +76,24 @@ def test_delete_thread_is_idempotent_when_langgraph_or_files_are_missing(paths: 
     assert response.files_deleted is False
 
 
+def test_delete_thread_handles_legacy_prefixed_thread_id(paths: Paths, monkeypatch: pytest.MonkeyPatch):
+    canonical_thread_id = "6317b60a-75a8-4ba8-9537-712a388d850b"
+    prefixed_thread_id = f"chats/{canonical_thread_id}"
+    thread_dir = paths.thread_dir(canonical_thread_id)
+    (thread_dir / "user-data" / "workspace").mkdir(parents=True)
+
+    client = _ThreadsClient(existing_thread_ids={canonical_thread_id})
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(client))
+
+    response = asyncio.run(threads.delete_thread(prefixed_thread_id))
+
+    assert response.thread_id == prefixed_thread_id
+    assert response.deleted is True
+    assert response.files_deleted is True
+    assert client.deleted == [canonical_thread_id]
+    assert not thread_dir.exists()
+
+
 def test_delete_all_threads_deletes_each_thread_and_reports_failures(paths: Paths, monkeypatch: pytest.MonkeyPatch):
     for thread_id in ("thread-a", "thread-b", "thread-c"):
         (paths.thread_dir(thread_id) / "user-data" / "workspace").mkdir(parents=True)
