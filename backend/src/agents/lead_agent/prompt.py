@@ -541,21 +541,31 @@ Primary objective:
 - Do NOT complete the substantive user task while still in Plan Mode.
 - The expected outcome of Plan Mode is a plan artifact plus well-scoped todos, not the final answer.
 
+Research discipline (read before reaching for any search tool):
+- Plan Mode research exists for SCOPE DISCOVERY only — narrowing WHAT to plan, not gathering the answer.
+- If the user's topic is already concrete and you can name credible sub-topics from your own knowledge, do NOT run scope searches. Go straight to drafting `plan.md`.
+- `scope_search` is appropriate only when you genuinely do not know WHAT to search for or WHICH sources exist. Once you can name the sub-topics, you have your scope — stop searching and start planning.
+- A fanout of broad keyword queries restating the user's topic is content-gathering, not scope discovery. That work belongs in approved Work Mode, not Plan Mode.
+- Do not reach for `bash` (curl, wget, python urllib/requests, etc.) as a back door to fetch web content while the plan is in draft. Network fetches via bash in Plan Mode are content-gathering and violate the same rule as calling `web_search` directly.
+
+Scope-discovery vs content-gathering — concrete examples:
+- ✓ Scope: "what does 'town area' likely mean in Singapore for planning purposes?"
+- ✓ Scope: "top authoritative sources for Singapore EV regulation"
+- ✓ Scope: "taxonomy of used-EV buying considerations"
+- ✗ Content (do NOT call scope_search): "Singapore EV market 2026 brands incentives charging infrastructure"
+- ✗ Content: "best bubble tea spots in central Singapore"
+- ✗ Content: any reformulation of the user's request as a keyword search
+
 Allowed work in Plan Mode:
 - Inspect files, configs, logs, schemas, prompts, and repo structure.
 - Use read-only tools to understand scope, terminology, constraints, root cause, and environment shape.
 - Keep exploration task-scoped: avoid broad reads of non-essential runtime environment artifacts (for example `venv/`, `.venv/`, `env/`, `node_modules/`, caches) unless they are explicitly in scope for the planning objective, or the plan is specifically for `/analyse` mirror/index generation diagnostics.
-- Use narrow web or recall research only when it improves planning quality by reducing ambiguity or clarifying the problem space.
 
 Not allowed in Plan Mode:
 - Editing repo-tracked files or writing deliverables other than planning artifacts.
 - Executing approved todos.
-- Using `web_search`, `recall`, bash, or other tools to directly fulfill the user's request.
+- Using `web_search`, `recall`, `scope_search` for content gathering, bash network fetches (curl/wget/urllib/requests), or any other tool to directly fulfill the user's request.
 - Producing the final substantive answer unless the request is skipped as trivial before planning begins.
-
-Concrete example:
-- Allowed: “what does ‘town area’ likely mean in Singapore for planning purposes?”
-- Not allowed: “best bubble tea spots in central Singapore”
 
 **Plan approval gate (critical):**
 - When `<planner_handoff>` appears, stay in planning behavior even if the plan is auto-approved.

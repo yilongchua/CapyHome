@@ -32,8 +32,13 @@ backend/.capyhome/threads/fa33b3bb-8994-4529-8944-05e63cfcb40e/
     │   └── .prompts/                                     # captured LLM prompts
     │       └── 20260522T140238_783072Z_lead_agent_prompt_tuning.txt
     │       └── ... (one file per model call)
-    └── outputs/                                          # files produced for the user
+    └── outputs/                                          # legacy — almost always empty; agent writes to workspace/ instead
 ```
+
+> **Note on produced files:** `outputs/` is effectively unused in current runs —
+> the agent writes deliverables into `user-data/workspace/` (alongside
+> `plan.md` and the `plans/` snapshots). Always check `workspace/` first when
+> auditing what was produced.
 
 Supporting global stores (shared across threads):
 
@@ -59,8 +64,9 @@ For a single chat, an audit should answer:
 3. **What ran?** — every `model_call_*` and `tool_call_*` event, in order.
 4. **What did the model see?** — the rendered system prompt + messages sent
    for each model call.
-5. **What did it produce?** — files written under `user-data/outputs/` and any
-   `present_files` tool calls.
+5. **What did it produce?** — files written under `user-data/workspace/`
+   (the agent's working directory; `outputs/` is legacy and usually empty) and
+   any `present_files` tool calls.
 6. **Did anything go wrong?** — timeouts, retries, failed middleware events.
 7. **What context was injected?** — which memory facts and skills appeared in
    the system prompt for that turn.
@@ -164,11 +170,17 @@ skill body was loaded.
 ### 3.6 Check produced files
 
 ```bash
+# Primary: agent writes deliverables into the workspace dir
+ls "$TDIR/user-data/workspace/"
+
+# Legacy path — almost always empty, kept for backwards compat
 ls "$TDIR/user-data/outputs/"
 ```
 
-Empty for the reference thread — the plan was never executed past draft, so
-no outputs were produced. A completed plan would show files here, typically
+`workspace/` is where the agent actually drops files (alongside `plan.md`,
+`plans/`, and `.prompts/`). `outputs/` exists in the directory layout but is
+effectively unused — do not rely on it as a signal that nothing was produced.
+A completed plan typically leaves Markdown/PDF deliverables in `workspace/`,
 mirrored by `present_files` tool calls in the trajectory.
 
 ### 3.7 Check for failures
@@ -225,7 +237,9 @@ audit_thread() {
   [ -f "$tdir/user-data/workspace/plan.md" ] && head -20 "$tdir/user-data/workspace/plan.md"
   echo "-- captured prompts --"
   ls "$tdir/user-data/workspace/.prompts/" 2>/dev/null
-  echo "-- outputs --"
+  echo "-- workspace (deliverables live here) --"
+  ls "$tdir/user-data/workspace/" 2>/dev/null
+  echo "-- outputs (legacy, usually empty) --"
   ls "$tdir/user-data/outputs/" 2>/dev/null
   echo "-- trajectories --"
   for traj in "$tdir"/logs/trajectory/*.jsonl; do
@@ -255,8 +269,10 @@ When auditing for quality/regressions, look for:
   `<memory>` block inside the captured prompt; if irrelevant facts appear,
   `injection_relevance_threshold` may need tightening
   ([backend/CLAUDE.md](../../backend/CLAUDE.md) → Memory System).
-- **No `present_files` despite outputs** — files written but not surfaced to
-  the user; check `WriteFileArtifactMiddleware` events.
+- **No `present_files` despite workspace deliverables** — files written to
+  `user-data/workspace/` but never surfaced to the user; check
+  `WriteFileArtifactMiddleware` events. (Don't use an empty `outputs/` dir as
+  the signal — it's almost always empty regardless of run success.)
 - **Subagent runs hidden from the timeline** — verify `task_*` events in the
   trajectory and that `subagent_type` / `group_id` payload fields are set.
 

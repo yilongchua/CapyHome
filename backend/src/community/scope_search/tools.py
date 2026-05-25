@@ -24,19 +24,23 @@ _SCOPE_SEARCH_MAX_RESULTS = 3
 async def scope_search_tool(query: str) -> str:
     """Scope-discovery search for Plan Mode.
 
-    Use this BEFORE plan approval to narrow research scope — identify sub-topics,
-    candidate sources, definitions, or taxonomy. Returns at most 3 concise results.
-    This is NOT for full content gathering; that happens in Work Mode via
-    ``web_search`` after the plan is approved.
+    DO NOT restate the user's request as keywords. If the topic is already
+    concrete, skip this tool and go straight to drafting the plan. Use only
+    when you genuinely do not know WHAT to search for or WHICH sources exist.
 
-    Examples of appropriate scope queries:
+    Returns at most 3 concise results. This is NOT for full content gathering;
+    that happens in Work Mode via ``web_search`` after the plan is approved.
+
+    Examples of appropriate scope queries (you don't yet know what to search for):
         - "types of crystals studied in cultural anthropology"
         - "top sources for restaurant reviews"
         - "definition of grounding crystals"
 
-    Examples of inappropriate (content-gathering) queries — wait for plan approval:
+    Examples of inappropriate (content-gathering) queries — DO NOT call this tool;
+    draft the plan instead and wait for approval:
         - "crystals spiritual protection grounding luck love history"
         - "best Italian restaurants in San Francisco with reviews"
+        - "Singapore EV market 2026 brands incentives charging infrastructure"
 
     Args:
         query: short scope-clarifying phrase. Keep it tight — under ~12 keywords.
