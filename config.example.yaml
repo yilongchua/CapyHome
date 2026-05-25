@@ -1,0 +1,449 @@
+# =============================================================================
+# CapyHome — Configuration
+# =============================================================================
+# Sections: Core, Models, Tools & Permissions, Sandbox, Channels,
+#           Agent Behavior (Middleware), Memory & Context, Skills,
+#           Knowledge & Search, Generation, Subagents, Observability,
+#           Dreamy Workflow, Routing & Scheduling, Local LLM Policy
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Core Infrastructure
+# -----------------------------------------------------------------------------
+
+checkpointer:
+  type: sqlite
+  connection_string: checkpoints.db
+
+# -----------------------------------------------------------------------------
+# Models — LLM providers and endpoints
+# -----------------------------------------------------------------------------
+
+models:
+  - name: qwen3.6-local
+    display_name: Qwen3.6-local
+    use: langchain_openai:ChatOpenAI
+    model: qwen/qwen3.6-35b-a3b
+    base_url: $LOCAL_LLM_BASE_URL
+    api_key: lm-studio
+    supports_thinking: true
+    supports_vision: true
+
+# -----------------------------------------------------------------------------
+# Tools & Permissions — tool definitions, groups, backends, access control
+# -----------------------------------------------------------------------------
+
+tool_groups:
+  - name: web
+  - name: file:read
+  - name: file:write
+  - name: bash
+  - name: media
+
+tools:
+  # File tools (file:read)
+  - group: file:read
+    name: ls
+    use: src.sandbox.tools:ls_tool
+  - group: file:read
+    name: read_file
+    use: src.sandbox.tools:read_file_tool
+
+  # File tools (file:write)
+  - group: file:write
+    name: write_file
+    use: src.sandbox.tools:write_file_tool
+  - group: file:write
+    name: str_replace
+    use: src.sandbox.tools:str_replace_tool
+
+  # Shell tool (bash)
+  - group: bash
+    name: bash
+    use: src.sandbox.tools:bash_tool
+
+  # Media tools (media)
+  - group: media
+    name: comfyui_generate
+    use: src.community.comfyui.tools:comfyui_generate_tool
+
+  # Vault tools (vault)
+  - group: vault
+    name: query_knowledge_vault
+    use: src.community.knowledge_vault_search.tool:query_knowledge_vault_tool
+
+tool_backends:
+  comfyui:
+    enabled: true
+    base_url: http://127.0.0.1:8188
+    health_path: /system_stats
+    timeout_seconds: 60
+  websearch:
+    enabled: true
+    base_url: http://192.168.1.39:9000
+    # base_url: http://localhost:9000
+    health_path: /health
+    # Must be <= routing.timeouts.tools.web_search (currently 30s). The HTTP client
+    # timeout bounds individual requests; the routing timeout bounds the full tool
+    # execution (HTTP + content fetching + enrichment). Setting both equal would
+    # leave no margin for post-HTTP work, so we keep a small gap.
+    timeout_seconds: 25
+
+permissions:
+  default_mode: auto
+  allow: []
+  deny: []
+  ask: []
+
+tool_disclosure:
+  enabled: false
+  block_mode: tool_error
+  default_phase: generator
+  phase_tools:
+    evaluator: []
+    generator: []
+    planner: []
+
+# -----------------------------------------------------------------------------
+# Sandbox & Local Stack — sandbox provider, container mounts, port mapping
+# -----------------------------------------------------------------------------
+
+sandbox:
+  use: src.sandbox.local:LocalSandboxProvider
+
+local_stack_ports:
+  CapyHome_gateway: 8001
+  CapyHome_langgraph: 2024
+  CapyHome_ui: 2026
+  comfyui: 8188
+
+# -----------------------------------------------------------------------------
+# Channels — communication channels (telegram, session)
+# -----------------------------------------------------------------------------
+
+channels:
+  telegram:
+    enabled: false
+    bot_token: $TELEGRAM_BOT_TOKEN
+
+  session:
+    assistant_id: lead_agent
+    config:
+      recursion_limit: 100
+    context:
+      thinking_enabled: true
+      subagent_enabled: true
+      max_concurrent_subagents: 3
+      is_plan_mode: false
+
+# -----------------------------------------------------------------------------
+# Agent Behavior (Middleware) — hooks, planning, evaluation, safety guards
+# -----------------------------------------------------------------------------
+
+hooks:
+  SessionStart: []
+  PreToolUse: []
+  PostToolUse: []
+  FileChanged: []
+
+handoffs:
+  enabled: true
+  dir: .handoffs
+
+# Planning & evaluation
+planner:
+  enabled: true
+  max_plan_steps: 8
+  research_fanout: true
+  research_fanout_min_todos: 2
+
+quality_gate:
+  enabled: true
+  max_repair_passes: 1
+
+evaluator:
+  enabled: true
+  max_attempts: 2
+  plan_evaluator_timeout_seconds: 180.0
+
+sprint_contracts:
+  enabled: true
+  min_todos_trigger: 2
+
+# Safety & loop detection
+loop_detection:
+  enabled: false # Master switch for repetitive tool-call pattern detection.
+  window_size: 20 # Number of recent model turns to keep when checking repeated call-hash patterns.
+  hard_limit: 20 # Force-stop identical tool-call pattern loops at this repeat count; higher is safer for long /analyse runs.
+  warn_threshold: 3 # Emit first loop warning when identical call pattern repeats this many times.
+  max_tracked_threads: 100 # Max concurrent thread histories to track for loop detection (LRU-evicted beyond this).
+  tool_freq_warn: 60 # Warn when the same tool type is called this many times in one thread (even with varying args).
+  tool_freq_hard_limit: 100 # Force-stop when a single tool type is called excessively many times.
+
+# Recursion-budget evaluator pivot — for local-model long-running agents.
+# When step count crosses each threshold (fraction of recursion_limit), an
+# evaluator LLM decides KEEP vs PIVOT and may inject a steering directive.
+# Each threshold fires at most once per run; later pivots have less remaining
+# budget (the natural shrinking-budget guard).
+recursion_pivot:
+  enabled: false # Master switch; off by default — opt in for long-running local runs.
+  thresholds: [0.80, 0.90, 0.95] # Budget fractions at which a pivot may fire.
+  evaluator_model: null # null => resolve via ModelRouter('evaluator').
+  evaluator_timeout_seconds: 30.0
+  on_evaluator_failure: skip # 'skip' continues the run; 'terminate' ends it.
+  min_recursion_limit: 10 # Skip pivot logic entirely below this recursion_limit.
+
+progress_guard:
+  enabled: false # Master switch for no-progress and stall detection.
+  terminate_on_stall: true # End run when no progress persists to threshold (prevents recursion-limit crashes).
+  context_pressure_threshold: 0.85 # Warn when prompt/context usage reaches this fraction of model context window.
+  conversation_inactivity_turn_threshold: 10 # Warn after this many turns with no user-visible assistant text.
+  cyclic_tool_result_threshold: 6 # Warn when identical tool results repeat this many consecutive turns.
+  no_progress_turn_threshold: 80 # Stall threshold for ending run when outputs/todos/artifacts stop changing.
+  terminate_on_cyclic_tool_results: true # End run on severe repeated identical tool-result cycles.
+  cyclic_tool_result_hard_limit: 12 # Hard-stop threshold for cyclic tool-result loops.
+
+# Retry & resume
+retry:
+  enabled: true
+  default: false
+  max_attempts: 2
+  backoff_ms: 1000
+  rules: []
+
+resume:
+  enabled: false
+  require_checkpoint: true
+  max_resume_depth: 3
+
+# Todo management
+todos:
+  dag_enabled: true
+  max_exit_reminders: 2
+
+# -----------------------------------------------------------------------------
+# Memory & Context — episodic memory, summarization, scratchpad
+# -----------------------------------------------------------------------------
+
+memory:
+  enabled: true
+  storage_path: memory.json
+  max_facts: 100
+  fact_confidence_threshold: 0.7
+  injection_enabled: true
+  max_injection_tokens: 2000
+  model_name: null
+  debounce_seconds: 30
+
+summarization:
+  enabled: true
+  # Compaction controls:
+  # - Use token pressure only. Fraction thresholds are resolved against the
+  #   model context window before LangChain's middleware is constructed.
+  trigger:
+    type: fraction
+    value: 0.8
+  keep:
+    type: tokens
+    value: 32000
+  model_name: null
+  max_context_tokens: 128000
+  trim_tokens_to_summarize: 15564
+  modes:
+    # `default` is the baseline profile for non-dreamy chat flows.
+    default:
+      trim_tokens_to_summarize: 32000
+    dreamy:
+      trim_tokens_to_summarize: 32000
+
+# -----------------------------------------------------------------------------
+# Artifact Visibility Policy (tracking / documentation)
+# -----------------------------------------------------------------------------
+artifact_visibility:
+  # `workspace`: temporary/intermediate files created while reasoning or drafting
+  # `outputs`: final deliverables intended for user-facing directory and sharing
+  # `both`: show both trees in UI for traceability
+  show_in_directory: both
+  primary_directory: workspace
+  notes: "If a final deliverable is created in workspace, copy/move it to /mnt/user-data/workspace before presenting."
+
+title:
+  enabled: true
+  max_chars: 60
+  max_words: 6
+  model_name: null
+  generation_timeout_seconds: 60.0
+  await_generated_title_timeout_seconds: 0.0
+
+question_generation:
+  enabled: false
+  enabled_in_dreamy: false
+  count: 3
+  max_response_chars: 2000
+  model_name: null
+  timeout_seconds: 180.0
+
+scratchpad:
+  enabled: false
+  artifact_file: scratchpad.md
+  max_entries: 40
+  max_chars_per_entry: 600
+
+task_memory:
+  enabled: false
+  max_facts_per_task: 6
+  retention_turns: 40
+
+memory_versioning:
+  enabled: false
+  require_expected_sha: false
+  storage_dir: .capyhome/memory_versions
+
+# -----------------------------------------------------------------------------
+# Skills — skill discovery, curation, progressive disclosure
+# -----------------------------------------------------------------------------
+
+skills:
+  path: skills
+  container_path: /mnt/skills
+  progressive_disclosure: true
+  active_body_token_budget: 25000
+  matcher_trigger_enabled: true
+
+skill_curation:
+  enabled: false
+  proposal_only: true
+  require_human_approval: true
+  min_confidence: 0.65
+
+# -----------------------------------------------------------------------------
+# Knowledge & Search — knowledge vault, web search summarization
+# -----------------------------------------------------------------------------
+
+knowledge_vault:
+  enabled: true
+  path: ''
+  max_content_chars: 20000
+  min_trust_score: 0.55
+  allowed_domains: []
+  query_retention_hours: 72
+  search_results_auto_classify: true
+  search_results_require_extracted_content: true
+  search_results_queue_enabled: true
+  search_results_max_queue_items: 5000
+  search_results_dedupe_window_hours: 72
+  search_results_queue_path: knowledge_vault/03_ops/queues/search_results_ingestion_queue.json
+
+web_search_summary:
+  enabled: true
+  summary_threshold_chars: 3000
+  timeout_seconds: 180.0
+
+# -----------------------------------------------------------------------------
+# Generation — async media generation (ComfyUI)
+# -----------------------------------------------------------------------------
+
+generation:
+  enabled: true
+  comfy_base_url: http://127.0.0.1:8188
+  comfy_output_dir: /Users/ryan_chua/Desktop/comfyUI/output
+  filename_prefix_root: capyhome
+  image_workflow_file: image-generation/assets/text2image.json
+  video_workflow_file: video-generation/assets/text_to_video_wan.json
+  workflow_api_dir: /Users/ryan_chua/Desktop/CapyHome/skills
+
+# -----------------------------------------------------------------------------
+# Subagents — concurrency limits, per-agent timeouts
+# -----------------------------------------------------------------------------
+
+subagents:
+  timeout_seconds: 1800
+  min_concurrent_limit: 2
+  max_concurrent_limit: 4
+  max_primary_per_turn: 3
+  agents:
+    bash:
+      timeout_seconds: 600
+    general-purpose:
+      timeout_seconds: 1800
+
+# -----------------------------------------------------------------------------
+# Observability — tracing, metrics, benchmarks, execution traces
+# -----------------------------------------------------------------------------
+
+trajectory:
+  enabled: true
+  file_prefix: trajectory
+  max_payload_chars: 1200
+  fsync: true
+
+execution_trace:
+  enabled: true
+
+metrics:
+  enabled: true
+
+benchmarks:
+  enabled: false
+  fail_on_regression: false
+  regression_threshold: 0.02
+  suite: coding
+  report_dir: .capyhome/benchmarks
+
+# -----------------------------------------------------------------------------
+# Dreamy Workflow — bootstrap, timeout watchdog, proof-of-concept mode
+# -----------------------------------------------------------------------------
+
+dreamy_timeout:
+  enabled: true
+  max_run_wall_clock: 1800.0
+  max_model_call_duration: 600.0
+  model_call_warn_threshold: 300.0
+  bootstrap_loader_timeout_seconds: 15.0
+  bootstrap_validate_data_source: true
+  checkpoint_on_after_agent: true
+  executor_poc_threshold: 4
+  executor_poc_max_rows: 50
+
+# -----------------------------------------------------------------------------
+# Routing & Scheduling — per-stage timeouts, model routing, background jobs
+# -----------------------------------------------------------------------------
+
+routing:
+  fallback: null
+  stages: {}
+  timeouts:
+    enabled: true
+    default: 600
+    stages:
+      generator: 600
+      evaluator: 600
+      synthesis: 1200
+      planner: 600
+      title: 60
+    tools:
+      bash: 600
+      task: 1800
+      web_search: 30
+      write_todos: 30
+
+scheduler:
+  enabled: true
+  poll_interval_seconds: 60
+
+# -----------------------------------------------------------------------------
+# Local LLM Policy — allowed local/edge LLM base URLs
+# -----------------------------------------------------------------------------
+
+local_llm_policy:
+  enabled: true
+  allowed_base_urls:
+    - http://localhost:1234/v1
+    - http://localhost:8081/v1
+    - http://127.0.0.1:4000/v1
+    - http://192.168.1.22:1234/v1
+    - http://192.168.1.21:1234/v1
+    - http://192.168.1.39:1234/v1
+    - http://192.168.1.21:4000/v1
+    - http://192.168.1.39:40114/olla/lmstudio/v1
+    
