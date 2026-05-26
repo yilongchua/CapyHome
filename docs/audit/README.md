@@ -6,9 +6,8 @@ it produced — by reading the on-disk artifacts the backend already writes.
 
 All examples below use a real thread as the reference:
 
-- **Reference thread id:** `fa33b3bb-8994-4529-8944-05e63cfcb40e`
-- **Topic:** crystal practices research (prompt #16 from
-  [prompt-tunning/test_prompt.py](../../prompt-tunning/test_prompt.py))
+- **Reference thread id:** `a73a4607-ab65-49d4-af18-66bb16b56c56`
+- **Topic:** Singapore vs Tokyo soba comparison
 
 You can swap that id for any other thread and the layout is identical.
 
@@ -20,17 +19,17 @@ Every chat is sandboxed under `backend/.capyhome/threads/{thread_id}/`.
 For the reference thread:
 
 ```
-backend/.capyhome/threads/fa33b3bb-8994-4529-8944-05e63cfcb40e/
+backend/.capyhome/threads/a73a4607-ab65-49d4-af18-66bb16b56c56/
 ├── logs/
 │   └── trajectory/
-│       └── trajectory-1779458558-run-e7d64f5272.jsonl   # per-run event log
+│       └── trajectory-1779762941-run-aa4cfcd299.jsonl   # per-run event log
 └── user-data/
     ├── workspace/
     │   ├── plan.md                                       # latest plan state
     │   ├── plans/                                        # versioned plan snapshots
-    │   │   └── plan-20260522-140345-crystal-practices-research-and-safety-plan.md
+    │   │   └── plan-20260526-023802-singapore-vs-tokyo-soba-comparison-plan.md
     │   └── .prompts/                                     # captured LLM prompts
-    │       └── 20260522T140238_783072Z_lead_agent_prompt_tuning.txt
+    │       └── 20260526T023541_237143Z_lead_agent_prompt_tuning.txt
     │       └── ... (one file per model call)
     └── outputs/                                          # legacy — almost always empty; agent writes to workspace/ instead
 ```
@@ -78,7 +77,7 @@ For a single chat, an audit should answer:
 ### 3.1 Locate the thread
 
 ```bash
-THREAD=fa33b3bb-8994-4529-8944-05e63cfcb40e
+THREAD=a73a4607-ab65-49d4-af18-66bb16b56c56
 TDIR="backend/.capyhome/threads/$THREAD"
 ls "$TDIR"
 ```
@@ -89,8 +88,8 @@ The submitted prompt is preserved verbatim inside the first captured prompt
 file's `messages[]` (and, for `test_prompt.py` runs, in
 `prompt-tunning/prompt_id_*/cycle_*_metadata.json` under `initial_prompt`).
 
-For this thread it is the "deeper read on crystals" prompt — prompt #16 in
-[prompt-tunning/test_prompt.py:112-114](../../prompt-tunning/test_prompt.py#L112-L114).
+For this thread the prompt focuses on comparing soba options in Singapore
+versus Tokyo.
 
 ### 3.3 Read the plan
 
@@ -101,15 +100,15 @@ ls "$TDIR/user-data/workspace/plans/"
 
 `plan.md` is overwritten as the plan evolves; `plans/` keeps timestamped
 snapshots. For the reference thread, the snapshot is
-`plan-20260522-140345-crystal-practices-research-and-safety-plan.md` —
-status `draft`, 7 todos, awaiting Execute Plan approval.
+`plan-20260526-023802-singapore-vs-tokyo-soba-comparison-plan.md` — status
+`draft`, awaiting Execute Plan approval.
 
 ### 3.4 Replay the run from the trajectory
 
 The trajectory JSONL is the canonical event log. One run = one file:
 
 ```bash
-TRAJ="$TDIR/logs/trajectory/trajectory-1779458558-run-e7d64f5272.jsonl"
+TRAJ="$TDIR/logs/trajectory/trajectory-1779762941-run-aa4cfcd299.jsonl"
 ```
 
 Each line is `{ts, run_id, thread_id, event, payload}`. The events the
@@ -134,9 +133,8 @@ awk -F'"event":' '{print $2}' "$TRAJ" | awk -F'"' '{print $2}' | sort | uniq -c
 grep -o '"tool": "[^"]*"' "$TRAJ" | sort -u
 ```
 
-For `fa33b3bb-...` this yields 6 model calls, 7 tool calls (one of which timed
-out), and the tools touched were `query_knowledge_vault`, `query_lightrag`,
-`web_search`, `write_todos`.
+For `a73a4607-...` this yields 3 model calls, 3 tool calls, and the tools
+touched were `web_search` and `write_todos`.
 
 A timeline view (`ts` is unix epoch seconds, sort by it):
 
@@ -153,7 +151,7 @@ captures from the prompt-tuning run.
 ```bash
 ls "$TDIR/user-data/workspace/.prompts/"
 jq '{timestamp_utc, model_name, invocation_params, messages: (.messages|length)}' \
-  "$TDIR/user-data/workspace/.prompts/20260522T140238_783072Z_lead_agent_prompt_tuning.txt"
+  "$TDIR/user-data/workspace/.prompts/20260526T023541_237143Z_lead_agent_prompt_tuning.txt"
 ```
 
 Each file contains:
@@ -250,7 +248,7 @@ audit_thread() {
   done
 }
 
-audit_thread fa33b3bb-8994-4529-8944-05e63cfcb40e
+audit_thread a73a4607-ab65-49d4-af18-66bb16b56c56
 ```
 
 ---
