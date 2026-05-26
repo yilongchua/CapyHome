@@ -1,0 +1,5 @@
+{
+  "_comment": "Policy file for external (MCP, CLI) tools. The MCP cache (src/mcp/cache.py) continues to source tool *schemas* from servers; this file only describes per-server availability (mode, phase, subagent_visible). CLI bridges may register a handler directly. Default state — empty arrays — means no policy is applied and all cached MCP tools pass through. Use src/tools/loader.py:filter_mcp_tools_by_policy to enforce. Add an entry like {\"name\": \"filesystem\", \"mode\": [\"work\"], \"phase\": [\"approved\"], \"name_prefix\": \"fs_\"} to gate a server.",
+  "mcp_servers": [],
+  "cli_bridges": []
+}

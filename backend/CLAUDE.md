@@ -221,6 +221,18 @@ Proxied through nginx: `/api/langgraph/*` → LangGraph, all other `/api/*` → 
 4. **Subagent tool** (if enabled):
    - `task` - Delegate to subagent (description, prompt, subagent_type, max_turns)
 
+**JSON-driven tool definitions** (`src/tools/internal_tools.json`, `src/tools/external_tools.json`):
+
+When `app_config.json_driven_tools` is `true` (the default), the LLM-facing contract for built-in and sandbox tools is sourced from `src/tools/internal_tools.json`. The Python handlers (`@tool`-decorated functions in `src/tools/builtins/` and `src/sandbox/tools.py`) continue to provide the runtime behavior, but their LLM-visible `description` and per-argument descriptions are overridden from JSON. This collapses an audit surface that previously lived across 13+ files into a single declarative file.
+
+- **`internal_tools.json`** — list of `ToolDefinition` entries (schema in `src/tools/schema.py`). Each entry carries `name`, `description`, `handler` (resolvable module:variable path), declarative filters (`mode`, `phase`, `groups`, `endpoint`, `requires_vision`, `requires_subagent_enabled`), a `returns` blurb, `examples`, and a JSON-Schema `parameters` block. The `name` must match the decorated tool's `name`.
+- **`external_tools.json`** — `ExternalPolicy` for MCP servers and CLI bridges. MCP entries are policy-only (mode/phase/subagent_visible); the actual schemas continue to come from MCP servers themselves. Empty arrays (the default) mean no policy is applied.
+- **Loader** (`src/tools/loader.py`) — `build_structured_tool(defn)` resolves the handler and mutates its `description`/`args_schema`; the policy is attached via `_capyhome_policy` so middlewares can read it. `filter_mcp_tools_by_policy(...)` enforces MCP server policy.
+- **Filter integration** — `PhaseToolFilterMiddleware` consults attached policies (via `get_tool_policy`) and hides any JSON-annotated tool whose `mode`/`phase` excludes the current request, on top of the existing blocked-name lists.
+- **Drift validator** — `tests/test_tool_schema_sync.py` walks every JSON entry, instantiates the handler, and asserts JSON parameters match the handler signature (with `tool_call_id` / `runtime` injection params excluded). Failures in CI mean rename one side or the other.
+- **Audit tool** — `make tools-audit` (or `python -m src.tools.audit --mode work --phase approved`) prints a Markdown table of the resolved catalog for a given mode/phase/vision/subagent triple. Use it to review JSON edits before merging.
+- **Kill switch** — set `json_driven_tools: false` in `config.yaml` to fall back to the legacy hard-coded `BUILTIN_TOOLS`+`SUBAGENT_TOOLS` path while debugging.
+
 **Community tools** (`src/community/`):
 - `image_search/` - Image search tool
 - `aio_sandbox/` - Docker/container-based sandbox provider

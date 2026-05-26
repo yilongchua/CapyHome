@@ -1,0 +1,385 @@
+[
+  {
+    "name": "ask_clarification",
+    "description": "Ask the user a single, focused question when you cannot proceed without their input. Execution is interrupted by ClarificationMiddleware; control returns once the user responds. Use for missing information, ambiguous requirements, approach choices, risk confirmations, or recommendations awaiting approval. Ask one question at a time, never assume on a destructive action.",
+    "handler": "src.tools.builtins.clarification_tool:ask_clarification_tool",
+    "mode": ["plan", "work", "auto"],
+    "phase": ["draft", "approved"],
+    "groups": ["interaction"],
+    "endpoint": "any",
+    "requires_vision": false,
+    "requires_subagent_enabled": false,
+    "returns": "Sentinel string; the real effect is a LangGraph interrupt that surfaces the question (and options) in the client and resumes the run on user reply.",
+    "examples": [
+      "ask_clarification(question=\"Which database should I migrate?\", clarification_type=\"approach_choice\", options=[{\"label\": \"prod\", \"recommended\": false}, {\"label\": \"staging\", \"recommended\": true, \"description\": \"Safer first target.\"}])"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": ["question", "clarification_type"],
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "The clarification question. One question per call; be specific."
+        },
+        "clarification_type": {
+          "type": "string",
+          "enum": ["missing_info", "ambiguous_requirement", "approach_choice", "risk_confirmation", "suggestion"],
+          "description": "Why clarification is needed. risk_confirmation is required before any destructive action."
+        },
+        "context": {
+          "type": "string",
+          "description": "Optional one-sentence context so the user understands why you're asking."
+        },
+        "options": {
+          "type": "array",
+          "description": "Optional structured choices for approach_choice / suggestion. Each item: {label: str, description?: str, recommended?: bool}. recommended=true marks the suggested option (UI highlights it). Provide at most one recommended entry.",
+          "items": {"type": "object"}
+        }
+      }
+    }
+  },
+  {
+    "name": "present_files",
+    "description": "Surface workspace files to the user — only files under `/mnt/user-data/workspace` may be presented. Supported types: PDF, MD, CSV/XLSX, code/text, images (PNG/JPG/SVG). Call after writing artifacts the user should see, view, or download. Not for files you only need to read for your own processing.",
+    "handler": "src.tools.builtins.present_file_tool:present_file_tool",
+    "mode": ["plan", "work", "auto"],
+    "phase": ["draft", "approved"],
+    "groups": ["artifacts"],
+    "endpoint": "any",
+    "requires_vision": false,
+    "requires_subagent_enabled": false,
+    "returns": "Updates state.artifacts with the normalized virtual paths and emits a tool message; the frontend renders the files in the client.",
+    "examples": [
+      "present_files(filepaths=[\"/mnt/user-data/workspace/report.md\", \"/mnt/user-data/workspace/chart.png\"])"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": ["filepaths"],
+      "properties": {
+        "filepaths": {
+          "type": "array",
+          "description": "Absolute paths under /mnt/user-data/workspace. Paths outside the workspace are rejected.",
+          "items": {"type": "string"}
+        }
+      }
+    }
+  },
+  {
+    "name": "recall",
+    "description": "Search long-term memory for facts relevant to a short query. Searches both workspace (per-thread) and global scopes when enabled. Use to retrieve context from prior conversations that is not present in the immediate working context. Short factual phrases (\"deployment workflow\", \"preferred linter\") outperform full questions.",
+    "handler": "src.tools.builtins.recall_tool:recall_tool",
+    "mode": ["plan", "work", "auto"],
+    "phase": ["draft", "approved"],
+    "groups": ["memory"],
+    "endpoint": "any",
+    "requires_vision": false,
+    "requires_subagent_enabled": false,
+    "returns": "JSON string {query, results: [{id, scope, content, category, confidence, score, source}]}. Returns 'No relevant memory found.' below threshold and 'Memory scopes are disabled.' when memory is off.",
+    "examples": [
+      "recall(query=\"preferred python formatter\")",
+      "recall(query=\"deployment pipeline\")"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": ["query"],
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Short factual phrase to search for. Avoid full sentences."
+        }
+      }
+    }
+  },
+  {
+    "name": "setup_agent",
+    "description": "Create or replace a custom CapyHome agent with a SOUL.md personality and a short description. Calling again with the same agent name overwrites the existing SOUL.md. The agent name comes from runtime context, not parameters.",
+    "handler": "src.tools.builtins.setup_agent_tool:setup_agent",
+    "mode": ["plan", "work", "auto"],
+    "phase": ["draft", "approved"],
+    "groups": ["meta"],
+    "endpoint": "any",
+    "requires_vision": false,
+    "requires_subagent_enabled": false,
+    "returns": "Command that writes SOUL.md (and config.yaml for non-default agents) to the agent directory and emits a tool message with the agent name. Cleans up the directory on error.",
+    "examples": [
+      "setup_agent(soul=\"# Personality\\nFocused researcher.\\n\\n# Goals\\nAnswer with sources.\", description=\"Source-cited research helper\")"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": ["soul", "description"],
+      "properties": {
+        "soul": {
+          "type": "string",
+          "description": "Full SOUL.md content. Recommended sections: Personality, Goals, Tool restrictions, Style."
+        },
+        "description": {
+          "type": "string",
+          "description": "One-line description of what the agent does. Keep under 100 characters."
+        }
+      }
+    }
+  },
+  {
+    "name": "task",
+    "description": "Delegate one focused objective to a specialized subagent that runs in its own context window. Use to preserve your context for verbose exploration, parallel research, or isolated command execution. Do not use for simple single-step work or anything that needs user clarification mid-run. Subagent responses above ~20k tokens are truncated — structure the delegation so the result fits.",
+    "handler": "src.tools.builtins.task_tool:task_tool",
+    "mode": ["work", "auto"],
+    "phase": ["approved"],
+    "groups": ["subagents"],
+    "endpoint": "any",
+    "requires_vision": false,
+    "requires_subagent_enabled": true,
+    "returns": "String containing the subagent's final response, or an error string for unknown subagent types / draft-plan blocking. Lifecycle events (task_started/running/completed) stream out-of-band.",
+    "examples": [
+      "task(description=\"Research async patterns\", prompt=\"Survey Python asyncio cancellation patterns; return 3-5 sources with citations.\", subagent_type=\"source-researcher\")"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": ["description", "prompt", "subagent_type"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Short (3-5 word) label for UI/log display, e.g. \"Research async patterns\"."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The objective for the subagent. Be specific and self-contained — the subagent does not see this conversation."
+        },
+        "subagent_type": {
+          "type": "string",
+          "description": "Which subagent to use. general-purpose: all-tool exploratory worker, default max_turns from config. bash: shell command specialist for verbose output. source-researcher: one narrow external-source objective; default max_turns=25; auto-narrows broad prompts. docs-explorer: local corpus / mounted documents. comparison-dimension-researcher: one comparison dimension across a fixed option set; default max_turns=25. synthesis-reviewer: reviews findings for coverage/contradictions/citations/freshness."
+        },
+        "max_turns": {
+          "type": "integer",
+          "description": "Optional override for the subagent's recursion limit. Defaults to the subagent's configured max."
+        }
+      }
+    }
+  },
+  {
+    "name": "view_image",
+    "description": "Load an image file into the model's vision channel so it can be analysed. Use when you need to see image contents yourself — pair with `present_files` when the user should also see the image. Supported formats: .jpg, .jpeg, .png, .webp. Prefer workspace paths like `/mnt/user-data/workspace/<file>`; keep images under ~10 MB.",
+    "handler": "src.tools.builtins.view_image_tool:view_image_tool",
+    "mode": ["plan", "work", "auto"],
+    "phase": ["draft", "approved"],
+    "groups": ["vision"],
+    "endpoint": "any",
+    "requires_vision": true,
+    "requires_subagent_enabled": false,
+    "returns": "Command that updates state.viewed_images with the base64 payload and mime type, then emits a confirmation tool message. Returns an error message if the path is invalid, missing, or has an unsupported extension.",
+    "examples": [
+      "view_image(image_path=\"/mnt/user-data/workspace/screenshot.png\")"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": ["image_path"],
+      "properties": {
+        "image_path": {
+          "type": "string",
+          "description": "Absolute path to the image. Workspace virtual paths (/mnt/user-data/...) are resolved to the thread-scoped physical path."
+        }
+      }
+    }
+  },
+  {
+    "name": "write_todos",
+    "description": "Create or update structured todo items. Items pass through pending -> in_progress -> completed/blocked. Items can declare dependencies via depends_on; downstream items remain blocked until their dependencies complete. Existing items are patched by id; items with a new or omitted id are appended. In Plan Mode while plan.status='draft', completed status is not allowed and all ids must use the 'todo-N' prefix — finalise progression after plan approval. Once plan.status='completed' the graph is frozen.",
+    "handler": "src.tools.builtins.write_todos_tool:write_todos_tool",
+    "mode": ["plan", "work", "auto"],
+    "phase": ["draft", "approved"],
+    "groups": ["planning"],
+    "endpoint": "any",
+    "requires_vision": false,
+    "requires_subagent_enabled": false,
+    "returns": "Command that writes state.todo_graph (nodes, ready_ids, updated_at), refreshes legacy state.todos, and syncs plan handoff files. On rejection emits a tool message tagged with one of: draft_completion_blocked, completed_plan_frozen, validation_failed.",
+    "examples": [
+      "write_todos(todos=[{\"id\":\"todo-1\",\"content\":\"Outline doc structure\",\"status\":\"in_progress\"}])",
+      "write_todos(todos=[{\"id\":\"todo-2\",\"content\":\"Run benchmark\",\"depends_on\":[\"todo-1\"],\"owner\":\"subagent\",\"subagent_type\":\"bash\"}])"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": ["todos"],
+      "properties": {
+        "todos": {
+          "type": "array",
+          "description": "List of todo updates. Each item: {id?: str (reuse to patch, omit/new to create), content: str, status: 'pending'|'in_progress'|'completed'|'blocked', depends_on?: [str], owner?: 'lead'|'subagent', subagent_type?: str (when owner=subagent), target_endpoint?: 'primary'|'helper', tool_budget?: int}.",
+          "items": {"type": "object"}
+        }
+      }
+    }
+  },
+  {
+    "name": "bash",
+    "description": "Execute a bash command inside the thread sandbox. Use `python` for Python code and `pip install` for package installs. Always use absolute paths; virtual `/mnt/user-data/...` paths are translated to the thread-scoped physical paths automatically.",
+    "handler": "src.sandbox.tools:bash_tool",
+    "mode": ["work", "auto"],
+    "phase": ["approved"],
+    "groups": ["sandbox"],
+    "endpoint": "any",
+    "requires_vision": false,
+    "requires_subagent_enabled": false,
+    "returns": "String containing the command's combined stdout/stderr, or an `Error: ...` message on sandbox/runtime failure.",
+    "examples": [
+      "bash(description=\"List repo root\", command=\"ls -la /mnt/user-data/workspace\")"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": ["description", "command"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Short explanation of why you're running this command."
+        },
+        "command": {
+          "type": "string",
+          "description": "The bash command to execute. Use absolute paths for files and directories."
+        }
+      }
+    }
+  },
+  {
+    "name": "ls",
+    "description": "List the contents of a directory up to two levels deep, in tree format. Faster than bash(ls) for quick discovery.",
+    "handler": "src.sandbox.tools:ls_tool",
+    "mode": ["plan", "work", "auto"],
+    "phase": ["draft", "approved"],
+    "groups": ["sandbox"],
+    "endpoint": "any",
+    "requires_vision": false,
+    "requires_subagent_enabled": false,
+    "returns": "Newline-joined tree of children, '(empty)' for empty directories, or an `Error: ...` message on failure.",
+    "examples": [
+      "ls(description=\"Inspect uploads\", path=\"/mnt/user-data/uploads\")"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": ["description", "path"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Short explanation of why you're listing this directory."
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute path to the directory to list."
+        }
+      }
+    }
+  },
+  {
+    "name": "read_file",
+    "description": "Read the contents of a text file (source, config, log, etc.). Supply start_line and end_line together to read a 1-indexed inclusive range; omit both to read the whole file.",
+    "handler": "src.sandbox.tools:read_file_tool",
+    "mode": ["plan", "work", "auto"],
+    "phase": ["draft", "approved"],
+    "groups": ["sandbox"],
+    "endpoint": "any",
+    "requires_vision": false,
+    "requires_subagent_enabled": false,
+    "returns": "String with the file contents (or the requested line slice), '(empty)' for empty files, or an `Error: ...` message for missing/permission/IO failures.",
+    "examples": [
+      "read_file(description=\"Check entrypoint\", path=\"/mnt/user-data/workspace/main.py\")",
+      "read_file(description=\"Inspect logs\", path=\"/mnt/user-data/workspace/run.log\", start_line=100, end_line=160)"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": ["description", "path"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Short explanation of why you're reading the file."
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute path to the file to read."
+        },
+        "start_line": {
+          "type": "integer",
+          "description": "Optional 1-indexed inclusive start line. Use with end_line."
+        },
+        "end_line": {
+          "type": "integer",
+          "description": "Optional 1-indexed inclusive end line. Use with start_line."
+        }
+      }
+    }
+  },
+  {
+    "name": "write_file",
+    "description": "Write or append text content to a file. Creates parent directories as needed. Use append=true to add to existing content without overwriting.",
+    "handler": "src.sandbox.tools:write_file_tool",
+    "mode": ["work", "auto"],
+    "phase": ["approved"],
+    "groups": ["sandbox"],
+    "endpoint": "any",
+    "requires_vision": false,
+    "requires_subagent_enabled": false,
+    "returns": "'OK' on success, or an `Error: ...` message on permission/IO failure.",
+    "examples": [
+      "write_file(description=\"Save report\", path=\"/mnt/user-data/workspace/report.md\", content=\"# Findings\\n...\")"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": ["description", "path", "content"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Short explanation of why you're writing the file."
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute path to the file."
+        },
+        "content": {
+          "type": "string",
+          "description": "Text content to write."
+        },
+        "append": {
+          "type": "boolean",
+          "description": "If true, append to the file instead of overwriting. Defaults to false."
+        }
+      }
+    }
+  },
+  {
+    "name": "str_replace",
+    "description": "Replace a substring inside a file. By default the substring must appear exactly once; set replace_all=true to replace every occurrence. Use this for targeted edits rather than rewriting the whole file with write_file.",
+    "handler": "src.sandbox.tools:str_replace_tool",
+    "mode": ["work", "auto"],
+    "phase": ["approved"],
+    "groups": ["sandbox"],
+    "endpoint": "any",
+    "requires_vision": false,
+    "requires_subagent_enabled": false,
+    "returns": "'OK' on success, or an `Error: ...` message if the file is missing or old_str is not present.",
+    "examples": [
+      "str_replace(description=\"Bump version\", path=\"/mnt/user-data/workspace/pyproject.toml\", old_str=\"version = \\\"0.1.0\\\"\", new_str=\"version = \\\"0.2.0\\\"\")"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": ["description", "path", "old_str", "new_str"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Short explanation of why you're replacing the substring."
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute path to the file."
+        },
+        "old_str": {
+          "type": "string",
+          "description": "Substring to replace. Must be unique in the file unless replace_all=true."
+        },
+        "new_str": {
+          "type": "string",
+          "description": "Replacement substring."
+        },
+        "replace_all": {
+          "type": "boolean",
+          "description": "If true, replace every occurrence. Defaults to false (single occurrence)."
+        }
+      }
+    }
+  }
+]

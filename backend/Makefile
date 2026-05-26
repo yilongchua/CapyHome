@@ -15,3 +15,6 @@ lint:
 
 format:
 	uvx ruff check . --fix && uvx ruff format .
+
+tools-audit:
+	PYTHONPATH=. uv run python -m src.tools.audit $(ARGS)

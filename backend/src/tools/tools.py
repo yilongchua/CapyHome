@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 from langchain.tools import BaseTool
 
@@ -8,8 +9,12 @@ from src.community.web_search import web_search_tool
 from src.config import get_app_config
 from src.reflection import resolve_variable
 from src.tools.builtins import ask_clarification_tool, present_file_tool, recall_tool, task_tool, view_image_tool, write_todos_tool
+from src.tools.loader import build_structured_tool, filter_mcp_tools_by_policy, load_external_policy, load_tool_definitions
 
 logger = logging.getLogger(__name__)
+
+INTERNAL_TOOLS_JSON = Path(__file__).resolve().parent / "internal_tools.json"
+EXTERNAL_TOOLS_JSON = Path(__file__).resolve().parent / "external_tools.json"
 
 BUILTIN_TOOLS = [
     present_file_tool,
@@ -97,16 +102,26 @@ def get_available_tools(
         except Exception as e:
             logger.error(f"Failed to get cached MCP tools: {e}")
 
-    # Conditionally add builtin tools, respecting community overrides.
-    builtin_tools = [t for t in BUILTIN_TOOLS if _get_community_tool_enabled(t.name)]
-    disabled_builtins = [t.name for t in BUILTIN_TOOLS if t.name not in {b.name for b in builtin_tools}]
-    if disabled_builtins:
-        logger.info("Community tool overrides disabled: %s", disabled_builtins)
-
-    # Add subagent tools only if enabled via runtime parameter
-    if subagent_enabled:
-        builtin_tools.extend(SUBAGENT_TOOLS)
-        logger.info("Including subagent tools (task)")
+    # Apply external_tools.json MCP policy when JSON-driven mode is on.
+    # No-op when the policy file declares no mcp_servers (default state).
+    if mcp_tools and getattr(config, "json_driven_tools", False):
+        try:
+            external_policy = load_external_policy(EXTERNAL_TOOLS_JSON)
+            if external_policy.mcp_servers:
+                before = len(mcp_tools)
+                mcp_tools = filter_mcp_tools_by_policy(
+                    mcp_tools,
+                    external_policy,
+                    subagent=subagent_enabled,
+                )
+                if before != len(mcp_tools):
+                    logger.info(
+                        "external_tools.json policy reduced MCP tools from %d to %d",
+                        before,
+                        len(mcp_tools),
+                    )
+        except Exception:
+            logger.exception("Failed to apply external_tools.json policy; serving full MCP catalog")
 
     # If no model_name specified, use the first model (default)
     if model_name is None and config.models:
@@ -114,11 +129,33 @@ def get_available_tools(
 
     # Add view_image_tool only if the model supports vision
     model_config = config.get_model_config(model_name) if model_name else None
-    if model_config is not None and model_config.supports_vision:
-        builtin_tools.append(view_image_tool)
-        logger.info(f"Including view_image_tool for model '{model_name}' (supports_vision=True)")
+    supports_vision = bool(model_config is not None and model_config.supports_vision)
 
-    merged = loaded_tools + builtin_tools + mcp_tools
+    if getattr(config, "json_driven_tools", False):
+        builtin_tools = _build_builtin_tools_from_json(
+            subagent_enabled=subagent_enabled,
+            supports_vision=supports_vision,
+        )
+    else:
+        # Legacy path — keep the hard-coded BUILTIN_TOOLS until Phase 6 cutover.
+        builtin_tools = [t for t in BUILTIN_TOOLS if _get_community_tool_enabled(t.name)]
+        disabled_builtins = [t.name for t in BUILTIN_TOOLS if t.name not in {b.name for b in builtin_tools}]
+        if disabled_builtins:
+            logger.info("Community tool overrides disabled: %s", disabled_builtins)
+        if subagent_enabled:
+            builtin_tools.extend(SUBAGENT_TOOLS)
+            logger.info("Including subagent tools (task)")
+        if supports_vision:
+            builtin_tools.append(view_image_tool)
+            logger.info(f"Including view_image_tool for model '{model_name}' (supports_vision=True)")
+
+    # When JSON drives tools, prefer the JSON-built BaseTool on name collisions so
+    # the JSON-sourced description/policy wins over any config.yaml duplicate.
+    # Legacy path preserves prior ordering (config.yaml first).
+    if getattr(config, "json_driven_tools", False):
+        merged = builtin_tools + loaded_tools + mcp_tools
+    else:
+        merged = loaded_tools + builtin_tools + mcp_tools
     deduped: list[BaseTool] = []
     seen: set[str] = set()
     for tool in merged:
@@ -128,3 +165,53 @@ def get_available_tools(
         seen.add(name)
         deduped.append(tool)
     return deduped
+
+
+def _build_builtin_tools_from_json(*, subagent_enabled: bool, supports_vision: bool) -> list[BaseTool]:
+    """Materialize built-in/sandbox tools from internal_tools.json.
+
+    Applies the same declarative filters the legacy path enforces imperatively:
+    community on/off overrides, subagent gating (`requires_subagent_enabled`),
+    and vision gating (`requires_vision`). Tools whose handlers fail to resolve
+    are logged and skipped so a single bad entry never breaks the agent.
+
+    Community tools listed in BUILTIN_TOOLS that have no JSON entry yet are
+    appended at the end so flipping the flag doesn't shrink the catalog.
+    """
+    try:
+        defns = load_tool_definitions(INTERNAL_TOOLS_JSON)
+    except Exception:
+        logger.exception("Failed to load internal_tools.json; falling back to legacy BUILTIN_TOOLS")
+        return list(BUILTIN_TOOLS) + (list(SUBAGENT_TOOLS) if subagent_enabled else [])
+
+    tools: list[BaseTool] = []
+    json_names: set[str] = set()
+    for defn in defns:
+        if defn.deprecated:
+            continue
+        if defn.requires_subagent_enabled and not subagent_enabled:
+            continue
+        if defn.requires_vision and not supports_vision:
+            continue
+        if not _get_community_tool_enabled(defn.name):
+            continue
+        try:
+            tools.append(build_structured_tool(defn))
+            json_names.add(defn.name)
+        except Exception:
+            logger.exception("Skipping tool '%s' — handler resolution failed", defn.name)
+
+    # Carry over BUILTIN_TOOLS entries (community tools like web_search,
+    # scope_search, knowledge_vault_*) that don't yet have a JSON entry.
+    for tool in BUILTIN_TOOLS:
+        if tool.name in json_names:
+            continue
+        if not _get_community_tool_enabled(tool.name):
+            continue
+        tools.append(tool)
+    if subagent_enabled:
+        for tool in SUBAGENT_TOOLS:
+            if tool.name in json_names:
+                continue
+            tools.append(tool)
+    return tools

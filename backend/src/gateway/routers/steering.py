@@ -203,24 +203,14 @@ async def _create_work_mode_run(
     history from the checkpointer; the trigger message is just a tick to start
     the turn in Work Mode.
     """
-    configurable: dict[str, Any] = {
-        "mode": "work",
-        "is_plan_mode": False,
-        "background_followup": False,
-        "plan_behavior": "work_interactive",
-        "subagent_enabled": True,
-        "thinking_enabled": True,
-        "auto_mode": auto_mode,
-    }
-    if requested_model_name:
-        configurable["model_name"] = requested_model_name
-
     context: dict[str, Any] = {
         "thread_id": thread_id,
         "mode": "work",
         "is_plan_mode": False,
         "background_followup": False,
         "plan_behavior": "work_interactive",
+        "subagent_enabled": True,
+        "thinking_enabled": True,
         "auto_mode": auto_mode,
     }
     if requested_model_name:
@@ -239,7 +229,6 @@ async def _create_work_mode_run(
         thread_id,
         _WORK_MODE_ASSISTANT_ID,
         input={"messages": [trigger_message]},
-        config={"configurable": configurable},
         context=context,
         metadata={"trigger": "execute_plan"},
     )

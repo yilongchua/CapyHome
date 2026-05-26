@@ -33,6 +33,7 @@ from langchain.agents.middleware.types import ModelCallResult, ModelRequest, Mod
 from langgraph.runtime import Runtime
 
 from src.agents.middlewares.runtime_events import append_runtime_event
+from src.tools.loader import get_tool_policy
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,28 @@ def _filter_tools(tools: list[Any], blocked: frozenset[str]) -> tuple[list[Any],
     return kept, hidden
 
 
+def _filter_tools_by_policy(tools: list[Any], *, mode: str, phase: str) -> tuple[list[Any], list[str]]:
+    """JSON-driven filter: a tool is dropped when its attached policy excludes the
+    current mode or phase. Tools without an attached policy pass through — they
+    are governed by the legacy `_filter_tools` blocked-name lists.
+    """
+    kept: list[Any] = []
+    hidden: list[str] = []
+    for tool in tools:
+        policy = get_tool_policy(tool) if not isinstance(tool, dict) else None
+        if policy is None:
+            kept.append(tool)
+            continue
+        if mode and policy.mode and mode not in policy.mode:
+            hidden.append(policy.name)
+            continue
+        if phase and policy.phase and phase not in policy.phase:
+            hidden.append(policy.name)
+            continue
+        kept.append(tool)
+    return kept, hidden
+
+
 class PhaseToolFilterMiddleware(AgentMiddleware[PhaseToolFilterState]):
     """Hide execution tools from the LLM's tool catalog while plan is draft."""
 
@@ -143,10 +166,18 @@ class PhaseToolFilterMiddleware(AgentMiddleware[PhaseToolFilterState]):
         if not tools:
             return request
         if _should_filter(state, runtime):
-            blocked, phase = _DRAFT_HIDDEN_TOOLS, "draft"
+            blocked, phase_label = _DRAFT_HIDDEN_TOOLS, "draft"
         else:
-            blocked, phase = _WORK_HIDDEN_TOOLS, "work"
+            blocked, phase_label = _WORK_HIDDEN_TOOLS, "work"
         kept, hidden = _filter_tools(tools, blocked)
+
+        # Declarative policy filter — JSON-annotated tools opt out of phases
+        # they don't belong to via their attached ToolDefinition.policy.
+        ctx_mode = str(_runtime_context(runtime).get("mode") or "").strip().lower()
+        declarative_phase = "draft" if phase_label == "draft" else "approved"
+        kept, policy_hidden = _filter_tools_by_policy(kept, mode=ctx_mode, phase=declarative_phase)
+        hidden.extend(policy_hidden)
+
         if not hidden:
             return request
         append_runtime_event(
@@ -154,9 +185,10 @@ class PhaseToolFilterMiddleware(AgentMiddleware[PhaseToolFilterState]):
             {
                 "source": "phase_tool_filter",
                 "decision": "tools_hidden",
-                "phase": phase,
+                "phase": phase_label,
                 "hidden": hidden,
                 "kept_count": len(kept),
+                "policy_hidden": policy_hidden,
             },
         )
         return request.override(tools=kept)

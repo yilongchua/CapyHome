@@ -64,6 +64,10 @@ class AppConfig(BaseModel):
     sandbox: SandboxConfig = Field(description="Sandbox configuration")
     tools: list[ToolConfig] = Field(default_factory=list, description="Available tools")
     tool_groups: list[ToolGroupConfig] = Field(default_factory=list, description="Available tool groups")
+    json_driven_tools: bool = Field(
+        default=True,
+        description="When true (default), built-in/sandbox tool descriptions and per-arg docs are sourced from src/tools/internal_tools.json; the loader applies declarative mode/phase/endpoint policy. Set to false in config.yaml to fall back to the legacy hard-coded BUILTIN_TOOLS path while debugging.",
+    )
     skills: SkillsConfig = Field(default_factory=SkillsConfig, description="Skills configuration")
     prompt: PromptConfig = Field(default_factory=PromptConfig, description="Prompt assembly configuration")
     permissions: PermissionsConfig = Field(default_factory=PermissionsConfig, description="Tool permission policy configuration")
