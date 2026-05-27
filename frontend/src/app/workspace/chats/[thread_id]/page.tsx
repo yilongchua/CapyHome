@@ -20,7 +20,10 @@ import {
 } from "@/components/workspace/input-box";
 import { MessageList } from "@/components/workspace/messages";
 import { ThreadContext } from "@/components/workspace/messages/context";
-import { PlanApprovalOverlay } from "@/components/workspace/plan-approval-overlay";
+import {
+  PlanApprovalOverlay,
+  PlanClarificationPopup,
+} from "@/components/workspace/plan-approval-overlay";
 import { QueuedMessageList } from "@/components/workspace/queued-message-list";
 import { ThreadTitle } from "@/components/workspace/thread-title";
 import { Welcome } from "@/components/workspace/welcome";
@@ -308,33 +311,39 @@ function ChatPageContent({
     return 0;
   }, [planCreatedEvent?.clarification_index, thread.values.plan?.clarification_index]);
 
-  const activeClarification = useMemo(() => {
+  const normalizedClarifications = useMemo(() => {
     const clarificationsFromEvent = Array.isArray(planCreatedEvent?.clarifications)
       ? planCreatedEvent?.clarifications
       : null;
     const clarificationsFromPlan = Array.isArray(thread.values.plan?.clarifications)
       ? thread.values.plan?.clarifications
       : null;
-    const clarifications = clarificationsFromEvent ?? clarificationsFromPlan ?? [];
-    const current = clarifications[activeClarificationIndex];
-    if (!current || typeof current !== "object") {
-      return null;
-    }
-    const question = typeof current.question === "string" ? current.question : "";
-    const options = Array.isArray(current.options)
-      ? current.options
-          .filter((option) => option && typeof option.label === "string" && option.label.trim().length > 0)
-          .map((option) => ({
-            label: String(option.label),
-            recommended: option.recommended === true,
-            description: option.description ?? null,
-          }))
-      : [];
-    return {
-      question,
-      options,
-    };
-  }, [activeClarificationIndex, planCreatedEvent?.clarifications, thread.values.plan?.clarifications]);
+    const source = clarificationsFromEvent ?? clarificationsFromPlan ?? [];
+    return source
+      .filter((entry) => Boolean(entry) && typeof entry === "object")
+      .map((entry) => {
+        const raw = entry as { question?: unknown; options?: unknown };
+        const question = typeof raw.question === "string" ? raw.question : "";
+        const options = Array.isArray(raw.options)
+          ? raw.options
+              .filter(
+                (option): option is { label: string; recommended?: unknown; description?: unknown } =>
+                  Boolean(option) &&
+                  typeof option === "object" &&
+                  typeof (option as { label?: unknown }).label === "string" &&
+                  ((option as { label: string }).label).trim().length > 0,
+              )
+              .map((option) => ({
+                label: String(option.label),
+                recommended: option.recommended === true,
+                description:
+                  typeof option.description === "string" ? option.description : null,
+              }))
+          : [];
+        return { question, options };
+      });
+  }, [planCreatedEvent?.clarifications, thread.values.plan?.clarifications]);
+
 
   const effectivePlanCreatedEvent = useMemo(() => {
     if (planCreatedEvent) {
@@ -481,7 +490,7 @@ function ChatPageContent({
     thread.isLoading,
   ]);
 
-  const handleClarifyPlan = useCallback((selectedOptionLabel: string) => {
+  const handleClarifyPlan = useCallback((clarificationIndex: number, selectedOptionLabel: string) => {
     const run = async () => {
       try {
         if (!selectedOptionLabel.trim() || isClarifyingPlan) {
@@ -492,7 +501,7 @@ function ChatPageContent({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            clarification_index: activeClarificationIndex,
+            clarification_index: clarificationIndex,
             selected_option_label: selectedOptionLabel,
           }),
         });
@@ -935,6 +944,13 @@ function ChatPageContent({
                   thread={thread}
                   liveNotices={[...generationNotices, ...uiNotices]}
                   liveThinkingContent={liveThinkingContent}
+                  paddingBottom={
+                    effectivePlanCreatedEvent && !isNewThread && effectivePlanEventKey !== hiddenPlanEventKey
+                      ? clarificationPending && normalizedClarifications.length > 0
+                        ? 400
+                        : 280
+                      : 160
+                  }
                 />
               </div>
             </div>
@@ -978,35 +994,13 @@ function ChatPageContent({
                       effectivePlanCreatedEvent && !isNewThread && effectivePlanEventKey !== hiddenPlanEventKey,
                     )}
                   />
-                  {effectivePlanCreatedEvent && !isNewThread && clarificationPending && activeClarification && (
-                    <div className="mb-2 rounded-lg border bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/30 dark:text-amber-100">
-                      {activeClarification.question ? (
-                        <p className="font-medium">{activeClarification.question}</p>
-                      ) : (
-                        <p className="font-medium">The planner needs a clarification before this plan can be executed.</p>
-                      )}
-                      {activeClarification.options.length > 0 ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {activeClarification.options.map((option) => (
-                            <button
-                              key={option.label}
-                              type="button"
-                              onClick={() => handleClarifyPlan(option.label)}
-                              disabled={isClarifyingPlan}
-                              className={cn(
-                                "rounded-md border px-2 py-1 text-xs",
-                                option.recommended
-                                  ? "border-amber-500 bg-amber-200/70 dark:bg-amber-700/40"
-                                  : "border-amber-300 bg-amber-100/60 dark:border-amber-700/60 dark:bg-amber-900/40",
-                                isClarifyingPlan && "opacity-60",
-                              )}
-                            >
-                              {option.label}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
+                  {effectivePlanCreatedEvent && !isNewThread && clarificationPending && normalizedClarifications.length > 0 && (
+                    <PlanClarificationPopup
+                      clarifications={normalizedClarifications}
+                      activeClarificationIndex={activeClarificationIndex}
+                      onClarify={handleClarifyPlan}
+                      isClarifying={isClarifyingPlan}
+                    />
                   )}
                   <InputBox
                     className={cn("bg-background/5 w-full")}
@@ -1030,7 +1024,7 @@ function ChatPageContent({
                       !clarificationPending &&
                       !(effectivePlanCreatedEvent.auto_approved && settings.context.auto_mode === true) ? (
                         <PlanApprovalOverlay
-                          planTitle={effectivePlanCreatedEvent.title}
+                          planPath={planReviewPath}
                           onExecute={handleExecutePlan}
                           onCancel={handleKeepEditingPlan}
                           onSubmitEdit={handleEditPlanSuggestion}
