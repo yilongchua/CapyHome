@@ -3,10 +3,12 @@
 Usage:
     PYTHONPATH=. uv run python -m src.tools.audit
     PYTHONPATH=. uv run python -m src.tools.audit --mode work --phase approved --vision --subagent
+    PYTHONPATH=. uv run python -m src.tools.audit --mode plan
 
 Renders a Markdown table of the LLM-facing tool surface for the given
-mode/phase/vision/subagent triple. Use this to review JSON edits before
-committing.
+mode/phase/vision/subagent triple. The mode argument also selects which
+catalog file (`internal_tools_plan.json` vs `internal_tools_work.json`) is
+loaded. Use this to review JSON edits before committing.
 """
 
 from __future__ import annotations
@@ -16,9 +18,20 @@ import sys
 from pathlib import Path
 
 from src.tools.loader import get_tool_policy, load_tool_definitions
-from src.tools.tools import get_available_tools
+from src.tools.tools import (
+    INTERNAL_TOOLS_JSON,
+    INTERNAL_TOOLS_PLAN_JSON,
+    INTERNAL_TOOLS_WORK_JSON,
+    get_available_tools,
+)
 
-DEFAULT_PATH = Path(__file__).resolve().parent / "internal_tools.json"
+
+def _catalog_path_for_mode(mode: str | None) -> Path:
+    if mode == "plan" and INTERNAL_TOOLS_PLAN_JSON.exists():
+        return INTERNAL_TOOLS_PLAN_JSON
+    if mode in {"work", "auto", None} and INTERNAL_TOOLS_WORK_JSON.exists():
+        return INTERNAL_TOOLS_WORK_JSON
+    return INTERNAL_TOOLS_JSON
 
 
 def _format_row(tool) -> str:
@@ -42,16 +55,18 @@ def _format_row(tool) -> str:
 
 
 def render(mode: str | None, phase: str | None, supports_vision: bool, subagent_enabled: bool) -> str:
-    defns = load_tool_definitions(DEFAULT_PATH)
+    catalog_path = _catalog_path_for_mode(mode)
+    defns = load_tool_definitions(catalog_path)
     tools = get_available_tools(
         include_mcp=False,
         subagent_enabled=subagent_enabled,
+        mode=mode,
     )
 
     lines: list[str] = []
     lines.append(f"# Tool audit (mode={mode or 'any'}, phase={phase or 'any'}, vision={supports_vision}, subagent={subagent_enabled})")
     lines.append("")
-    lines.append(f"`internal_tools.json` entries: **{len(defns)}**")
+    lines.append(f"`{catalog_path.name}` entries: **{len(defns)}**")
     lines.append(f"Resolved catalog size: **{len(tools)}**")
     lines.append("")
     lines.append("| name | endpoint | mode | phase | groups | flags | description |")

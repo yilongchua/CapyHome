@@ -94,7 +94,6 @@ class PlannerClarification:
 
 @dataclass
 class PlannerOutput:
-    trivial: bool = False
     title: str = "Execution Plan"
     summary: str = ""
     objective: str = ""
@@ -205,7 +204,6 @@ You are a planning assistant. Produce a structured execution plan for the user's
 
 Return ONLY valid JSON matching this exact schema (no prose, no markdown fences):
 {
-  "trivial": false,
   "title": "Short plan title (≤ 8 words)",
   "objective": "One paragraph objective describing the intended end state.",
   "summary": "1-2 sentence overview of what will be accomplished.",
@@ -245,11 +243,6 @@ Return ONLY valid JSON matching this exact schema (no prose, no markdown fences)
     }
   ]
 }
-
-TRIVIAL SIGNAL — if the request is clearly trivial (single factual lookup, greeting,
-simple calculation, definition request), return:
-  {"trivial": true}
-and nothing else.
 
 DEPENDENCY RULES:
 - depends_on lists IDs of todos that MUST complete before this one starts.
@@ -488,10 +481,6 @@ def _parse_plan_response(raw: str, max_steps: int) -> PlannerOutput:
             parse_ok=False,
         )
 
-    # Trivial signal
-    if payload.get("trivial"):
-        return PlannerOutput(trivial=True)
-
     title = str(payload.get("title") or "Execution Plan")
     objective = str(payload.get("objective") or payload.get("summary") or "").strip()
     summary = str(payload.get("summary") or "")
@@ -664,36 +653,34 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
 
     def _should_plan(self, state: PlannerState, runtime: Runtime) -> bool:
         plan = state.get("plan")
-        # Re-plan opportunity: if a draft plan already exists, the user has
-        # not answered a pending clarification, and a fresh HumanMessage has
-        # arrived since the last plan revision, run the planner again to
-        # incorporate the user's edit. The new plan reuses the same plan_id
-        # and bumps a `revision` counter — see before_model below.
+        # Re-plan opportunity: if a plan already exists in any non-clarifying
+        # state and a fresh HumanMessage has arrived since the last revision,
+        # run the planner again to incorporate the user's edit. The new plan
+        # reuses the same plan_id and bumps a `revision` counter — see
+        # before_model below. Plan Mode and Work Mode are separate graphs;
+        # re-planning here updates the plan artifact only, Work Mode runs
+        # independently against whichever plan was current when it started.
         if isinstance(plan, dict):
-            status = str(plan.get("status") or "").strip().lower()
-            if status == "draft" and not bool(plan.get("clarification_pending")):
-                if int(plan.get("revision") or 0) >= self._MAX_DRAFT_REVISIONS:
-                    append_runtime_event(
-                        runtime,
-                        {
-                            "source": "planner_middleware",
-                            "decision": "replan_capped",
-                            "plan_id": plan.get("plan_id"),
-                            "revision": plan.get("revision"),
-                        },
-                    )
-                    return False
-                if self._has_new_user_message_since_plan(state, plan):
-                    return True
-            return False
-        if state.get("todo_graph"):
-            return False
+            if bool(plan.get("clarification_pending")):
+                return False
+            if int(plan.get("revision") or 0) >= self._MAX_DRAFT_REVISIONS:
+                append_runtime_event(
+                    runtime,
+                    {
+                        "source": "planner_middleware",
+                        "decision": "replan_capped",
+                        "plan_id": plan.get("plan_id"),
+                        "revision": plan.get("revision"),
+                    },
+                )
+                return False
+            return self._has_new_user_message_since_plan(state, plan)
         messages = state.get("messages", []) or []
         human_count = sum(1 for msg in messages if getattr(msg, "type", None) == "human")
         ai_count = sum(1 for msg in messages if getattr(msg, "type", None) == "ai")
         mode = str(_runtime_context(runtime).get("mode") or "").strip().lower()
         # In Plan mode, allow re-planning in ongoing chats even when there are
-        # prior AI turns, as long as no active plan/todo graph is linked.
+        # prior AI turns.
         if mode == "plan":
             return human_count >= 1
         return human_count >= 1 and ai_count == 0
@@ -809,10 +796,6 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
             logger.exception("Planner LLM call failed; skipping planning")
             return None
 
-        if plan_output.trivial:
-            append_runtime_event(runtime, {"source": "planner_middleware", "decision": "llm_classified_trivial"})
-            return None
-
         if not plan_output.parse_ok:
             append_runtime_event(runtime, {"source": "planner_middleware", "decision": "parse_failed_fallback", "todo_count": len(plan_output.todos)})
 
@@ -840,13 +823,13 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
         artifact_paths: list[str] = []
         plan_path: str | None = None
         latest_alias_path: str | None = None
-        # Plan-edit reuse: if a draft plan already exists and the user is
-        # refining it, preserve plan_id and bump revision. This keeps plan.md
-        # history coherent and lets the frontend update the same popup in place.
+        # Plan-edit reuse: if a plan already exists in any non-clarifying state
+        # and the user is refining it, preserve plan_id and bump revision. This
+        # keeps plan.md history coherent and lets the frontend update the same
+        # popup in place. Mirrors the gating in ``_should_plan``.
         existing_plan = state.get("plan") if isinstance(state.get("plan"), dict) else None
         is_replan = (
             isinstance(existing_plan, dict)
-            and str(existing_plan.get("status") or "").strip().lower() == "draft"
             and not bool(existing_plan.get("clarification_pending"))
         )
         if is_replan:

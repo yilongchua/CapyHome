@@ -54,7 +54,6 @@ _SOURCE_STAGE: dict[str, str] = {
 
 _TRACEABLE_RUNTIME_EVENTS = {
     "plan_created",
-    "skipped_trivial",
     "parse_failed_fallback",
     "rule_fail",
     "llm_verdict",

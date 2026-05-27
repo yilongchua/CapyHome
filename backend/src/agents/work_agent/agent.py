@@ -792,7 +792,7 @@ def _build_work_agent(config: RunnableConfig, *, prompt_template_fn=None):
         )
         return create_agent(
             model=chat_model,
-            tools=get_available_tools(model_name=model_name, subagent_enabled=params.subagent_enabled) + [setup_agent],
+            tools=get_available_tools(model_name=model_name, subagent_enabled=params.subagent_enabled, mode=params.mode) + [setup_agent],
             middleware=_build_middlewares(config, model_name=model_name, model_router=router),
             system_prompt=system_prompt,
             state_schema=ThreadState,
@@ -806,6 +806,7 @@ def _build_work_agent(config: RunnableConfig, *, prompt_template_fn=None):
             model_name=model_name,
             groups=agent_config.tool_groups if agent_config else None,
             subagent_enabled=params.subagent_enabled,
+            mode=params.mode,
         ),
         middleware=_build_middlewares(
             config,

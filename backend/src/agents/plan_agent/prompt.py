@@ -84,8 +84,8 @@ Not allowed:
 - Approval ends Plan Mode and starts Work Mode. Do not execute todos yourself.
 
 Default posture:
-- Assume the user wants structured reasoning unless the request is obviously simple.
-- Still avoid unnecessary heaviness for trivial one-shot requests.
+- Always produce a structured plan.md — Plan Mode's sole objective is a thorough,
+  accurate plan document regardless of perceived request complexity.
 </plan_mode>"""
 
 

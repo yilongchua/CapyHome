@@ -415,8 +415,10 @@ def render_plan_md(
     current_status_text = current_status or "Plan status is not yet available."
     last_synced = last_synced_at or (created_at or "unknown").strip()
 
+    plan_status_label = _normalize_plan_status(status)
     body = (
         f"# {title}\n\n"
+        f"**Plan status:** `{plan_status_label}`\n\n"
         "## Objective\n"
         f"{objective_text}\n\n"
         "## Current Status\n"

@@ -15,7 +15,6 @@ import { cn } from "@/lib/utils";
 
 const VISIBLE_EVENT_TYPES = new Set([
   "plan_created",
-  "skipped_trivial",
   "tool_call_start",
   "tool_call_end",
   "task_started",
@@ -129,10 +128,6 @@ function summarizeEvent(event: ExecutionTraceEvent): string | null {
 
   if (event.event_type === "plan_created") {
     return "Planning response.";
-  }
-
-  if (event.event_type === "skipped_trivial") {
-    return "Skipping the heavy planning path for a simple request.";
   }
 
   if (event.event_type === "tool_call_start") {

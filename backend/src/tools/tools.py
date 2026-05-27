@@ -14,7 +14,30 @@ from src.tools.loader import build_structured_tool, filter_mcp_tools_by_policy, 
 logger = logging.getLogger(__name__)
 
 INTERNAL_TOOLS_JSON = Path(__file__).resolve().parent / "internal_tools.json"
+INTERNAL_TOOLS_PLAN_JSON = Path(__file__).resolve().parent / "internal_tools_plan.json"
+INTERNAL_TOOLS_WORK_JSON = Path(__file__).resolve().parent / "internal_tools_work.json"
 EXTERNAL_TOOLS_JSON = Path(__file__).resolve().parent / "external_tools.json"
+
+
+def _resolve_internal_tools_path(mode: str | None) -> Path:
+    """Pick the per-mode tool catalog file, falling back to the combined legacy file.
+
+    `internal_tools_plan.json` and `internal_tools_work.json` carry mode-tailored
+    descriptions so the LLM-facing contract for a tool can differ between plan
+    and work without coupling the two surfaces. If the per-mode file is missing
+    we fall back to `internal_tools.json`, which is the legacy single-file path
+    that still works for callers that haven't started passing mode through.
+    """
+    mode_lower = (mode or "").strip().lower()
+    if mode_lower == "plan" and INTERNAL_TOOLS_PLAN_JSON.exists():
+        return INTERNAL_TOOLS_PLAN_JSON
+    if mode_lower in {"work", "auto"} and INTERNAL_TOOLS_WORK_JSON.exists():
+        return INTERNAL_TOOLS_WORK_JSON
+    # Unset or unknown mode → prefer the work file (matches default runtime),
+    # then the legacy combined file.
+    if INTERNAL_TOOLS_WORK_JSON.exists() and not mode_lower:
+        return INTERNAL_TOOLS_WORK_JSON
+    return INTERNAL_TOOLS_JSON
 
 BUILTIN_TOOLS = [
     present_file_tool,
@@ -57,6 +80,7 @@ def get_available_tools(
     include_mcp: bool = True,
     model_name: str | None = None,
     subagent_enabled: bool = False,
+    mode: str | None = None,
 ) -> list[BaseTool]:
     """Get all available tools from config.
 
@@ -68,6 +92,10 @@ def get_available_tools(
         include_mcp: Whether to include tools from MCP servers (default: True).
         model_name: Optional model name to determine if vision tools should be included.
         subagent_enabled: Whether to include subagent tools (task, task_status).
+        mode: Optional runtime mode (`plan`, `work`, or `auto`). Selects between
+            `internal_tools_plan.json` and `internal_tools_work.json` so the
+            LLM-facing tool descriptions can be tailored per mode. Defaults to
+            the work file when unset.
 
     Returns:
         List of available tools.
@@ -135,6 +163,7 @@ def get_available_tools(
         builtin_tools = _build_builtin_tools_from_json(
             subagent_enabled=subagent_enabled,
             supports_vision=supports_vision,
+            mode=mode,
         )
     else:
         # Legacy path — keep the hard-coded BUILTIN_TOOLS until Phase 6 cutover.
@@ -167,21 +196,25 @@ def get_available_tools(
     return deduped
 
 
-def _build_builtin_tools_from_json(*, subagent_enabled: bool, supports_vision: bool) -> list[BaseTool]:
-    """Materialize built-in/sandbox tools from internal_tools.json.
+def _build_builtin_tools_from_json(*, subagent_enabled: bool, supports_vision: bool, mode: str | None = None) -> list[BaseTool]:
+    """Materialize built-in/sandbox tools from the mode-specific JSON catalog.
 
-    Applies the same declarative filters the legacy path enforces imperatively:
-    community on/off overrides, subagent gating (`requires_subagent_enabled`),
-    and vision gating (`requires_vision`). Tools whose handlers fail to resolve
-    are logged and skipped so a single bad entry never breaks the agent.
+    Picks `internal_tools_plan.json` or `internal_tools_work.json` based on
+    `mode` (falls back to the combined `internal_tools.json` when the split
+    files are missing). Applies the same declarative filters the legacy path
+    enforces imperatively: community on/off overrides, subagent gating
+    (`requires_subagent_enabled`), and vision gating (`requires_vision`).
+    Tools whose handlers fail to resolve are logged and skipped so a single
+    bad entry never breaks the agent.
 
     Community tools listed in BUILTIN_TOOLS that have no JSON entry yet are
     appended at the end so flipping the flag doesn't shrink the catalog.
     """
+    catalog_path = _resolve_internal_tools_path(mode)
     try:
-        defns = load_tool_definitions(INTERNAL_TOOLS_JSON)
+        defns = load_tool_definitions(catalog_path)
     except Exception:
-        logger.exception("Failed to load internal_tools.json; falling back to legacy BUILTIN_TOOLS")
+        logger.exception("Failed to load %s; falling back to legacy BUILTIN_TOOLS", catalog_path.name)
         return list(BUILTIN_TOOLS) + (list(SUBAGENT_TOOLS) if subagent_enabled else [])
 
     tools: list[BaseTool] = []

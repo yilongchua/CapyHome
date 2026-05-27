@@ -263,12 +263,8 @@ def _to_activity_event(runtime: Runtime, runtime_event: dict[str, Any]) -> Activ
     elif event_type == "plan_created":
         todo_count = payload.get("todo_count")
         line = f"Plan created with {todo_count} todo(s)" if isinstance(todo_count, int) else "Plan created"
-    elif event_type == "skipped_trivial":
-        line = "Planner classified this as a simple request"
     elif event_type == "skipped_direct_answer":
         line = "Planner will answer directly without a separate plan"
-    elif event_type == "llm_classified_trivial":
-        line = "Planner confirmed this does not need a separate plan"
     elif event_type == "parse_failed_fallback":
         line = "Planner is using a fallback plan structure"
     elif event_type == "plan_auto_approved":

@@ -24,9 +24,7 @@ function isTerminalKind(kind: string) {
     normalized.includes("tool_call_end") ||
     normalized.includes("plan_created") ||
     normalized.includes("plan_auto_approved") ||
-    normalized.includes("skipped_trivial") ||
     normalized.includes("skipped_direct_answer") ||
-    normalized.includes("llm_classified_trivial") ||
     normalized.includes("parse_failed_fallback")
   );
 }
@@ -55,12 +53,7 @@ function operationIdForEvent(event: ActivityEvent): string | null {
   if (kind === "planning_started" || kind === "plan_created" || kind === "plan_auto_approved") {
     return `planner:todos:${event.run_id}`;
   }
-  if (
-    kind === "skipped_trivial" ||
-    kind === "skipped_direct_answer" ||
-    kind === "llm_classified_trivial" ||
-    kind === "parse_failed_fallback"
-  ) {
+  if (kind === "skipped_direct_answer" || kind === "parse_failed_fallback") {
     return `planner:complexity:${event.run_id}`;
   }
   if (source === "plan_evaluator") {
@@ -91,8 +84,8 @@ function labelForEvent(event: ActivityEvent, status: ProgressOperationStatus): s
     const count = event.payload?.todo_count;
     return typeof count === "number" ? `Planner created ${count} todo(s)` : "Planner created todos";
   }
-  if (kind === "skipped_trivial" || kind === "skipped_direct_answer" || kind === "llm_classified_trivial") {
-    return "Planner evaluated request complexity";
+  if (kind === "skipped_direct_answer") {
+    return "Planner answered directly without a separate plan";
   }
   if (kind === "parse_failed_fallback") {
     return "Planner evaluated request complexity and used a fallback";

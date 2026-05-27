@@ -9,7 +9,6 @@ import { type PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { Badge } from "@/components/ui/badge";
 import { AdaptationNotice } from "@/components/workspace/adaptation-notice";
 import { useDirectory } from "@/components/workspace/artifacts/context";
-import { MountFolderBadge } from "@/components/workspace/chat-ui/mount-folder-badge";
 import {
   ChatBox,
   useThreadChat,
@@ -971,14 +970,6 @@ function ChatPageContent({
                     onDismiss={queueControls.dismissQueued}
                   />
                 </div>
-                {!isNewThread && mountedFolder && (
-                  <div className="mb-1 flex justify-end px-1">
-                    <MountFolderBadge
-                      threadId={threadId}
-                      className="bg-transparent border-none p-0 shadow-none backdrop-blur-none rounded-none"
-                    />
-                  </div>
-                )}
                   <div className="relative">
                   {adaptationEvent && !isNewThread && (
                     <AdaptationNotice

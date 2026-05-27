@@ -206,7 +206,8 @@ def _default_body(plan: dict[str, Any], nodes: list[dict[str, Any]]) -> str:
     ``render_plan_md`` body via ``body_renderer`` for the rich human view.
     """
     title = plan.get("title") or "Execution Plan"
-    lines = [f"# {title}", ""]
+    status = str(plan.get("status") or "draft").strip().lower() or "draft"
+    lines = [f"# {title}", "", f"**Plan status:** `{status}`", ""]
     objective = (plan.get("objective") or plan.get("summary") or "").strip()
     if objective:
         lines.extend(["## Objective", objective, ""])

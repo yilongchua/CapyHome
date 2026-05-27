@@ -71,6 +71,7 @@ import { Button } from "../ui/button";
 
 import { AttachmentPopup } from "./chat-ui/attachment-popup";
 import { FileMentionDropdown } from "./chat-ui/file-mention-dropdown";
+import { MountFolderBadge } from "./chat-ui/mount-folder-badge";
 import {
   SlashCommandDropdown,
   type SlashCommandOption,
@@ -1267,15 +1268,35 @@ export function InputBox({
           textInput.setInput("");
         }}
       />
-      {!isPlanMode && !disabled && (
-        <div className="text-muted-foreground/70 mb-1.5 flex items-center justify-center gap-1 text-[11px] leading-none">
-          <span>Complex task? Try Plan Mode</span>
-          <span aria-hidden>→</span>
-          <kbd className="border-border/60 bg-muted/60 rounded-sm border px-1 py-px font-mono text-[10px]">
-            Shift + Tab
-          </kbd>
-        </div>
-      )}
+      {(() => {
+        const showPlanHint =
+          !isPlanMode && !disabled && /\bplan\b/i.test(textInput.value ?? "");
+        const showMountBadge = !isNewThread && Boolean(mountedFolder);
+        if (!showPlanHint && !showMountBadge) {
+          return null;
+        }
+        return (
+          <div className="mb-1.5 flex items-center justify-between gap-2 px-1 leading-none">
+            <div className="flex min-w-0 items-center gap-1 text-[11px] text-[#4a2d1a]">
+              {showPlanHint ? (
+                <>
+                  <span>Complex task? Try Plan Mode</span>
+                  <span aria-hidden>→</span>
+                  <kbd className="border-border/60 bg-muted/60 rounded-sm border px-1 py-px font-mono text-[10px]">
+                    Shift + Tab
+                  </kbd>
+                </>
+              ) : null}
+            </div>
+            {showMountBadge ? (
+              <MountFolderBadge
+                threadId={threadId}
+                className="bg-transparent border-none p-0 shadow-none backdrop-blur-none rounded-none"
+              />
+            ) : null}
+          </div>
+        );
+      })()}
       <PromptInput
         className={cn(
           "bg-background/85 rounded-2xl backdrop-blur-sm transition-all duration-300 ease-out *:data-[slot='input-group']:rounded-2xl",
