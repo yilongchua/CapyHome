@@ -587,7 +587,7 @@ export function InputBox({
         apiClient.threads.create as (payload?: { graphId?: string }) => Promise<{
           thread_id: string;
         }>
-      )({ graphId: "lead_agent" });
+      )({ graphId: "work_agent" });
       const createdThreadId = createdThread.thread_id;
       const title = "mount-drive";
 

@@ -89,7 +89,7 @@ class ExecutePlanResponse(BaseModel):
     )
     assistant_id: str | None = Field(
         default=None,
-        description="Assistant/graph id of the Work Mode run (e.g. 'lead_agent').",
+        description="Assistant/graph id of the Work Mode run (e.g. 'work_agent').",
     )
 
 
@@ -181,7 +181,7 @@ def _requested_model_from_values(values: dict[str, Any]) -> str | None:
     return None
 
 
-_WORK_MODE_ASSISTANT_ID = "lead_agent"
+_WORK_MODE_ASSISTANT_ID = "work_agent"
 _WORK_MODE_TRIGGER_CONTENT = "<execute_plan/>"
 
 
@@ -205,8 +205,9 @@ async def _create_work_mode_run(
     """
     context: dict[str, Any] = {
         "thread_id": thread_id,
-        "mode": "work",
-        "is_plan_mode": False,
+        "current_mode": "work",
+        "mode": "work",  # legacy alias; remove after step 8
+        "is_plan_mode": False,  # legacy dual-write; remove after step 8
         "background_followup": False,
         "plan_behavior": "work_interactive",
         "subagent_enabled": True,

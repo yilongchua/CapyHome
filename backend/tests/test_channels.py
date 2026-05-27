@@ -436,7 +436,7 @@ class TestChannelManager:
             mock_client.runs.wait.assert_called_once()
             call_args = mock_client.runs.wait.call_args
             assert call_args[0][0] == "test-thread-123"  # thread_id
-            assert call_args[0][1] == "lead_agent"  # assistant_id
+            assert call_args[0][1] == "work_agent"  # assistant_id
             assert call_args[1]["input"]["messages"][0]["content"] == "hi"
 
             assert len(outbound_received) == 1

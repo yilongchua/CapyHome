@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Debug script for lead_agent.
+Debug script for work_agent.
 Run this file directly in VS Code with breakpoints.
 
 Usage:
@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 
-from src.agents import make_lead_agent
+from src.agents import make_work_agent
 
 load_dotenv()
 
@@ -47,16 +47,17 @@ async def main():
         "configurable": {
             "thread_id": "debug-thread-001",
             "thinking_enabled": True,
-            "is_plan_mode": True,
+            "current_mode": "plan",
+            "is_plan_mode": True,  # legacy dual-write; remove after step 8
             # Uncomment to use a specific model
             "model_name": "kimi-k2.5",
         }
     }
 
-    agent = make_lead_agent(config)
+    agent = make_work_agent(config)
 
     print("=" * 50)
-    print("Lead Agent Debug Mode")
+    print("Work Agent Debug Mode")
     print("Type 'quit' or 'exit' to stop")
     print("=" * 50)
 

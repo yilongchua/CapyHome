@@ -15,12 +15,13 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LANGGRAPH_URL = "http://localhost:2024"
 DEFAULT_GATEWAY_URL = "http://localhost:8001"
-DEFAULT_ASSISTANT_ID = "lead_agent"
+DEFAULT_ASSISTANT_ID = "work_agent"
 
 DEFAULT_RUN_CONFIG: dict[str, Any] = {"recursion_limit": 100}
 DEFAULT_RUN_CONTEXT: dict[str, Any] = {
     "thinking_enabled": True,
-    "is_plan_mode": False,
+    "current_mode": "work",
+    "is_plan_mode": False,  # legacy dual-write; remove after step 8
     "subagent_enabled": False,
 }
 

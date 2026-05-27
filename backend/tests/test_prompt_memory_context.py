@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
-from src.agents.lead_agent import prompt as prompt_module
-from src.agents.lead_agent.prompt_cache import invalidate
+from src.agents.work_agent import prompt as prompt_module
+from src.agents.work_agent.prompt_cache import invalidate
 from src.agents.memory import prompt as memory_prompt_module
 
 

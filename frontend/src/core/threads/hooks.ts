@@ -1079,7 +1079,7 @@ export function useThreadStream({
 
   const thread = useStream<AgentThreadState>({
     client: getAPIClient(isMock),
-    assistantId: "lead_agent",
+    assistantId: "work_agent",
     threadId: onStreamThreadId,
     reconnectOnMount: true,
     // Guard: history-backed SDK APIs throw if this is false.

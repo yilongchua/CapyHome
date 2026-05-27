@@ -99,14 +99,14 @@ class MetricsMiddleware(AgentMiddleware[AgentState]):
     def before_model(self, state: AgentState, runtime: Runtime) -> dict | None:
         if not get_metrics_config().enabled:
             return None
-        increment_metric("lead_agent.before_model", self._base_labels(runtime))
+        increment_metric("work_agent.before_model", self._base_labels(runtime))
         return None
 
     @override
     def after_model(self, state: AgentState, runtime: Runtime) -> dict | None:
         if not get_metrics_config().enabled:
             return None
-        increment_metric("lead_agent.after_model", self._base_labels(runtime))
+        increment_metric("work_agent.after_model", self._base_labels(runtime))
         return None
 
     @override
@@ -114,9 +114,9 @@ class MetricsMiddleware(AgentMiddleware[AgentState]):
         if not get_metrics_config().enabled:
             return handler(request)
         labels = self._base_labels(request.runtime)
-        increment_metric("lead_agent.model_call.start", labels)
+        increment_metric("work_agent.model_call.start", labels)
         result = handler(request)
-        increment_metric("lead_agent.model_call.end", labels)
+        increment_metric("work_agent.model_call.end", labels)
         return result
 
     @override
@@ -124,9 +124,9 @@ class MetricsMiddleware(AgentMiddleware[AgentState]):
         if not get_metrics_config().enabled:
             return await handler(request)
         labels = self._base_labels(request.runtime)
-        increment_metric("lead_agent.model_call.start", labels)
+        increment_metric("work_agent.model_call.start", labels)
         result = await handler(request)
-        increment_metric("lead_agent.model_call.end", labels)
+        increment_metric("work_agent.model_call.end", labels)
         return result
 
     @override
@@ -137,9 +137,9 @@ class MetricsMiddleware(AgentMiddleware[AgentState]):
             **self._base_labels(request.runtime),
             "tool": request.tool_call.get("name") or "unknown",
         }
-        increment_metric("lead_agent.tool_call.start", labels)
+        increment_metric("work_agent.tool_call.start", labels)
         result = handler(request)
-        increment_metric("lead_agent.tool_call.end", labels)
+        increment_metric("work_agent.tool_call.end", labels)
         return result
 
     @override
@@ -150,7 +150,7 @@ class MetricsMiddleware(AgentMiddleware[AgentState]):
             **self._base_labels(request.runtime),
             "tool": request.tool_call.get("name") or "unknown",
         }
-        increment_metric("lead_agent.tool_call.start", labels)
+        increment_metric("work_agent.tool_call.start", labels)
         result = await handler(request)
-        increment_metric("lead_agent.tool_call.end", labels)
+        increment_metric("work_agent.tool_call.end", labels)
         return result

@@ -696,20 +696,49 @@ def _inject_trace_metadata(
     )
 
 
-def make_work_agent(config: RunnableConfig, *, prompt_template_fn=None):
-    """Build the work-mode agent.
+def make_work_agent(config: RunnableConfig):
+    """Graph entry point for the ``work_agent`` LangGraph node.
 
-    ``prompt_template_fn`` lets the plan_agent factory inject its own prompt
-    composer (``plan_agent.prompt.apply_prompt_template``) without duplicating
-    middleware/tool/model setup. Defaults to the work-mode prompt template.
+    LangGraph's factory loader requires the registered callable's parameters
+    to be ``ServerRuntime`` and/or ``RunnableConfig`` only — any extra kwarg
+    (even with a default) causes graph load to fail. This function is the
+    thin wrapper that satisfies that contract; the real builder is
+    :func:`_build_work_agent`, which ``make_plan_agent`` calls directly when
+    it needs to inject the plan-mode prompt template.
+    """
+    return _build_work_agent(config)
+
+
+def _build_work_agent(config: RunnableConfig, *, prompt_template_fn=None):
+    """Build a mode-aware agent.
+
+    Backs both the ``work_agent`` and ``plan_agent`` LangGraph entry points.
+    Selects the prompt template based on ``current_mode`` (or accepts an
+    explicit ``prompt_template_fn`` override from :func:`make_plan_agent`).
+    Middleware activation is driven by the same ``current_mode`` field via
+    ``_RegistryContext.is_plan_mode``.
+
+    ``prompt_template_fn`` precedence:
+    1. Explicit kwarg (from ``make_plan_agent``).
+    2. Auto-selected based on ``current_mode``: plan_agent's template for
+       ``"plan"``, work_agent's template otherwise. This preserves plan-mode
+       behavior when the frontend addresses the ``work_agent`` graph with
+       ``mode="plan"`` in configurable, which is the current default routing.
     """
     # Lazy import to avoid circular dependency
     from src.tools import get_available_tools
     from src.tools.builtins import setup_agent
 
-    prompt_template_fn = prompt_template_fn or apply_prompt_template
-
     params = _extract_runtime_params(config)
+
+    if prompt_template_fn is None:
+        if params.mode == "plan":
+            # Lazy import keeps work_agent free of a hard dep on plan_agent
+            # at module load (plan_agent imports work_agent's prompt module).
+            from src.agents.plan_agent.prompt import apply_prompt_template as _plan_template
+            prompt_template_fn = _plan_template
+        else:
+            prompt_template_fn = apply_prompt_template
     runtime_cfg = config.get("configurable") or {}
     current_turn_text = str(runtime_cfg.get("current_turn_text") or runtime_cfg.get("original_user_request") or runtime_cfg.get("user_prompt") or "")
 

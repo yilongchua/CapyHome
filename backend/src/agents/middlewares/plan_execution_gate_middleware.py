@@ -84,7 +84,8 @@ def _is_read_only_tool(tool_name: str) -> bool:
 
 def _is_plan_mode(runtime: Any) -> bool:
     context = getattr(runtime, "context", None) or {}
-    return str(context.get("mode") or "").strip().lower() == "plan"
+    raw = context.get("current_mode") or context.get("mode") or ("plan" if context.get("is_plan_mode") else "")
+    return str(raw).strip().lower() == "plan"
 
 
 def _is_plan_safe_bash(command: str) -> bool:

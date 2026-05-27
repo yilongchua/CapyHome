@@ -293,6 +293,7 @@ def render_plan_md(
     clarifications: list[dict[str, Any]] | None = None,
     clarification_answers: list[dict[str, str]] | None = None,
     last_synced_at: str | None = None,
+    include_frontmatter: bool = True,
 ) -> str:
     completed = sum(1 for n in nodes if str(n.get("status") or "") == "completed")
     total = len(nodes)
@@ -414,18 +415,7 @@ def render_plan_md(
     current_status_text = current_status or "Plan status is not yet available."
     last_synced = last_synced_at or (created_at or "unknown").strip()
 
-    return (
-        "---\n"
-        "plan_version: 4\n"
-        f'plan_id: "{(plan_id or "").strip()}"\n'
-        f'domain: "{domain}"\n'
-        f'title: "{frontmatter_title}"\n'
-        f'status: "{_normalize_plan_status(status)}"\n'
-        f'created_at: "{(created_at or "unknown").strip()}"\n'
-        f'last_synced_at: "{last_synced}"\n'
-        f"total_todos: {total}\n"
-        f"completed_todos: {completed}\n"
-        "---\n\n"
+    body = (
         f"# {title}\n\n"
         "## Objective\n"
         f"{objective_text}\n\n"
@@ -459,6 +449,29 @@ def render_plan_md(
         f"{acceptance_block}\n\n"
         "## Execution DAG\n"
         f"{dag_block}\n"
+    )
+
+    if not include_frontmatter:
+        return body
+
+    # Legacy v4 frontmatter — superseded by the canonical v5 frontmatter
+    # written via ``serialize_plan_md`` in ``common/handoff.py``. Callers that
+    # use ``serialize_plan_md`` pass ``include_frontmatter=False`` to compose
+    # the canonical frontmatter with this body. The v4 fallback is kept for
+    # direct calls that bypass the canonical serializer.
+    return (
+        "---\n"
+        "plan_version: 4\n"
+        f'plan_id: "{(plan_id or "").strip()}"\n'
+        f'domain: "{domain}"\n'
+        f'title: "{frontmatter_title}"\n'
+        f'status: "{_normalize_plan_status(status)}"\n'
+        f'created_at: "{(created_at or "unknown").strip()}"\n'
+        f'last_synced_at: "{last_synced}"\n'
+        f"total_todos: {total}\n"
+        f"completed_todos: {completed}\n"
+        "---\n\n"
+        + body
     )
 
 
@@ -506,27 +519,58 @@ def sync_handoff_files_from_state(state: dict[str, Any]) -> list[str]:
 
     clarifications_raw = plan.get("clarifications") if isinstance(plan.get("clarifications"), list) else None
     clarification_answers_raw = plan.get("clarification_answers") if isinstance(plan.get("clarification_answers"), list) else None
-    plan_md = render_plan_md(
-        title,
-        summary,
-        nodes,
-        domain=domain,
-        plan_id=str(plan.get("plan_id") or "").strip() or None,
-        status=str(plan.get("status") or "").strip() or None,
-        created_at=str(plan.get("created_at") or "").strip() or None,
-        objective=str(plan.get("objective") or "").strip() or None,
-        assumptions=plan.get("assumptions") if isinstance(plan.get("assumptions"), list) else None,
-        constraints=plan.get("constraints") if isinstance(plan.get("constraints"), list) else None,
-        risks=plan.get("risks") if isinstance(plan.get("risks"), list) else None,
-        acceptance_criteria=plan.get("acceptance_criteria") if isinstance(plan.get("acceptance_criteria"), list) else None,
-        current_status=_current_status_line(nodes, plan, file_changes),
-        file_changes=file_changes,
-        runtime_artifacts=runtime_artifacts,
-        evaluator_findings=evaluator_findings,
-        clarifications=clarifications_raw,
-        clarification_answers=clarification_answers_raw,
-        last_synced_at=str(plan.get("last_synced_at") or "").strip() or str(plan.get("created_at") or "").strip() or None,
-    )
+    last_synced = str(plan.get("last_synced_at") or "").strip() or str(plan.get("created_at") or "").strip() or None
+    canonical_plan: dict[str, Any] = {
+        "plan_id": str(plan.get("plan_id") or "").strip(),
+        "title": title,
+        "status": str(plan.get("status") or "").strip(),
+        "domain": domain,
+        "target_mode": str(plan.get("target_mode") or "work"),
+        "created_at": str(plan.get("created_at") or "").strip(),
+        "last_synced_at": last_synced or "",
+        "objective": str(plan.get("objective") or "").strip(),
+        "summary": summary,
+        "assumptions": plan.get("assumptions") if isinstance(plan.get("assumptions"), list) else [],
+        "constraints": plan.get("constraints") if isinstance(plan.get("constraints"), list) else [],
+        "risks": plan.get("risks") if isinstance(plan.get("risks"), list) else [],
+        "acceptance_criteria": plan.get("acceptance_criteria") if isinstance(plan.get("acceptance_criteria"), list) else [],
+        "clarifications": clarifications_raw or [],
+        "clarification_answers": clarification_answers_raw or [],
+        "clarification_pending": bool(plan.get("clarification_pending", False)),
+        "clarification_resolved": bool(plan.get("clarification_resolved", False)),
+    }
+    canonical_graph: dict[str, Any] = {
+        "nodes": nodes,
+        "ready_ids": list((state.get("todo_graph") or {}).get("ready_ids") or []),
+    }
+
+    def _render_body(_plan: dict, _nodes: list[dict]) -> str:
+        return render_plan_md(
+            title,
+            summary,
+            _nodes,
+            domain=domain,
+            plan_id=canonical_plan["plan_id"] or None,
+            status=canonical_plan["status"] or None,
+            created_at=canonical_plan["created_at"] or None,
+            objective=canonical_plan["objective"] or None,
+            assumptions=canonical_plan["assumptions"] or None,
+            constraints=canonical_plan["constraints"] or None,
+            risks=canonical_plan["risks"] or None,
+            acceptance_criteria=canonical_plan["acceptance_criteria"] or None,
+            current_status=_current_status_line(_nodes, plan, file_changes),
+            file_changes=file_changes,
+            runtime_artifacts=runtime_artifacts,
+            evaluator_findings=evaluator_findings,
+            clarifications=clarifications_raw,
+            clarification_answers=clarification_answers_raw,
+            last_synced_at=last_synced,
+            include_frontmatter=False,
+        )
+
+    from src.agents.common.handoff import serialize_plan_md  # local import to avoid module-load cycle
+
+    plan_md = serialize_plan_md(canonical_plan, canonical_graph, body_renderer=_render_body)
 
     changed: list[str] = []
     for key in ("plan_path", "latest_alias_path"):

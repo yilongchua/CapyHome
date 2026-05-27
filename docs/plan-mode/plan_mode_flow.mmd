@@ -1,0 +1,94 @@
+flowchart TD
+    %% Triggers
+    U([User query])
+    UI{{Plan-Mode chip on?}}
+    U --> UI
+    UI -->|Yes| FE_PLAN[Frontend sets<br/>context.mode = plan]
+    UI -->|No| FE_WORK[Frontend sets<br/>context.mode = work]
+
+    FE_PLAN -->|POST stream| LG_PLAN[(LangGraph<br/>plan_agent graph)]
+    FE_WORK -->|POST stream| LG_WORK[(LangGraph<br/>work_agent graph)]
+
+    %% Auto-escalation
+    LG_WORK --> WMM[WorkModeMiddleware<br/>before_model]
+    WMM --> CC{classify_complexity}
+    CC -->|complex + no plan + auto_mode| ESC[_spawn_plan_rerun<br/>daemon thread]
+    ESC -.->|re-invoke same thread| LG_PLAN
+    CC -->|moderate / trivial| WM_EXEC[Execute work loop]
+
+    %% Plan agent factory
+    LG_PLAN --> MAKE[make_plan_agent<br/>forces current_mode=plan]
+    MAKE --> BUILD[_build_work_agent<br/>prompt_template_fn = plan_apply_prompt_template]
+    BUILD --> REG[_build_middleware_registry<br/>ctx.is_plan_mode = True]
+    REG --> PROMPT[apply_prompt_template<br/>work_base + PLAN_MODE_SECTION]
+
+    %% First model cycle
+    PROMPT --> BM[before_model chain]
+    BM --> SUMM[SummarizationMiddleware<br/>plan-mode override]
+    SUMM --> SKILL[SkillDisclosureMiddleware]
+    SKILL --> PM[PlannerMiddleware.before_model]
+
+    PM --> TRIV{trivial?<br/>direct answer?}
+    TRIV -->|yes| FAST[Skip planning,<br/>let model respond]
+    TRIV -->|no| LLM1[(Planner LLM<br/>PLANNER_SYSTEM_PROMPT)]
+    LLM1 --> PARSE[_parse_plan_response<br/>normalize_todo_nodes]
+    PARSE --> CLAR[_ensure_research_<br/>clarifications]
+    CLAR --> WRITE[serialize_plan_md<br/>plan_version 5]
+    WRITE --> DISK[(workspace/plan.md<br/>+ plans/plan-TS-slug.md)]
+    WRITE --> SSE1>SSE: plan_created]
+
+    PARSE --> PE[PlanEvaluatorMiddleware<br/>timeout-bounded LLM check]
+    PE -->|revised_todos| GRAPH[Update todo_graph]
+    PE -->|ok / timeout| GRAPH
+
+    %% Tool filtering
+    GRAPH --> PTF[PhaseToolFilterMiddleware<br/>wrap_model_call]
+    PTF --> HIDDEN[Drop: web_search, task,<br/>write_file, str_replace,<br/>query_knowledge_vault]
+    PTF --> KEPT[Keep: write_todos,<br/>scope_search, recall,<br/>ask_user_for_clarification,<br/>read-only bash/ls/read_file]
+
+    KEPT --> LLM2[(Main LLM<br/>plan-mode prompt + restricted tools)]
+    LLM2 --> GATE[PlanExecutionGateMiddleware<br/>wrap_tool_call - backstop]
+    GATE -->|scope_search query| CLS[(Scope classifier LLM)]
+    CLS -->|scope| ALLOW[Allow tool call]
+    CLS -->|content| BLOCK["Return [plan_gate]<br/>ToolMessage block"]
+
+    %% User interaction loop
+    SSE1 --> POPUP[Frontend Execute Plan popup]
+    POPUP --> ACTION{User action}
+    ACTION -->|Answer clarification| CLARIFY[POST /plan/clarify]
+    CLARIFY --> APPLY[apply_clarification_progress<br/>advance index]
+    APPLY -.->|next turn| PM
+    ACTION -->|Edit plan.md| EDIT[User edits file on disk]
+    ACTION -->|Click Execute Plan| EXEC[POST /plan/execute]
+    ACTION -->|More chat| PM
+
+    %% Handoff
+    EXEC --> APPROVE[status = approved<br/>mark_handoff_requested]
+    APPROVE --> NEWRUN[_create_work_mode_run<br/>runs.create work_agent]
+    EDIT -.-> LOAD
+    NEWRUN --> WORK[(work_agent run)]
+    WORK --> LOAD[_load_canonical_plan_overrides<br/>parse_plan_md from disk]
+    LOAD --> WMM2[WorkModeMiddleware<br/>drives todo loop]
+    WMM2 --> EXECUTE[Execute todos via<br/>full tool catalog + subagents]
+    EXECUTE --> SYNC[PlanFileSyncMiddleware<br/>background plan.md refresh]
+    SYNC --> ANSWER([Final answer to user])
+
+    %% Auto-approval shortcut
+    PARSE -.->|auto_mode + no clarifications| AUTO[spawn_work_mode_handoff<br/>daemon thread]
+    AUTO -.-> WORK
+
+    classDef trigger fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e
+    classDef agent fill:#fef3c7,stroke:#b45309,color:#78350f
+    classDef middleware fill:#dcfce7,stroke:#15803d,color:#14532d
+    classDef llm fill:#f3e8ff,stroke:#7e22ce,color:#581c87
+    classDef disk fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d
+    classDef sse fill:#fce7f3,stroke:#be185d,color:#831843
+    classDef route fill:#e0e7ff,stroke:#4338ca,color:#312e81
+
+    class U,UI,FE_PLAN,FE_WORK trigger
+    class LG_PLAN,LG_WORK,MAKE,BUILD,REG,WORK agent
+    class WMM,WMM2,PM,PE,PTF,GATE,SUMM,SKILL,SYNC,APPLY,LOAD middleware
+    class LLM1,LLM2,CLS llm
+    class DISK,EDIT disk
+    class SSE1 sse
+    class CLARIFY,EXEC,NEWRUN,AUTO route

@@ -6,14 +6,79 @@ import logging
 import os
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
+from src.agents.common.handoff import parse_plan_md
 from src.config.handoffs_config import get_handoffs_config
+from src.sandbox.path_mapping import replace_virtual_path
 
 logger = logging.getLogger(__name__)
 
 _HANDOFF_GUARD = threading.Lock()
 _IN_FLIGHT_HANDOFFS: set[str] = set()
+
+
+def _load_canonical_plan_overrides(values: dict[str, Any]) -> dict[str, Any]:
+    """Read plan.md from disk and parse it for a canonical handoff override.
+
+    Returns ``{"plan": ..., "todo_graph": ...}`` when the on-disk plan.md is in
+    the canonical format (``plan_version >= 5``). Returns an empty dict when
+    the file is missing, the parse returns ``None`` (older format), or any
+    error occurs — callers should fall back to checkpointed state silently in
+    that case.
+
+    Honoring user edits to plan.md between plan approval and work handoff is
+    the core purpose of this function. Without it, the work agent silently
+    consumes the stale checkpointed plan and ignores manual edits.
+    """
+    plan = values.get("plan") if isinstance(values, dict) else None
+    if not isinstance(plan, dict):
+        return {}
+    thread_data = values.get("thread_data") if isinstance(values, dict) else None
+    virtual_path = str(plan.get("latest_alias_path") or "").strip()
+    if not virtual_path:
+        # Fall back to the conventional location when the plan dict doesn't
+        # carry the alias path (older plans / partial state).
+        workspace_path = (thread_data or {}).get("workspace_path") if isinstance(thread_data, dict) else None
+        if not workspace_path:
+            return {}
+        physical_path = Path(workspace_path) / "plan.md"
+    else:
+        physical_path = Path(replace_virtual_path(virtual_path, thread_data))
+    try:
+        text = physical_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    except OSError as exc:
+        logger.warning("Could not read plan.md for canonical handoff (%s): %s", physical_path, exc)
+        return {}
+    try:
+        parsed = parse_plan_md(text)
+    except ValueError as exc:
+        logger.warning("plan.md failed canonical parse for thread handoff: %s", exc)
+        return {}
+    if parsed is None:
+        return {}
+    parsed_plan, parsed_graph = parsed
+    # Carry forward fields that only the runtime knows about so we don't
+    # accidentally clobber them with frontmatter defaults.
+    for key in (
+        "plan_path",
+        "latest_alias_path",
+        "execution_requested_at",
+        "approved_at",
+        "execution_handoff_started",
+        "execution_handoff_started_at",
+    ):
+        if plan.get(key) is not None:
+            parsed_plan.setdefault(key, plan[key])
+    logger.info(
+        "Loaded canonical plan.md overrides for handoff (todos=%d, status=%s)",
+        len(parsed_graph.get("nodes") or []),
+        parsed_plan.get("status"),
+    )
+    return {"plan": parsed_plan, "todo_graph": parsed_graph}
 
 
 def _langgraph_url() -> str:
@@ -164,8 +229,9 @@ def _run_work_mode_handoff(
             config["recursion_limit"] = recursion_limit
             config["configurable"].update(
                 {
-                    "mode": "work",
-                    "is_plan_mode": False,
+                    "current_mode": "work",
+                    "mode": "work",  # legacy alias; remove after step 8
+                    "is_plan_mode": False,  # legacy dual-write; remove after step 8
                     "background_followup": False,
                     "plan_behavior": "work_interactive",
                 }
@@ -176,14 +242,20 @@ def _run_work_mode_handoff(
                 if isinstance(plan, dict):
                     clarification_block = format_clarification_context_for_work(plan)
             handoff_messages = _handoff_context_message(original_user_request, clarification_block)
+            invoke_state: dict[str, Any] = {"messages": handoff_messages}
+            # Canonical plan.md handoff: if the on-disk plan.md was edited by
+            # the user between approval and now, honor those edits by parsing
+            # the file and overriding plan + todo_graph in the new run's input.
+            invoke_state.update(_load_canonical_plan_overrides(values))
             invoke_client_agent_async(
                 client,
-                {"messages": handoff_messages},
+                invoke_state,
                 config=config,
                 context={
                     "thread_id": thread_id,
-                    "mode": "work",
-                    "is_plan_mode": False,
+                    "current_mode": "work",
+                    "mode": "work",  # legacy alias; remove after step 8
+                    "is_plan_mode": False,  # legacy dual-write; remove after step 8
                     "background_followup": False,
                     "plan_behavior": "work_interactive",
                     "model_name": requested_model_name,

@@ -19,6 +19,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 
+from src.agents.common.handoff import serialize_plan_md
 from src.agents.middlewares.handoff_sync import render_plan_md
 from src.agents.middlewares.message_selection import extract_text, original_user_prompt
 from src.agents.middlewares.plan_execution import (
@@ -938,20 +939,48 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
             }
             for c in clarifications
         ]
-        plan_md_content = render_plan_md(
-            plan_output.title,
-            plan_output.summary,
-            nodes,
-            domain=plan_output.domain,
-            plan_id=plan_id,
-            status=plan_status,
-            created_at=created_at,
-            objective=plan_output.objective,
-            assumptions=plan_output.assumptions,
-            constraints=plan_output.constraints,
-            risks=plan_output.risks,
-            acceptance_criteria=plan_output.acceptance_criteria,
-            clarifications=inline_clarifications or None,
+        canonical_plan_for_md = {
+            "plan_id": plan_id,
+            "title": plan_output.title,
+            "status": plan_status,
+            "domain": plan_output.domain,
+            "target_mode": "work",
+            "created_at": created_at,
+            "objective": plan_output.objective,
+            "summary": plan_output.summary,
+            "assumptions": plan_output.assumptions,
+            "constraints": plan_output.constraints,
+            "risks": plan_output.risks,
+            "acceptance_criteria": plan_output.acceptance_criteria,
+            "clarifications": inline_clarifications or [],
+        }
+        canonical_todo_graph_for_md = {
+            "nodes": nodes,
+            "ready_ids": ready_ids,
+        }
+
+        def _render_body(_plan: dict, _nodes: list[dict]) -> str:
+            return render_plan_md(
+                plan_output.title,
+                plan_output.summary,
+                _nodes,
+                domain=plan_output.domain,
+                plan_id=plan_id,
+                status=plan_status,
+                created_at=created_at,
+                objective=plan_output.objective,
+                assumptions=plan_output.assumptions,
+                constraints=plan_output.constraints,
+                risks=plan_output.risks,
+                acceptance_criteria=plan_output.acceptance_criteria,
+                clarifications=inline_clarifications or None,
+                include_frontmatter=False,
+            )
+
+        plan_md_content = serialize_plan_md(
+            canonical_plan_for_md,
+            canonical_todo_graph_for_md,
+            body_renderer=_render_body,
         )
 
         # Write versioned plan file + latest alias.

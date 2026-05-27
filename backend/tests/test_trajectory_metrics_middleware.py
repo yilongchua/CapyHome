@@ -59,8 +59,8 @@ def test_metrics_collects_primary_endpoint_labels():
 
     snapshot = get_metrics_snapshot()
     assert any("endpoint=primary" in key for key in snapshot)
-    assert any("lead_agent.before_model" in key for key in snapshot)
-    assert any("lead_agent.tool_call.start" in key for key in snapshot)
+    assert any("work_agent.before_model" in key for key in snapshot)
+    assert any("work_agent.tool_call.start" in key for key in snapshot)
 
 
 def test_trajectory_calls_fsync_when_enabled(monkeypatch, tmp_path: Path):

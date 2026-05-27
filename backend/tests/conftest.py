@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 #     -> .executor (SubagentExecutor, SubagentResult)
 #       -> src.agents.thread_state
 #         -> src.agents.__init__
-#           -> lead_agent.agent
+#           -> work_agent.agent
 #             -> subagent_limit_middleware
 #               -> src.subagents.executor  <-- circular!
 #

@@ -127,7 +127,7 @@ channels:
     bot_token: $TELEGRAM_BOT_TOKEN
 
   session:
-    assistant_id: lead_agent
+    assistant_id: work_agent
     config:
       recursion_limit: 100
     context:

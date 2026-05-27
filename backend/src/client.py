@@ -35,8 +35,10 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 
-from src.agents.lead_agent.agent import _build_middlewares
-from src.agents.lead_agent.prompt import apply_prompt_template
+from src.agents.common.mode import resolve_current_mode
+from src.agents.plan_agent.prompt import apply_prompt_template as plan_apply_prompt_template
+from src.agents.work_agent.agent import _build_middlewares
+from src.agents.work_agent.prompt import apply_prompt_template
 from src.agents.thread_state import ThreadState
 from src.config.app_config import get_app_config, reload_app_config
 from src.config.extensions_config import ExtensionsConfig, SkillStateConfig, get_extensions_config, reload_extensions_config
@@ -180,11 +182,13 @@ class CapyHomeClient:
             is_plan_mode = mode == "plan"
         else:
             is_plan_mode = bool(plan_mode_override if plan_mode_override is not None else self._plan_mode)
+        current_mode = "plan" if is_plan_mode else (mode or "work")
         configurable = {
             "thread_id": thread_id,
             "model_name": overrides.get("model_name", self._model_name),
             "thinking_enabled": overrides.get("thinking_enabled", self._thinking_enabled),
-            "is_plan_mode": is_plan_mode,
+            "current_mode": current_mode,
+            "is_plan_mode": is_plan_mode,  # legacy dual-write; remove after step 8
             "subagent_enabled": overrides.get("subagent_enabled", self._subagent_enabled),
             "auto_mode": overrides.get("auto_mode", self._auto_mode),
             "background_followup": bool(overrides.get("background_followup", False)),
@@ -193,9 +197,8 @@ class CapyHomeClient:
         if current_turn_text:
             configurable["current_turn_text"] = current_turn_text
             configurable["original_user_request"] = current_turn_text
-        mode = str(mode or ("plan" if configurable["is_plan_mode"] else "work"))
-        configurable["mode"] = mode
-        configurable["plan_behavior"] = overrides.get("plan_behavior") or ("plan_foreground" if mode == "plan" else "work_interactive")
+        configurable["mode"] = current_mode  # legacy alias; remove after step 8
+        configurable["plan_behavior"] = overrides.get("plan_behavior") or ("plan_foreground" if current_mode == "plan" else "work_interactive")
         return RunnableConfig(
             configurable=configurable,
             recursion_limit=overrides.get("recursion_limit", 100),
@@ -212,8 +215,7 @@ class CapyHomeClient:
         key = (
             cfg.get("model_name"),
             cfg.get("thinking_enabled"),
-            cfg.get("is_plan_mode"),
-            cfg.get("mode"),
+            cfg.get("current_mode") or cfg.get("mode") or ("plan" if cfg.get("is_plan_mode") else "work"),
             cfg.get("background_followup"),
             cfg.get("subagent_enabled"),
             cfg.get("thread_id"),
@@ -235,10 +237,13 @@ class CapyHomeClient:
             "model": create_chat_model(name=model_name, thinking_enabled=thinking_enabled),
             "tools": self._get_tools(model_name=model_name, subagent_enabled=subagent_enabled),
             "middleware": _build_middlewares(config, model_name=model_name),
-            "system_prompt": apply_prompt_template(
+            "system_prompt": (
+                plan_apply_prompt_template
+                if resolve_current_mode(cfg) == "plan"
+                else apply_prompt_template
+            )(
                 subagent_enabled=subagent_enabled,
                 max_concurrent_subagents=max_concurrent_subagents,
-                plan_mode=str(cfg.get("mode") or "").strip().lower() == "plan",
                 background_followup=bool(cfg.get("background_followup", False)),
                 current_turn_text=str(cfg.get("current_turn_text") or cfg.get("original_user_request") or cfg.get("user_prompt") or ""),
             ),
@@ -346,12 +351,14 @@ class CapyHomeClient:
         state: dict[str, Any] = {"messages": [HumanMessage(content=message)]}
         cfg = config.get("configurable") or {}
         resolved_model = ModelRouter(app_config=self._app_config).resolve("generator", requested_model=cfg.get("model_name"))
+        current_mode_ctx = cfg.get("current_mode") or cfg.get("mode") or ("plan" if cfg.get("is_plan_mode") else "work")
         context = {
             "thread_id": thread_id,
             "model_name": resolved_model,
             "thinking_enabled": cfg.get("thinking_enabled", True),
-            "is_plan_mode": cfg.get("is_plan_mode", False),
-            "mode": cfg.get("mode", "work"),
+            "current_mode": current_mode_ctx,
+            "is_plan_mode": current_mode_ctx == "plan",  # legacy dual-write
+            "mode": current_mode_ctx,  # legacy alias
             "background_followup": cfg.get("background_followup", False),
             "subagent_enabled": cfg.get("subagent_enabled", False),
             "plan_behavior": cfg.get("plan_behavior", "work_interactive"),
@@ -438,12 +445,14 @@ class CapyHomeClient:
         state: dict[str, Any] = {"messages": [HumanMessage(content=message)]}
         cfg = config.get("configurable") or {}
         resolved_model = ModelRouter(app_config=self._app_config).resolve("generator", requested_model=cfg.get("model_name"))
+        current_mode_ctx = cfg.get("current_mode") or cfg.get("mode") or ("plan" if cfg.get("is_plan_mode") else "work")
         context = {
             "thread_id": thread_id,
             "model_name": resolved_model,
             "thinking_enabled": cfg.get("thinking_enabled", True),
-            "is_plan_mode": cfg.get("is_plan_mode", False),
-            "mode": cfg.get("mode", "work"),
+            "current_mode": current_mode_ctx,
+            "is_plan_mode": current_mode_ctx == "plan",  # legacy dual-write
+            "mode": current_mode_ctx,  # legacy alias
             "subagent_enabled": cfg.get("subagent_enabled", False),
             "plan_behavior": cfg.get("plan_behavior", "work_interactive"),
             "auto_mode": cfg.get("auto_mode", False),

@@ -17,7 +17,7 @@ from src.agents.execution_trace import (
     make_summary_fallback,
     stream_trace_event,
 )
-from src.agents.lead_agent.prompt import get_skills_prompt_section
+from src.agents.work_agent.prompt import get_skills_prompt_section
 from src.agents.middlewares.runtime_events import append_runtime_event
 from src.agents.thread_state import ThreadState
 from src.subagents import SubagentExecutor, get_subagent_config

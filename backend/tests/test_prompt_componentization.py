@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.agents.lead_agent import prompt as prompt_module
+from src.agents.work_agent import prompt as prompt_module
 from src.config.agents_config import load_agent_soul
 from src.config.app_config import AppConfig, set_app_config
 from src.config.model_config import ModelConfig
@@ -141,7 +141,7 @@ def test_load_agent_soul_none_agent_name_reads_base_dir(tmp_path, monkeypatch):
 
 
 def test_get_agent_soul_wraps_content_in_xml_tags(monkeypatch):
-    monkeypatch.setattr("src.agents.lead_agent.prompt.load_agent_soul", lambda name: "Be precise.")
+    monkeypatch.setattr("src.agents.work_agent.prompt.load_agent_soul", lambda name: "Be precise.")
     result = prompt_module.get_agent_soul("research")
     assert "<soul>" in result
     assert "Be precise." in result
@@ -149,7 +149,7 @@ def test_get_agent_soul_wraps_content_in_xml_tags(monkeypatch):
 
 
 def test_get_agent_soul_returns_empty_string_when_no_soul(monkeypatch):
-    monkeypatch.setattr("src.agents.lead_agent.prompt.load_agent_soul", lambda name: None)
+    monkeypatch.setattr("src.agents.work_agent.prompt.load_agent_soul", lambda name: None)
     assert prompt_module.get_agent_soul("research") == ""
 
 

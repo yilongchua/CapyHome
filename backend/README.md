@@ -43,9 +43,9 @@ CapyHome is a LangGraph-based AI super agent with sandbox execution, persistent 
 
 ## Core Components
 
-### Lead Agent
+### Work Agent
 
-The single LangGraph agent (`lead_agent`) is the runtime entry point, created via `make_lead_agent(config)`. It combines:
+The LangGraph work-mode agent (`work_agent`) is the runtime entry point, created via `make_work_agent(config)`. It combines:
 
 - **Dynamic model selection** with thinking and vision support
 - **Middleware chain** for cross-cutting concerns (9 middlewares)
@@ -201,7 +201,7 @@ Direct access: LangGraph at http://localhost:2024, Gateway at http://localhost:8
 backend/
 ├── src/
 │   ├── agents/                  # Agent system
-│   │   ├── lead_agent/         # Main agent (factory, prompts)
+│   │   ├── work_agent/         # Work-mode agent (factory, prompts)
 │   │   ├── middlewares/        # 9 middleware components
 │   │   ├── memory/             # Memory extraction & storage
 │   │   └── thread_state.py    # ThreadState schema

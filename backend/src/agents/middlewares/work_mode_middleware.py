@@ -209,8 +209,9 @@ def _run_plan_mode_rerun(
         )
         config["configurable"].update(
             {
-                "mode": "plan",
-                "is_plan_mode": True,
+                "current_mode": "plan",
+                "mode": "plan",  # legacy alias; remove after step 8
+                "is_plan_mode": True,  # legacy dual-write; remove after step 8
             }
         )
         invoke_client_agent_async(
@@ -219,8 +220,9 @@ def _run_plan_mode_rerun(
             config=config,
             context={
                 "thread_id": thread_id,
-                "mode": "plan",
-                "is_plan_mode": True,
+                "current_mode": "plan",
+                "mode": "plan",  # legacy alias; remove after step 8
+                "is_plan_mode": True,  # legacy dual-write; remove after step 8
                 "model_name": requested_model_name,
             },
         )

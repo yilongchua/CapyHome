@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from src.agents.lead_agent import agent as lead_agent_module
+from src.agents.work_agent import agent as work_agent_module
 from src.config.summarization_config import ContextSize, SummarizationConfig, SummarizationModeOverride
 
 
@@ -29,11 +29,11 @@ def _app_config(*, context_window: int | None = None):
 def _install_common(monkeypatch, cfg: SummarizationConfig, *, model=None, context_window: int | None = None):
     _FakeSummarizationMiddleware.calls = []
     fake_model = model if model is not None else SimpleNamespace(profile=None)
-    monkeypatch.setattr(lead_agent_module, "get_summarization_config", lambda: cfg)
-    monkeypatch.setattr(lead_agent_module, "get_app_config", lambda: _app_config(context_window=context_window))
-    monkeypatch.setattr(lead_agent_module, "create_chat_model", lambda **kwargs: fake_model)
-    monkeypatch.setattr(lead_agent_module, "get_memory_config", lambda: SimpleNamespace(enabled=False))
-    monkeypatch.setattr(lead_agent_module, "CapyHomeSummarizationMiddleware", _FakeSummarizationMiddleware)
+    monkeypatch.setattr(work_agent_module, "get_summarization_config", lambda: cfg)
+    monkeypatch.setattr(work_agent_module, "get_app_config", lambda: _app_config(context_window=context_window))
+    monkeypatch.setattr(work_agent_module, "create_chat_model", lambda **kwargs: fake_model)
+    monkeypatch.setattr(work_agent_module, "get_memory_config", lambda: SimpleNamespace(enabled=False))
+    monkeypatch.setattr(work_agent_module, "CapyHomeSummarizationMiddleware", _FakeSummarizationMiddleware)
 
 
 def test_fraction_trigger_resolves_from_model_profile(monkeypatch):
@@ -46,7 +46,7 @@ def test_fraction_trigger_resolves_from_model_profile(monkeypatch):
     model = SimpleNamespace(profile=SimpleNamespace(max_input_tokens=64000))
     _install_common(monkeypatch, cfg, model=model)
 
-    middleware = lead_agent_module._create_summarization_middleware()
+    middleware = work_agent_module._create_summarization_middleware()
 
     assert isinstance(middleware, _FakeSummarizationMiddleware)
     assert _FakeSummarizationMiddleware.calls[0]["trigger"] == ("tokens", 51200)
@@ -63,7 +63,7 @@ def test_fraction_trigger_resolves_from_configured_max_context(monkeypatch):
     )
     _install_common(monkeypatch, cfg)
 
-    lead_agent_module._create_summarization_middleware()
+    work_agent_module._create_summarization_middleware()
 
     assert _FakeSummarizationMiddleware.calls[0]["trigger"] == ("tokens", 102400)
     assert _FakeSummarizationMiddleware.calls[0]["trigger"] != ("tokens", 12345)
@@ -77,7 +77,7 @@ def test_fraction_trigger_resolves_from_model_config_when_global_missing(monkeyp
     )
     _install_common(monkeypatch, cfg, context_window=100000)
 
-    lead_agent_module._create_summarization_middleware()
+    work_agent_module._create_summarization_middleware()
 
     assert _FakeSummarizationMiddleware.calls[0]["trigger"] == ("tokens", 80000)
 
@@ -94,7 +94,7 @@ def test_message_trigger_ignored_and_message_keep_converted(monkeypatch):
     )
     _install_common(monkeypatch, cfg)
 
-    lead_agent_module._create_summarization_middleware()
+    work_agent_module._create_summarization_middleware()
 
     call = _FakeSummarizationMiddleware.calls[0]
     assert call["trigger"] == ("tokens", 102400)
@@ -113,8 +113,8 @@ def test_modes_inherit_token_only_policy(monkeypatch):
     )
     _install_common(monkeypatch, cfg)
 
-    lead_agent_module._create_summarization_middleware(mode="work")
-    lead_agent_module._create_summarization_middleware(mode="plan")
+    work_agent_module._create_summarization_middleware(mode="work")
+    work_agent_module._create_summarization_middleware(mode="plan")
 
     for call in _FakeSummarizationMiddleware.calls:
         assert call["trigger"] == ("tokens", 102400)
@@ -132,6 +132,6 @@ def test_summary_prompt_omitted_when_config_uses_middleware_default(monkeypatch)
     )
     _install_common(monkeypatch, cfg)
 
-    lead_agent_module._create_summarization_middleware()
+    work_agent_module._create_summarization_middleware()
 
     assert "summary_prompt" not in _FakeSummarizationMiddleware.calls[0]

@@ -39,7 +39,7 @@ def _detect_actor(serialized: dict[str, Any], kwargs: dict[str, Any]) -> str:
         return "tool"
     if "subagent" in haystack:
         return "sub_agent"
-    return "lead_agent"
+    return "work_agent"
 
 
 def _extract_text(content: Any) -> str:

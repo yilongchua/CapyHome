@@ -76,7 +76,11 @@ def _runtime_context(runtime: Runtime | None) -> dict[str, Any]:
 
 
 def _is_plan_mode(runtime: Runtime | None) -> bool:
-    return str(_runtime_context(runtime).get("mode") or "").strip().lower() == "plan"
+    ctx = _runtime_context(runtime)
+    # Prefer canonical ``current_mode``; fall back to legacy ``mode`` / ``is_plan_mode``
+    # for runs whose context predates the field rename (kept until callers migrate).
+    raw = ctx.get("current_mode") or ctx.get("mode") or ("plan" if ctx.get("is_plan_mode") else "")
+    return str(raw).strip().lower() == "plan"
 
 
 def _should_filter(state: dict[str, Any], runtime: Runtime | None) -> bool:
