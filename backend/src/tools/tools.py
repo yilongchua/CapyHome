@@ -9,7 +9,7 @@ from src.community.web_search import web_search_tool
 from src.config import get_app_config
 from src.reflection import resolve_variable
 from src.tools.builtins import ask_user_for_clarification_tool, present_file_tool, recall_tool, task_tool, view_image_tool, write_todos_tool
-from src.tools.loader import build_structured_tool, filter_mcp_tools_by_policy, load_external_policy, load_tool_definitions
+from src.tools.loader import POLICY_ATTR, build_structured_tool, filter_mcp_tools_by_policy, get_tool_policy, load_external_policy, load_tool_definitions
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +193,51 @@ def get_available_tools(
             continue
         seen.add(name)
         deduped.append(tool)
+
+    # Backfill JSON policy onto config.yaml-loaded tools when their counterpart
+    # is declared in the *other* mode's catalog. Without this, a tool that only
+    # appears in `internal_tools_work.json` (e.g. `bash`) would arrive in plan
+    # mode via `loaded_tools` without any policy attached, and the runtime
+    # `PhaseToolFilterMiddleware._filter_tools_by_policy` would pass it through
+    # — silently exposing execution tools that the split was designed to hide.
+    if getattr(config, "json_driven_tools", False):
+        _backfill_policy_from_other_catalogs(deduped, current_mode=mode)
     return deduped
+
+
+def _backfill_policy_from_other_catalogs(tools: list[BaseTool], *, current_mode: str | None) -> None:
+    """Attach JSON policy from the inactive catalog onto unannotated tools.
+
+    Runtime middleware filters by the policy attached via `_capyhome_policy`.
+    Tools loaded from config.yaml never carry one, and tools whose declaration
+    lives in the inactive catalog (e.g. `bash` in work-only mode) won't either
+    when the active catalog is the plan file. We mutate those tools in place
+    so the middleware can do its job.
+    """
+    # Snapshot every JSON catalog except the active one (already applied by
+    # `_build_builtin_tools_from_json`). Active catalog is fine to include too
+    # — re-attaching the same policy is a no-op.
+    name_to_policy: dict[str, object] = {}
+    for path in (INTERNAL_TOOLS_PLAN_JSON, INTERNAL_TOOLS_WORK_JSON, INTERNAL_TOOLS_JSON):
+        if not path.exists():
+            continue
+        try:
+            for defn in load_tool_definitions(path):
+                # Prefer the first occurrence (plan > work > legacy ordering),
+                # since we mainly want a policy that mentions the active mode
+                # if any catalog declares one.
+                name_to_policy.setdefault(defn.name, defn)
+        except Exception:
+            logger.exception("Skipping malformed catalog while backfilling policy: %s", path.name)
+
+    for tool in tools:
+        if get_tool_policy(tool) is not None:
+            continue
+        name = getattr(tool, "name", "")
+        defn = name_to_policy.get(name)
+        if defn is None:
+            continue
+        setattr(tool, POLICY_ATTR, defn)
 
 
 def _build_builtin_tools_from_json(*, subagent_enabled: bool, supports_vision: bool, mode: str | None = None) -> list[BaseTool]:
