@@ -195,9 +195,10 @@ class AioSandboxProvider(SandboxProvider):
         # is set, otherwise falls back to the container's own base dir (native mode).
         host_paths = Paths(base_dir=paths.host_base_dir)
 
+        # Uploads now live at {workspace}/uploads on host, so they are exposed inside
+        # the sandbox via the workspace bind-mount at /mnt/user-data/workspace/uploads.
         return [
             (str(host_paths.sandbox_work_dir(thread_id)), f"{VIRTUAL_PATH_PREFIX}/workspace", False),
-            (str(host_paths.sandbox_uploads_dir(thread_id)), f"{VIRTUAL_PATH_PREFIX}/uploads", False),
             (str(host_paths.sandbox_outputs_dir(thread_id)), f"{VIRTUAL_PATH_PREFIX}/outputs", False),
         ]
 

@@ -44,7 +44,7 @@ follows the same workflow template but operates on different data. It handles:
 
 ```bash
 python /mnt/skills/public/batch-workflow/scripts/load_tasks.py \
-  --input /mnt/user-data/uploads/<file> \
+  --input /mnt/user-data/workspace/uploads/<file> \
   [--checkpoint /mnt/user-data/workspace/checkpoint.json]
 ```
 
@@ -168,7 +168,7 @@ If the run is interrupted:
 
 ```bash
 python /mnt/skills/public/batch-workflow/scripts/load_tasks.py \
-  --input /mnt/user-data/uploads/<file> \
+  --input /mnt/user-data/workspace/uploads/<file> \
   --checkpoint /mnt/user-data/workspace/checkpoint.json
 ```
 

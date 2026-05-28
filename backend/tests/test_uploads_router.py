@@ -63,8 +63,8 @@ def test_upload_files_syncs_non_local_sandbox_and_marks_markdown_file(tmp_path):
     assert (thread_uploads_dir / "report.pdf").read_bytes() == b"pdf-bytes"
     assert (thread_uploads_dir / "report.md").read_text(encoding="utf-8") == "converted"
 
-    sandbox.update_file.assert_any_call("/mnt/user-data/uploads/report.pdf", b"pdf-bytes")
-    sandbox.update_file.assert_any_call("/mnt/user-data/uploads/report.md", b"converted")
+    sandbox.update_file.assert_any_call("/mnt/user-data/workspace/uploads/report.pdf", b"pdf-bytes")
+    sandbox.update_file.assert_any_call("/mnt/user-data/workspace/uploads/report.md", b"converted")
 
 
 def test_upload_files_rejects_dotdot_and_dot_filenames(tmp_path):

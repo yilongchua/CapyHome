@@ -392,7 +392,7 @@ SKILL.md Format:
      "files": [{
        "filename": "doc.pdf",
        "path": ".capyhome/.../uploads/doc.pdf",
-       "virtual_path": "/mnt/user-data/uploads/doc.pdf",
+       "virtual_path": "/mnt/user-data/workspace/uploads/doc.pdf",
        "artifact_url": "/api/threads/.../artifacts/mnt/.../doc.pdf"
      }]
    }

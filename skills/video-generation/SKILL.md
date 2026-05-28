@@ -134,7 +134,7 @@ Submit:
 ```bash
 python /mnt/skills/public/video-generation/scripts/generate.py \
   --prompt-file /mnt/user-data/workspace/street-run.json \
-  --reference-images /mnt/user-data/uploads/ref-frame.jpg \
+  --reference-images /mnt/user-data/workspace/uploads/ref-frame.jpg \
   --output-file /mnt/user-data/workspace/street-run-01.mp4 \
   --aspect-ratio 16:9
 ```

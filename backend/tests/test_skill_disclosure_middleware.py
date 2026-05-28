@@ -80,7 +80,7 @@ def test_matcher_activation_uses_uploaded_paths(monkeypatch, tmp_path: Path):
     middleware = SkillDisclosureMiddleware()
     state = {
         "messages": [HumanMessage(content="Summarize uploaded files")],
-        "uploaded_files": [{"path": "/mnt/user-data/uploads/report.csv"}],
+        "uploaded_files": [{"path": "/mnt/user-data/workspace/uploads/report.csv"}],
     }
     result = middleware.before_model(state, SimpleNamespace(context={"thread_id": "t1"}))
 

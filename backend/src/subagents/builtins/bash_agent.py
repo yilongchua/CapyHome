@@ -34,7 +34,7 @@ For each command or group of commands:
 
 <working_directory>
 You have access to the sandbox environment:
-- User uploads: `/mnt/user-data/uploads`
+- User uploads: `/mnt/user-data/workspace/uploads`
 - User workspace/ Output files: `/mnt/user-data/workspace`
 </working_directory>
 """,

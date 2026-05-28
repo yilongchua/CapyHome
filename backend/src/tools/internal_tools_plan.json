@@ -162,10 +162,10 @@
     "requires_subagent_enabled": false,
     "returns": "Command that appends the base64 payload and mime type to `state.viewed_images`, then emits a confirmation tool message. The image is injected into the next model call as a vision input. Returns an error message string if the path is invalid, missing, not absolute, or has an unsupported extension.",
     "examples": [
-      "view_image(image_path=\"/mnt/user-data/uploads/architecture-diagram.png\")",
-      "view_image(image_path=\"/mnt/user-data/uploads/error-screenshot.jpg\")",
-      "view_image(image_path=\"/mnt/user-data/uploads/contract-scan.png\")",
-      "view_image(image_path=\"/mnt/user-data/uploads/event-poster.png\")"
+      "view_image(image_path=\"/mnt/user-data/workspace/uploads/architecture-diagram.png\")",
+      "view_image(image_path=\"/mnt/user-data/workspace/uploads/error-screenshot.jpg\")",
+      "view_image(image_path=\"/mnt/user-data/workspace/uploads/contract-scan.png\")",
+      "view_image(image_path=\"/mnt/user-data/workspace/uploads/event-poster.png\")"
     ],
     "parameters": {
       "type": "object",
@@ -173,7 +173,7 @@
       "properties": {
         "image_path": {
           "type": "string",
-          "description": "Absolute path to the image. Workspace virtual paths (`/mnt/user-data/workspace/...`, `/mnt/user-data/uploads/...`) are resolved to the thread-scoped physical path. Supported extensions: `.jpg`, `.jpeg`, `.png`, `.webp`. Keep file size under ~10 MB."
+          "description": "Absolute path to the image. Workspace virtual paths under `/mnt/user-data/workspace/...` (including `/mnt/user-data/workspace/uploads/...`) are resolved to the thread-scoped physical path. Supported extensions: `.jpg`, `.jpeg`, `.png`, `.webp`. Keep file size under ~10 MB."
         }
       }
     }
@@ -261,7 +261,7 @@
     "requires_subagent_enabled": false,
     "returns": "Newline-joined tree of children (max 2 levels). Returns the literal `(empty)` for empty directories, `Error: Directory not found: <path>` if the path does not exist, `Error: Permission denied: <path>` if unreadable, or `Error: ...` on other sandbox failures.",
     "examples": [
-      "ls(description=\"Survey uploads before planning intake\", path=\"/mnt/user-data/uploads\")",
+      "ls(description=\"Survey uploads before planning intake\", path=\"/mnt/user-data/workspace/uploads\")",
       "ls(description=\"Survey repo root before scoping the plan\", path=\"/mnt/user-data/workspace\")"
     ],
     "parameters": {
@@ -292,7 +292,7 @@
     "returns": "String containing the file contents (or the requested line slice). Returns the literal `(empty)` for empty files, `Error: File not found: <path>` if missing, `Error: Path is a directory, not a file: <path>` if you point at a directory, `Error: Permission denied reading file: <path>` if unreadable, or `Error: ...` on other failures.",
     "examples": [
       "read_file(description=\"Read entrypoint before scoping the plan\", path=\"/mnt/user-data/workspace/main.py\")",
-      "read_file(description=\"Review contract obligations to scope the plan\", path=\"/mnt/user-data/uploads/contract-acme-v3.md\")",
+      "read_file(description=\"Review contract obligations to scope the plan\", path=\"/mnt/user-data/workspace/uploads/contract-acme-v3.md\")",
       "read_file(description=\"Inspect logs around the crash before planning a fix\", path=\"/mnt/user-data/workspace/run.log\", start_line=100, end_line=160)",
       "read_file(description=\"Read invoice line items before planning the rewrite\", path=\"/mnt/user-data/workspace/invoice-2026-Q2-acme.csv\")"
     ],

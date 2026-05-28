@@ -100,7 +100,7 @@ After `ask_user_for_clarification` is called, execution stops and waits for the 
 {subagent_section}
 
 <working_directory existed="true">
-- User uploads: `/mnt/user-data/uploads` - Files uploaded by the user (automatically listed in context)
+- User uploads: `/mnt/user-data/workspace/uploads` - Files uploaded by the user (automatically listed in context)
 - User workspace: `/mnt/user-data/workspace` - Working directory for temporary files
 - Output files: `/mnt/user-data/workspace` - Final deliverables must be saved here
 
@@ -210,9 +210,10 @@ After `ask_user_for_clarification` is called, execution stops and waits for the 
 </clarification_system>"""
 
 WORKING_DIRECTORY_SECTION = """<working_directory existed="true">
-- User uploads: `/mnt/user-data/uploads` - Files uploaded by the user (automatically listed in context)
-- User workspace: `/mnt/user-data/workspace` - Working directory for temporary files
-- Output files: `/mnt/user-data/workspace` - Final deliverables must be saved here
+- workspace: `/mnt/user-data/workspace`
+    - Working directory for temporary files/ Output files/ Final deliverables must be saved here
+- uploads: `/mnt/user-data/workspace/uploads`
+    - Files uploaded by the user (sub-folder of workspace; auto-listed in <uploaded_files>)
 
 **File Management:**
 - Uploaded files are automatically listed in the <uploaded_files> section before each request

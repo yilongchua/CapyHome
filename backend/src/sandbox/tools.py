@@ -30,8 +30,9 @@ def replace_virtual_path(path: str, thread_data: ThreadDataState | None) -> str:
 
     Mapping:
         /mnt/user-data/workspace/* -> thread_data['workspace_path']/*
-        /mnt/user-data/uploads/* -> thread_data['uploads_path']/*
-        /mnt/user-data/workspace/* -> thread_data['outputs_path']/*
+            (includes /mnt/user-data/workspace/uploads/* — uploads nests under workspace)
+        /mnt/user-data/uploads/*   -> thread_data['uploads_path']/* (legacy alias)
+        /mnt/user-data/outputs/*   -> thread_data['outputs_path']/*
 
     Args:
         path: The path that may contain virtual path prefix.

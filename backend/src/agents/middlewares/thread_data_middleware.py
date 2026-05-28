@@ -24,7 +24,7 @@ class ThreadDataMiddleware(AgentMiddleware[ThreadDataMiddlewareState]):
 
     Creates the following directory structure:
     - {base_dir}/threads/{thread_id}/user-data/workspace
-    - {base_dir}/threads/{thread_id}/user-data/uploads
+    - {base_dir}/threads/{thread_id}/user-data/workspace/uploads
     - {base_dir}/threads/{thread_id}/user-data/outputs
 
     Lifecycle Management:

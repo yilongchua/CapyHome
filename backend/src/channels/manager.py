@@ -137,6 +137,13 @@ def _format_artifact_text(artifacts: list[str]) -> str:
 
 
 _WORKSPACE_VIRTUAL_PREFIX = "/mnt/user-data/workspace/"
+# Uploads now physically nest under workspace, so they would pass the workspace
+# prefix check. Keep the original intent — never exfiltrate user uploads via IM
+# channels — by explicitly rejecting the uploads sub-path (and its legacy alias).
+_UPLOADS_VIRTUAL_PREFIXES = (
+    "/mnt/user-data/workspace/uploads/",
+    "/mnt/user-data/uploads/",
+)
 
 
 def _resolve_attachments(thread_id: str, artifacts: list[str]) -> list[ResolvedAttachment]:
@@ -144,7 +151,10 @@ def _resolve_attachments(thread_id: str, artifacts: list[str]) -> list[ResolvedA
 
     Only paths under ``/mnt/user-data/workspace/`` are accepted; any other
     virtual path is rejected with a warning to prevent exfiltrating uploads
-    or workspace files via IM channels.
+    or workspace files via IM channels. Paths under
+    ``/mnt/user-data/workspace/uploads/`` are also rejected, even though they
+    sit under workspace on disk — user uploads must not be re-shared back out
+    through channel attachments.
 
     Skips artifacts that cannot be resolved (missing files, invalid paths)
     and logs warnings for them.
@@ -154,19 +164,33 @@ def _resolve_attachments(thread_id: str, artifacts: list[str]) -> list[ResolvedA
     attachments: list[ResolvedAttachment] = []
     paths = get_paths()
     workspace_dir = paths.sandbox_work_dir(thread_id).resolve()
+    uploads_dir = paths.sandbox_uploads_dir(thread_id).resolve()
     for virtual_path in artifacts:
         # Security: only allow files from the agent workspace directory
         if not virtual_path.startswith(_WORKSPACE_VIRTUAL_PREFIX):
             logger.warning("[Manager] rejected non-workspace artifact path: %s", virtual_path)
             continue
+        if any(virtual_path.startswith(p) for p in _UPLOADS_VIRTUAL_PREFIXES):
+            logger.warning("[Manager] rejected uploads artifact path: %s", virtual_path)
+            continue
         try:
             actual = paths.resolve_virtual_path(thread_id, virtual_path)
             # Verify the resolved path is actually under the workspace directory
             # (guards against path-traversal even after prefix check)
+            actual_resolved = actual.resolve()
             try:
-                actual.resolve().relative_to(workspace_dir)
+                actual_resolved.relative_to(workspace_dir)
             except ValueError:
                 logger.warning("[Manager] artifact path escapes workspace dir: %s -> %s", virtual_path, actual)
+                continue
+            # Defense-in-depth: also reject if a traversal smuggled a path into
+            # the uploads sub-tree past the prefix check above.
+            try:
+                actual_resolved.relative_to(uploads_dir)
+            except ValueError:
+                pass
+            else:
+                logger.warning("[Manager] artifact resolves inside uploads dir: %s -> %s", virtual_path, actual)
                 continue
             if not actual.is_file():
                 logger.warning("[Manager] artifact not found on disk: %s -> %s", virtual_path, actual)

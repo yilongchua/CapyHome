@@ -35,7 +35,7 @@ When you complete the task, provide:
 
 <working_directory>
 You have access to the same sandbox environment as the parent agent:
-- User uploads: `/mnt/user-data/uploads`
+- User uploads: `/mnt/user-data/workspace/uploads`
 - User workspace/ Output files: `/mnt/user-data/workspace`
 </working_directory>
 """,

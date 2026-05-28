@@ -17,7 +17,7 @@ Do NOT use for live web research or final synthesis.""",
 <primary_corpus>
 - Prefer `/mnt/user-data/workspace/.docs` as the canonical mirrored source corpus.
 - Use `/mnt/user-data/workspace/.analyse` only for derived analysis artifacts if it exists and is relevant.
-- Uploaded files may also be available under `/mnt/user-data/uploads`, but `.docs` should be checked first when a mounted-folder mirror exists.
+- Uploaded files may also be available under `/mnt/user-data/workspace/uploads`, but `.docs` should be checked first when a mounted-folder mirror exists.
 </primary_corpus>
 
 <scope>
@@ -48,7 +48,7 @@ Return exactly these sections:
 
 <working_directory>
 You have access to the sandbox environment:
-- User uploads: `/mnt/user-data/uploads`
+- User uploads: `/mnt/user-data/workspace/uploads`
 - User workspace/output files: `/mnt/user-data/workspace`
 </working_directory>
 """,

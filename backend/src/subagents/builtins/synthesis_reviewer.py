@@ -43,7 +43,7 @@ Return exactly these sections:
 
 <working_directory>
 You have access to the sandbox environment:
-- User uploads: `/mnt/user-data/uploads`
+- User uploads: `/mnt/user-data/workspace/uploads`
 - User workspace/output files: `/mnt/user-data/workspace`
 </working_directory>
 """,

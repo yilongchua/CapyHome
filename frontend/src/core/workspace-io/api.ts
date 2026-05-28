@@ -12,7 +12,7 @@ export const api = {
     artifacts: (threadId: string, path: string) =>
       `/api/threads/${threadId}/artifacts${path}`,
     uploads: (threadId: string, filename: string) =>
-      `/api/threads/${threadId}/artifacts/mnt/user-data/uploads/${filename}`,
+      `/api/threads/${threadId}/artifacts/mnt/user-data/workspace/uploads/${filename}`,
     files: {
       reveal: (threadId: string) => `/api/threads/${threadId}/files/reveal`,
       open: (threadId: string) => `/api/threads/${threadId}/files/open`,

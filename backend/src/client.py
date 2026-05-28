@@ -1036,8 +1036,8 @@ class CapyHomeClient:
                     "filename": src_path.name,
                     "size": str(dest.stat().st_size),
                     "path": str(dest),
-                    "virtual_path": f"/mnt/user-data/uploads/{src_path.name}",
-                    "artifact_url": f"/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/{src_path.name}",
+                    "virtual_path": f"/mnt/user-data/workspace/uploads/{src_path.name}",
+                    "artifact_url": f"/api/threads/{thread_id}/artifacts/mnt/user-data/workspace/uploads/{src_path.name}",
                 }
 
                 if src_path.suffix.lower() in convertible_extensions:
@@ -1056,8 +1056,8 @@ class CapyHomeClient:
 
                     if md_path is not None:
                         info["markdown_file"] = md_path.name
-                        info["markdown_virtual_path"] = f"/mnt/user-data/uploads/{md_path.name}"
-                        info["markdown_artifact_url"] = f"/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/{md_path.name}"
+                        info["markdown_virtual_path"] = f"/mnt/user-data/workspace/uploads/{md_path.name}"
+                        info["markdown_artifact_url"] = f"/api/threads/{thread_id}/artifacts/mnt/user-data/workspace/uploads/{md_path.name}"
 
                 uploaded_files.append(info)
         finally:
@@ -1096,8 +1096,8 @@ class CapyHomeClient:
                     "filename": filename,
                     "size": str(stat.st_size),
                     "path": str(Path(entry.path)),
-                    "virtual_path": f"/mnt/user-data/uploads/{filename}",
-                    "artifact_url": f"/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/{filename}",
+                    "virtual_path": f"/mnt/user-data/workspace/uploads/{filename}",
+                    "artifact_url": f"/api/threads/{thread_id}/artifacts/mnt/user-data/workspace/uploads/{filename}",
                     "extension": Path(filename).suffix,
                     "modified": stat.st_mtime,
                 }

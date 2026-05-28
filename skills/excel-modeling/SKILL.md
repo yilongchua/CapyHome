@@ -25,7 +25,7 @@ For SQL exploration across Excel/CSV datasets, prefer `data-analysis`.
 
 ```bash
 python /mnt/skills/public/excel-modeling/scripts/inspect_workbook.py \
-  --input /mnt/user-data/uploads/model.xlsx \
+  --input /mnt/user-data/workspace/uploads/model.xlsx \
   --output /mnt/user-data/workspace/model-inspection.json
 ```
 
@@ -33,7 +33,7 @@ python /mnt/skills/public/excel-modeling/scripts/inspect_workbook.py \
 
 ```bash
 python /mnt/skills/public/excel-modeling/scripts/validate_formulas.py \
-  --input /mnt/user-data/uploads/model.xlsx \
+  --input /mnt/user-data/workspace/uploads/model.xlsx \
   --output /mnt/user-data/workspace/model-validation.json
 ```
 
@@ -41,7 +41,7 @@ python /mnt/skills/public/excel-modeling/scripts/validate_formulas.py \
 
 ```bash
 python /mnt/skills/public/excel-modeling/scripts/apply_financial_formatting.py \
-  --input /mnt/user-data/uploads/model.xlsx \
+  --input /mnt/user-data/workspace/uploads/model.xlsx \
   --output /mnt/user-data/workspace/model-formatted.xlsx
 ```
 

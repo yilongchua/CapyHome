@@ -326,7 +326,7 @@ RULES: (1) One tool/bash call = exactly ONE row's data ...
 If the run is interrupted, check the checkpoint:
 ```bash
 python /mnt/skills/batch-workflow/scripts/load_tasks.py \
-  --input /mnt/user-data/uploads/tasks.txt \
+  --input /mnt/user-data/workspace/uploads/tasks.txt \
   --checkpoint /mnt/user-data/workspace/checkpoint.json
 ```
 

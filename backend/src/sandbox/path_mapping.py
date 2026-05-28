@@ -22,6 +22,10 @@ def replace_virtual_path(path: str, thread_data: ThreadDataLike | None) -> str:
     if thread_data is None:
         return path
 
+    # `uploads` is a legacy virtual subdir kept for backward compatibility with
+    # checkpointed conversations that reference `/mnt/user-data/uploads/...`.
+    # New paths use `/mnt/user-data/workspace/uploads/...`, which is resolved via
+    # the `workspace` mapping (uploads physically lives at `{workspace}/uploads`).
     path_mapping = {
         "workspace": thread_data.get("workspace_path"),
         "uploads": thread_data.get("uploads_path"),
@@ -59,9 +63,13 @@ def to_virtual_path(path: str | None, thread_data: ThreadDataLike | None) -> str
     if path.startswith(VIRTUAL_PATH_PREFIX):
         return path
 
+    # `uploads_path` is intentionally omitted: it nests under `workspace_path`
+    # ({workspace}/uploads), so a physical uploads file is reverse-mapped to
+    # the canonical `/mnt/user-data/workspace/uploads/...` via the workspace
+    # entry. Including `uploads` would emit the legacy `/mnt/user-data/uploads/...`
+    # form, which is no longer canonical.
     candidates = [
         ("workspace", thread_data.get("workspace_path")),
-        ("uploads", thread_data.get("uploads_path")),
         ("outputs", thread_data.get("outputs_path")),
         ("mounted", thread_data.get("mounted_path")),
     ]

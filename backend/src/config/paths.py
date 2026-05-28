@@ -25,7 +25,7 @@ class Paths:
             └── {thread_id}/
                 └── user-data/         <-- mounted as /mnt/user-data/ inside sandbox
                     ├── workspace/     <-- /mnt/user-data/workspace/
-                    ├── uploads/       <-- /mnt/user-data/uploads/
+                    │   └── uploads/   <-- /mnt/user-data/workspace/uploads/
                     └── outputs/       <-- /mnt/user-data/workspace/
 
     BaseDir resolution (in priority order):
@@ -117,10 +117,10 @@ class Paths:
     def sandbox_uploads_dir(self, thread_id: str) -> Path:
         """
         Host path for user-uploaded files.
-        Host: `{base_dir}/threads/{thread_id}/user-data/uploads/`
-        Sandbox: `/mnt/user-data/uploads/`
+        Host: `{base_dir}/threads/{thread_id}/user-data/workspace/uploads/`
+        Sandbox: `/mnt/user-data/workspace/uploads/`
         """
-        return self.thread_dir(thread_id) / "user-data" / "uploads"
+        return self.thread_dir(thread_id) / "user-data" / "workspace" / "uploads"
 
     def sandbox_outputs_dir(self, thread_id: str) -> Path:
         """

@@ -174,13 +174,25 @@ class TestResolveAttachments:
         assert result == []
 
     def test_rejects_uploads_path(self):
-        """Paths under /mnt/user-data/uploads/ are rejected (security)."""
+        """Legacy /mnt/user-data/uploads/ paths are rejected (security)."""
         from src.channels.manager import _resolve_attachments
 
         mock_paths = MagicMock()
 
         with patch("src.config.paths.get_paths", return_value=mock_paths):
             result = _resolve_attachments("t1", ["/mnt/user-data/uploads/secret.pdf"])
+
+        assert result == []
+        mock_paths.resolve_virtual_path.assert_not_called()
+
+    def test_rejects_workspace_uploads_path(self):
+        """Canonical /mnt/user-data/workspace/uploads/ paths are rejected even though they sit under workspace on disk."""
+        from src.channels.manager import _resolve_attachments
+
+        mock_paths = MagicMock()
+
+        with patch("src.config.paths.get_paths", return_value=mock_paths):
+            result = _resolve_attachments("t1", ["/mnt/user-data/workspace/uploads/secret.pdf"])
 
         assert result == []
         mock_paths.resolve_virtual_path.assert_not_called()

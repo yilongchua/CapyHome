@@ -164,7 +164,7 @@
     "examples": [
       "task(description=\"Research async patterns\", prompt=\"Survey Python asyncio cancellation patterns in 2024-2025 sources. Return 3-5 sources with one-sentence summaries and direct URL citations. Focus on structured concurrency primitives (TaskGroup, anyio).\", subagent_type=\"source-researcher\")",
       "task(description=\"Find weekend events\", prompt=\"Find 5-8 family-friendly events happening in Singapore between 2026-05-30 and 2026-06-01. For each event return: name, venue, time, one-line description, ticket/price info if any, and the source URL. Skip nightlife and 18+ events.\", subagent_type=\"source-researcher\")",
-      "task(description=\"Organise case files\", prompt=\"Enumerate the files under /mnt/user-data/uploads/case-acme-v-beta/. Group them by document type (pleadings, evidence, correspondence, court orders, expert reports). Return a markdown index: per group, list filename and a one-line role description. Do not open or modify the files.\", subagent_type=\"general-purpose\")",
+      "task(description=\"Organise case files\", prompt=\"Enumerate the files under /mnt/user-data/workspace/uploads/case-acme-v-beta/. Group them by document type (pleadings, evidence, correspondence, court orders, expert reports). Return a markdown index: per group, list filename and a one-line role description. Do not open or modify the files.\", subagent_type=\"general-purpose\")",
       "task(description=\"Run full test suite\", prompt=\"Run `make test` from the repo root and report: (1) pass/fail count, (2) the names and first 5 lines of any failing test, (3) total duration. Do not attempt to fix failures.\", subagent_type=\"bash\")"
     ],
     "parameters": {
@@ -204,9 +204,9 @@
     "returns": "Command that appends the base64 payload and mime type to `state.viewed_images`, then emits a confirmation tool message. The image is injected into the next model call as a vision input. Returns an error message string if the path is invalid, missing, not absolute, or has an unsupported extension.",
     "examples": [
       "view_image(image_path=\"/mnt/user-data/workspace/screenshot.png\")",
-      "view_image(image_path=\"/mnt/user-data/uploads/diagram.jpg\")",
-      "view_image(image_path=\"/mnt/user-data/uploads/receipt-2026-05-22.jpg\")",
-      "view_image(image_path=\"/mnt/user-data/uploads/event-poster.png\")"
+      "view_image(image_path=\"/mnt/user-data/workspace/uploads/diagram.jpg\")",
+      "view_image(image_path=\"/mnt/user-data/workspace/uploads/receipt-2026-05-22.jpg\")",
+      "view_image(image_path=\"/mnt/user-data/workspace/uploads/event-poster.png\")"
     ],
     "parameters": {
       "type": "object",
@@ -214,7 +214,7 @@
       "properties": {
         "image_path": {
           "type": "string",
-          "description": "Absolute path to the image. Workspace virtual paths (`/mnt/user-data/workspace/...`, `/mnt/user-data/uploads/...`) are resolved to the thread-scoped physical path. Supported extensions: `.jpg`, `.jpeg`, `.png`, `.webp`. Keep file size under ~10 MB."
+          "description": "Absolute path to the image. Workspace virtual paths under `/mnt/user-data/workspace/...` (including `/mnt/user-data/workspace/uploads/...`) are resolved to the thread-scoped physical path. Supported extensions: `.jpg`, `.jpeg`, `.png`, `.webp`. Keep file size under ~10 MB."
         }
       }
     }
@@ -303,7 +303,7 @@
     "returns": "String containing the command's combined stdout+stderr (sandbox provider decides interleaving). Returns `Error: ...` on sandbox runtime failure, permission error, or unexpected exception. Exit codes are not surfaced separately — check the output text for error markers.",
     "examples": [
       "bash(description=\"List repo root\", command=\"ls -la /mnt/user-data/workspace\")",
-      "bash(description=\"Convert contract PDF to markdown\", command=\"markitdown /mnt/user-data/uploads/contract-acme-v3.pdf > /mnt/user-data/workspace/contract-acme-v3.md\")",
+      "bash(description=\"Convert contract PDF to markdown\", command=\"markitdown /mnt/user-data/workspace/uploads/contract-acme-v3.pdf > /mnt/user-data/workspace/contract-acme-v3.md\")",
       "bash(description=\"Generate invoice XLSX from CSV\", command=\"python -c 'import pandas as pd; pd.read_csv(\\\"/mnt/user-data/workspace/invoice.csv\\\").to_excel(\\\"/mnt/user-data/workspace/invoice.xlsx\\\", index=False)'\")",
       "bash(description=\"Run unit tests\", command=\"cd /mnt/user-data/workspace && pytest tests/ -v\")",
       "bash(description=\"Install package\", command=\"pip install pandas openpyxl\")"
@@ -335,7 +335,7 @@
     "requires_subagent_enabled": false,
     "returns": "Newline-joined tree of children (max 2 levels). Returns the literal `(empty)` for empty directories, `Error: Directory not found: <path>` if the path does not exist, `Error: Permission denied: <path>` if unreadable, or `Error: ...` on other sandbox failures.",
     "examples": [
-      "ls(description=\"Inspect uploads\", path=\"/mnt/user-data/uploads\")",
+      "ls(description=\"Inspect uploads\", path=\"/mnt/user-data/workspace/uploads\")",
       "ls(description=\"Survey repo root\", path=\"/mnt/user-data/workspace\")"
     ],
     "parameters": {
@@ -366,7 +366,7 @@
     "returns": "String containing the file contents (or the requested line slice). Returns the literal `(empty)` for empty files, `Error: File not found: <path>` if missing, `Error: Path is a directory, not a file: <path>` if you point at a directory, `Error: Permission denied reading file: <path>` if unreadable, or `Error: ...` on other failures.",
     "examples": [
       "read_file(description=\"Check entrypoint\", path=\"/mnt/user-data/workspace/main.py\")",
-      "read_file(description=\"Review contract obligations\", path=\"/mnt/user-data/uploads/contract-acme-v3.md\")",
+      "read_file(description=\"Review contract obligations\", path=\"/mnt/user-data/workspace/uploads/contract-acme-v3.md\")",
       "read_file(description=\"Inspect logs around the crash\", path=\"/mnt/user-data/workspace/run.log\", start_line=100, end_line=160)",
       "read_file(description=\"Read invoice line items\", path=\"/mnt/user-data/workspace/invoice-2026-Q2-acme.csv\")"
     ],

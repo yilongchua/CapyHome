@@ -7,7 +7,7 @@ CapyHome 的文件上传系统返回三种不同的路径，每种路径用于�
 ### 1. 实际文件系统路径 (path)
 
 ```
-.capyhome/threads/{thread_id}/user-data/uploads/document.pdf
+.capyhome/threads/{thread_id}/user-data/workspace/uploads/document.pdf
 ```
 
 **用途：**
@@ -19,14 +19,14 @@ CapyHome 的文件上传系统返回三种不同的路径，每种路径用于�
 ```python
 # Python 代码中直接访问
 from pathlib import Path
-file_path = Path("backend/.capyhome/threads/abc123/user-data/uploads/document.pdf")
+file_path = Path("backend/.capyhome/threads/abc123/user-data/workspace/uploads/document.pdf")
 content = file_path.read_bytes()
 ```
 
 ### 2. 虚拟路径 (virtual_path)
 
 ```
-/mnt/user-data/uploads/document.pdf
+/mnt/user-data/workspace/uploads/document.pdf
 ```
 
 **用途：**
@@ -38,16 +38,16 @@ content = file_path.read_bytes()
 Agent 在对话中使用：
 ```python
 # Agent 使用 read_file 工具
-read_file(path="/mnt/user-data/uploads/document.pdf")
+read_file(path="/mnt/user-data/workspace/uploads/document.pdf")
 
 # Agent 使用 bash 工具
-bash(command="cat /mnt/user-data/uploads/document.pdf")
+bash(command="cat /mnt/user-data/workspace/uploads/document.pdf")
 ```
 
 ### 3. HTTP 访问 URL (artifact_url)
 
 ```
-/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/document.pdf
+/api/threads/{thread_id}/artifacts/mnt/user-data/workspace/uploads/document.pdf
 ```
 
 **用途：**
@@ -62,11 +62,11 @@ const threadId = 'abc123';
 const filename = 'document.pdf';
 
 // 下载文件
-const downloadUrl = `/api/threads/${threadId}/artifacts/mnt/user-data/uploads/${filename}?download=true`;
+const downloadUrl = `/api/threads/${threadId}/artifacts/mnt/user-data/workspace/uploads/${filename}?download=true`;
 window.open(downloadUrl);
 
 // 在新窗口预览
-const viewUrl = `/api/threads/${threadId}/artifacts/mnt/user-data/uploads/${filename}`;
+const viewUrl = `/api/threads/${threadId}/artifacts/mnt/user-data/workspace/uploads/${filename}`;
 window.open(viewUrl, '_blank');
 
 // 使用 fetch API 获取
@@ -99,21 +99,21 @@ async function uploadAndProcess(threadId: string, file: File) {
   console.log('文件信息：', fileInfo);
   // {
   //   filename: "report.pdf",
-  //   path: ".capyhome/threads/abc123/user-data/uploads/report.pdf",
-  //   virtual_path: "/mnt/user-data/uploads/report.pdf",
-  //   artifact_url: "/api/threads/abc123/artifacts/mnt/user-data/uploads/report.pdf",
+  //   path: ".capyhome/threads/abc123/user-data/workspace/uploads/report.pdf",
+  //   virtual_path: "/mnt/user-data/workspace/uploads/report.pdf",
+  //   artifact_url: "/api/threads/abc123/artifacts/mnt/user-data/workspace/uploads/report.pdf",
   //   markdown_file: "report.md",
-  //   markdown_path: ".capyhome/threads/abc123/user-data/uploads/report.md",
-  //   markdown_virtual_path: "/mnt/user-data/uploads/report.md",
-  //   markdown_artifact_url: "/api/threads/abc123/artifacts/mnt/user-data/uploads/report.md"
+  //   markdown_path: ".capyhome/threads/abc123/user-data/workspace/uploads/report.md",
+  //   markdown_virtual_path: "/mnt/user-data/workspace/uploads/report.md",
+  //   markdown_artifact_url: "/api/threads/abc123/artifacts/mnt/user-data/workspace/uploads/report.md"
   // }
 
   // 2. 发送消息给 Agent
   await sendMessage(threadId, "请分析刚上传的 PDF 文件");
 
   // Agent 会自动看到文件列表，包含：
-  // - report.pdf (虚拟路径: /mnt/user-data/uploads/report.pdf)
-  // - report.md (虚拟路径: /mnt/user-data/uploads/report.md)
+  // - report.pdf (虚拟路径: /mnt/user-data/workspace/uploads/report.pdf)
+  // - report.md (虚拟路径: /mnt/user-data/workspace/uploads/report.md)
 
   // 3. 前端可以直接访问转换后的 Markdown
   const mdResponse = await fetch(fileInfo.markdown_artifact_url);
@@ -132,11 +132,11 @@ async function uploadAndProcess(threadId: string, file: File) {
 
 | 场景 | 使用的路径类型 | 示例 |
 |------|---------------|------|
-| 服务器后端代码直接访问 | `path` | `.capyhome/threads/abc123/user-data/uploads/file.pdf` |
-| Agent 工具调用 | `virtual_path` | `/mnt/user-data/uploads/file.pdf` |
-| 前端下载/预览 | `artifact_url` | `/api/threads/abc123/artifacts/mnt/user-data/uploads/file.pdf` |
-| 备份脚本 | `path` | `.capyhome/threads/abc123/user-data/uploads/file.pdf` |
-| 日志记录 | `path` | `.capyhome/threads/abc123/user-data/uploads/file.pdf` |
+| 服务器后端代码直接访问 | `path` | `.capyhome/threads/abc123/user-data/workspace/uploads/file.pdf` |
+| Agent 工具调用 | `virtual_path` | `/mnt/user-data/workspace/uploads/file.pdf` |
+| 前端下载/预览 | `artifact_url` | `/api/threads/abc123/artifacts/mnt/user-data/workspace/uploads/file.pdf` |
+| 备份脚本 | `path` | `.capyhome/threads/abc123/user-data/workspace/uploads/file.pdf` |
+| 日志记录 | `path` | `.capyhome/threads/abc123/user-data/workspace/uploads/file.pdf` |
 
 ## 代码示例集合
 

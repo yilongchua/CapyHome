@@ -81,7 +81,7 @@ async def upload_files(
     """Upload multiple files to a thread's uploads directory.
 
     For PDF, PPT, Excel, and Word files, they will be converted to markdown using markitdown.
-    All files (original and converted) are saved to /mnt/user-data/uploads.
+    All files (original and converted) are saved to /mnt/user-data/workspace/uploads.
 
     Args:
         thread_id: The thread ID to upload files to.
@@ -118,7 +118,7 @@ async def upload_files(
 
             # Build relative path from backend root
             relative_path = str(paths.sandbox_uploads_dir(thread_id) / safe_filename)
-            virtual_path = f"{VIRTUAL_PATH_PREFIX}/uploads/{safe_filename}"
+            virtual_path = f"{VIRTUAL_PATH_PREFIX}/workspace/uploads/{safe_filename}"
 
             # Keep local sandbox source of truth in thread-scoped host storage.
             # For non-local sandboxes, also sync to virtual path for runtime visibility.
@@ -130,7 +130,7 @@ async def upload_files(
                 "size": str(len(content)),
                 "path": relative_path,  # Actual filesystem path (relative to backend/)
                 "virtual_path": virtual_path,  # Path for Agent in sandbox
-                "artifact_url": f"/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/{safe_filename}",  # HTTP URL
+                "artifact_url": f"/api/threads/{thread_id}/artifacts/mnt/user-data/workspace/uploads/{safe_filename}",  # HTTP URL
             }
 
             logger.info(f"Saved file: {safe_filename} ({len(content)} bytes) to {relative_path}")
@@ -141,7 +141,7 @@ async def upload_files(
                 md_path = await convert_file_to_markdown(file_path)
                 if md_path:
                     md_relative_path = str(paths.sandbox_uploads_dir(thread_id) / md_path.name)
-                    md_virtual_path = f"{VIRTUAL_PATH_PREFIX}/uploads/{md_path.name}"
+                    md_virtual_path = f"{VIRTUAL_PATH_PREFIX}/workspace/uploads/{md_path.name}"
 
                     if sandbox_id != "local":
                         sandbox.update_file(md_virtual_path, md_path.read_bytes())
@@ -149,7 +149,7 @@ async def upload_files(
                     file_info["markdown_file"] = md_path.name
                     file_info["markdown_path"] = md_relative_path
                     file_info["markdown_virtual_path"] = md_virtual_path
-                    file_info["markdown_artifact_url"] = f"/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/{md_path.name}"
+                    file_info["markdown_artifact_url"] = f"/api/threads/{thread_id}/artifacts/mnt/user-data/workspace/uploads/{md_path.name}"
 
             uploaded_files.append(file_info)
 
@@ -189,8 +189,8 @@ async def list_uploaded_files(thread_id: str) -> dict:
                     "filename": file_path.name,
                     "size": stat.st_size,
                     "path": relative_path,  # Actual filesystem path
-                    "virtual_path": f"{VIRTUAL_PATH_PREFIX}/uploads/{file_path.name}",  # Path for Agent in sandbox
-                    "artifact_url": f"/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/{file_path.name}",  # HTTP URL
+                    "virtual_path": f"{VIRTUAL_PATH_PREFIX}/workspace/uploads/{file_path.name}",  # Path for Agent in sandbox
+                    "artifact_url": f"/api/threads/{thread_id}/artifacts/mnt/user-data/workspace/uploads/{file_path.name}",  # HTTP URL
                     "extension": file_path.suffix,
                     "modified": stat.st_mtime,
                 }

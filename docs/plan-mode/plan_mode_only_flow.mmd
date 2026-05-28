@@ -1,83 +1,98 @@
 flowchart TD
     %% ===== USER ENTRY =====
-    U([User message<br/>+ Plan-Mode chip / Shift+Tab])
-    FE[Frontend sets<br/>configurable.current_mode = plan<br/>plan_behavior = plan_foreground]
+    U([User message + Shift+Tab<br/>or Plan-Mode chip])
+    FE[Frontend sets configurable:<br/>current_mode = plan<br/>plan_behavior = plan_foreground<br/>auto_mode optional]
     U --> FE
-    FE -->|POST stream| LG[(LangGraph<br/>plan_agent graph)]
+    FE -->|POST stream<br/>graph = plan_agent| LG[(LangGraph<br/>plan_agent entry point)]
 
-    %% ===== FACTORY =====
-    LG --> MAKE[make_plan_agent<br/>forces current_mode = plan]
+    %% ===== FACTORY (build-time, per-mode catalog selection) =====
+    LG --> MAKE[make_plan_agent<br/>forces current_mode = plan,<br/>plan_behavior = plan_foreground]
     MAKE --> BUILD[_build_work_agent<br/>prompt_template_fn = plan_apply_prompt_template]
-    BUILD --> PROMPT[apply_prompt_template<br/>= work_base + PLAN_MODE_SECTION]
+    BUILD --> PROMPT[plan-mode prompt =<br/>work_base + PLAN_MODE_SECTION<br/>'Always produce plan.md']
+    BUILD --> CATALOG[get_available_tools<br/>mode = plan]
+    CATALOG --> JSON[Load internal_tools_plan.json<br/>excludes bash, write_file,<br/>str_replace, task]
+    CATALOG --> COMM[_COMMUNITY_TOOL_MODES filter:<br/>KEEP web_search,<br/>DROP knowledge_vault,<br/>DROP bash/write_file]
     BUILD --> MW[Build middleware chain<br/>ctx.is_plan_mode = True]
+    MW --> PMS[Plan-mode-only middlewares:<br/>PlannerMiddleware,<br/>PlanEvaluatorMiddleware,<br/>TodoDagMiddleware,<br/>PlanFileSyncMiddleware]
 
     %% ===== BEFORE-MODEL CHAIN =====
-    MW --> BM[before_model chain]
-    BM --> SETUP[ThreadData / Sandbox /<br/>Uploads / Permissions]
-    SETUP --> SUMM[SummarizationMiddleware<br/>token-pressure compaction]
-    SUMM --> SKILL[SkillDisclosureMiddleware<br/>inject active skill bodies]
+    PMS --> BM[before_model chain]
+    BM --> SETUP[ThreadData / Sandbox /<br/>Uploads / Permissions /<br/>DanglingToolCall]
+    SETUP --> SUMM[SummarizationMiddleware<br/>token-pressure compaction,<br/>preserves planner_handoff +<br/>clarification operational msgs]
+    SUMM --> SKILL[SkillDisclosureMiddleware<br/>inject active skill bodies<br/>within active_body_token_budget]
 
     %% ===== PLANNER =====
     SKILL --> PM[PlannerMiddleware.before_model]
-    PM --> SHOULD{_should_plan?<br/>has user msg AND<br/>no active plan OR<br/>fresh msg since draft}
+    PM --> SHOULD{_should_plan?<br/>has user msg AND<br/>no clarification_pending AND<br/>not over revision cap}
     SHOULD -->|no| SKIPPED[No planning this turn]
-    SHOULD -->|yes| DIRECT{_looks_like_direct_<br/>answer_request?}
+    SHOULD -->|yes| DIRECT{_looks_like_direct_<br/>answer_request?<br/>checklist/compare/guide etc.}
     DIRECT -->|yes| SKIPPED
-    DIRECT -->|no| LLM1[(Planner LLM call<br/>PLANNER_SYSTEM_PROMPT<br/>returns JSON)]
-    LLM1 --> TRIV{LLM returned<br/>trivial: true?}
-    TRIV -->|yes| SKIPPED
-    TRIV -->|no| PARSE[_parse_plan_response<br/>normalize_todo_nodes<br/>_materialize_ready_ids]
-    PARSE --> CLAR[_ensure_research_<br/>clarifications]
-    CLAR --> SERIAL[serialize_plan_md<br/>plan_version = 5<br/>frontmatter + body]
-    SERIAL --> DISK[(plan.md latest alias<br/>+ plans/plan-TS-slug.md)]
-    SERIAL --> SSE1>SSE: plan_created<br/>+ inline clarifications]
+    DIRECT -->|no| SSEPLAN>SSE: planning_started]
+    SSEPLAN --> LLM1[(Planner LLM call<br/>PLANNER_SYSTEM_PROMPT<br/>returns JSON: title, todos,<br/>clarifications, risks...)]
+    LLM1 --> PARSE[_parse_plan_response<br/>normalize_todo_nodes<br/>_materialize_ready_ids<br/>cycle detection]
+    PARSE --> CLAR[_ensure_research_<br/>clarifications<br/>timeframe + scope]
+    CLAR --> STATUS{auto_mode AND<br/>no clarifications?}
+    STATUS -->|yes| APPR[status = approved<br/>approved_at = now]
+    STATUS -->|no| DRAFT[status = draft<br/>awaiting_execution_approval]
+    APPR --> SERIAL[serialize_plan_md<br/>plan_version = 5<br/>YAML frontmatter + body]
+    DRAFT --> SERIAL
+    SERIAL --> DISK[(/mnt/user-data/workspace/<br/>plan.md latest alias<br/>+ plans/plan-TS-slug.md)]
+    SERIAL --> SSE1>SSE: plan_created<br/>+ inline clarifications<br/>+ first_todos preview]
+    SERIAL --> HANDOFFMSG[Build ephemeral<br/>planner_handoff +<br/>planner_clarification_required<br/>SystemMessages]
 
     %% ===== PLAN EVALUATOR =====
-    PARSE --> PE[PlanEvaluatorMiddleware<br/>timeout-bounded LLM check]
-    PE -->|issues + revised_todos| GRAPH[Update todo_graph]
-    PE -->|ok / timeout / no revision| GRAPH
+    HANDOFFMSG --> PE[PlanEvaluatorMiddleware<br/>fast LLM quality review<br/>timeout-bounded]
+    PE -->|issues + revised_todos valid| REVISE[Update todo_graph<br/>plan_evaluated = True]
+    PE -->|ok / timeout / invalid revision| KEEP[Keep original<br/>plan_evaluated = True]
 
-    %% ===== TOOL FILTER =====
-    GRAPH --> PTF[PhaseToolFilterMiddleware<br/>wrap_model_call]
-    PTF --> HIDE[HIDE from LLM:<br/>web_search, task,<br/>write_file, str_replace,<br/>query_knowledge_vault,<br/>search_internal_documents,<br/>save_to_knowledge_vault]
-    PTF --> KEEP[KEEP for LLM:<br/>write_todos,<br/>scope_search,<br/>ask_user_for_clarification,<br/>recall, read_file, ls, view_image,<br/>bash read-only only]
+    %% ===== AUTO-APPROVED SHORTCUT (auto_mode only) =====
+    APPR --> WHANDOFF{plan_behavior =<br/>plan_foreground AND<br/>status = approved?}
+    WHANDOFF -->|yes| SPAWN[spawn_work_mode_handoff<br/>daemon: starts work_agent<br/>run on same thread]
+    SPAWN -.->|out of scope:<br/>work_agent graph| OOS([Work Mode<br/>handoff - excluded])
 
-    %% ===== JUMP TO END FOR FOREGROUND =====
-    PM --> JUMP{plan_behavior =<br/>plan_foreground<br/>AND no clarification?}
-    JUMP -->|yes| END1[jump_to = end<br/>LLM never runs]
-    JUMP -->|no - background or<br/>clarification pending| LLM2[(Main LLM<br/>plan-mode prompt +<br/>restricted tool catalog)]
+    %% ===== FOREGROUND JUMP =====
+    REVISE --> JUMP{plan_behavior =<br/>plan_foreground AND<br/>no clarification?}
+    KEEP --> JUMP
+    JUMP -->|yes| END1[payload jump_to = end<br/>__can_jump_to__ = end<br/>LLM never runs this turn]
+    JUMP -->|no - background or<br/>clarification pending| LLM2[(Main LLM with<br/>plan-mode prompt +<br/>plan-mode tool catalog)]
 
-    %% ===== RUNTIME GATE =====
-    LLM2 --> GATE[PlanExecutionGateMiddleware<br/>wrap_tool_call - backstop]
-    GATE -->|tool in scope-gated set| CLS[(Scope-vs-content<br/>classifier LLM)]
-    CLS -->|verdict = scope| ALLOW[Allow tool call]
-    CLS -->|verdict = content| BLOCK1["Return [plan_gate]<br/>ToolMessage block"]
-    GATE -->|bash with mutation tokens| BLOCK2["Block bash mutation"]
-    GATE -->|other execution tool| BLOCK3["Block - refine plan.md"]
-    GATE -->|allowed plan-mode tool| ALLOW
+    %% ===== TOOLS AVAILABLE TO LLM IN PLAN MODE =====
+    LLM2 -.uses.-> TOOLS[/Plan Mode tools:<br/>write_todos<br/>ask_user_for_clarification<br/>web_search now allowed<br/>read_file, ls, view_image<br/>recall, present_files/]
 
-    ALLOW --> TOOLRES[Tool result back to LLM]
-    BLOCK1 --> TOOLRES
-    BLOCK2 --> TOOLRES
-    BLOCK3 --> TOOLRES
-    TOOLRES --> LLM2
+    %% ===== CLARIFICATION INTERCEPT =====
+    LLM2 -->|tool_call:<br/>ask_user_for_clarification| CM[ClarificationMiddleware<br/>wrap_tool_call]
+    CM --> AUTOQ{auto_mode AND<br/>recommended option?}
+    AUTOQ -->|yes| FAKE[Inject 'Selected: rec_label'<br/>ToolMessage, continue]
+    AUTOQ -->|no| ENDC[Command goto=END<br/>ToolMessage with question]
+    FAKE --> LLM2
+    ENDC --> CHECK
+    LLM2 -->|normal tool/text| AM
 
-    %% ===== PERSISTENCE =====
-    LLM2 --> AM[after_model chain]
-    SKIPPED --> AM
+    %% ===== AFTER MODEL =====
+    SKIPPED --> AM[after_model chain]
     END1 --> AM
-    AM --> PFS[PlanFileSyncMiddleware<br/>after_model]
-    PFS --> DAEMON[Spawn background thread<br/>ensure_plan_state +<br/>sync_handoff_files_from_state]
-    DAEMON -.->|1s later| DISK
-    AM --> CHECK[Checkpoint state<br/>plan, todo_graph, messages]
+    AM --> PFS[PlanFileSyncMiddleware<br/>after_model: detect terminal AI]
+    PFS --> DAEMON[Background daemon thread<br/>sleep 1s then<br/>ensure_plan_state +<br/>sync_handoff_files_from_state]
+    DAEMON -.refreshes.-> DISK
+    AM --> TIMELINE[ActivityTimeline<br/>+ Metrics + Trajectory]
+    TIMELINE --> CHECK[Checkpoint thread state<br/>plan, todo_graph,<br/>messages, artifacts]
 
     %% ===== STREAM TO FRONTEND =====
-    SSE1 --> POPUP[Frontend renders<br/>Execute Plan popup<br/>+ inline clarifications]
-    CHECK --> STREAM[LangGraph stream<br/>flushes to client]
+    SSE1 --> POPUP[Frontend renders<br/>Execute Plan popup +<br/>inline clarifications]
+    CHECK --> STREAM[LangGraph SSE stream<br/>flushes to client]
     STREAM --> POPUP
 
-    %% ===== FINAL OUTPUT OF PLAN MODE =====
-    POPUP --> FINAL([Plan Mode output:<br/>plan.md on disk +<br/>plan_created SSE +<br/>popup awaiting user])
+    %% ===== USER ACTIONS POST-PLAN =====
+    POPUP --> ACTION{User action}
+    ACTION -->|Answer inline option| API1[/POST /api/threads/.../<br/>plan/clarify/]
+    ACTION -->|Edit plan.md on disk| EDIT[plan.md user edits<br/>honored at handoff via<br/>parse_plan_md]
+    ACTION -->|Click Execute Plan| API2[/POST /api/threads/.../<br/>plan/execute/]
+    ACTION -->|More chat in plan mode| PM
+    API1 -.advances clarification.-> PM
+    API2 -.creates work_agent run.-> OOS
+
+    %% ===== FINAL OUTPUT =====
+    POPUP --> FINAL([Plan Mode deliverable:<br/>plan.md on disk<br/>plan_created SSE<br/>Execute Plan popup<br/>awaiting user])
 
     %% ===== STYLE =====
     classDef trigger fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e
@@ -88,12 +103,16 @@ flowchart TD
     classDef sse fill:#fce7f3,stroke:#be185d,color:#831843
     classDef branch fill:#fff7ed,stroke:#c2410c,color:#7c2d12
     classDef terminal fill:#ecfdf5,stroke:#047857,color:#064e3b
+    classDef catalog fill:#fffbeb,stroke:#a16207,color:#713f12
+    classDef oos fill:#f1f5f9,stroke:#64748b,color:#334155
 
     class U,FE trigger
-    class LG,MAKE,BUILD,PROMPT,MW factory
-    class SETUP,SUMM,SKILL,PM,PE,GRAPH,PTF,GATE,PFS,DAEMON,AM,CHECK middleware
-    class LLM1,LLM2,CLS llm
-    class DISK disk
-    class SSE1,STREAM sse
-    class SHOULD,DIRECT,TRIV,JUMP branch
-    class FINAL,POPUP,SKIPPED,END1 terminal
+    class LG,MAKE,BUILD,PROMPT,MW,PMS factory
+    class SETUP,SUMM,SKILL,PM,PE,REVISE,KEEP,CM,PFS,DAEMON,AM,TIMELINE,CHECK,HANDOFFMSG middleware
+    class LLM1,LLM2 llm
+    class DISK,EDIT disk
+    class SSE1,SSEPLAN,STREAM sse
+    class SHOULD,DIRECT,STATUS,JUMP,WHANDOFF,AUTOQ,ACTION branch
+    class FINAL,POPUP,SKIPPED,END1,APPR,DRAFT,FAKE,ENDC terminal
+    class CATALOG,JSON,COMM,TOOLS catalog
+    class OOS,SPAWN,API1,API2 oos

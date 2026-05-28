@@ -179,7 +179,7 @@ class ThreadState(AgentState):
 | Virtual Path | Physical Path |
 |-------------|---------------|
 | `/mnt/user-data/workspace` | `backend/.capyhome/threads/{thread_id}/user-data/workspace` |
-| `/mnt/user-data/uploads` | `backend/.capyhome/threads/{thread_id}/user-data/uploads` |
+| `/mnt/user-data/workspace/uploads` | `backend/.capyhome/threads/{thread_id}/user-data/workspace/uploads` |
 | `/mnt/skills` | `CapyHome/skills/` |
 
 ### Tool System
@@ -384,7 +384,7 @@ SKILL.md Format:
 
 2. Gateway receives file
    - Validates file
-   - Stores in .capyhome/threads/{thread_id}/user-data/uploads/
+   - Stores in .capyhome/threads/{thread_id}/user-data/workspace/uploads/
    - If document: converts to Markdown via markitdown
 
 3. Returns response
@@ -392,7 +392,7 @@ SKILL.md Format:
      "files": [{
        "filename": "doc.pdf",
        "path": ".capyhome/.../uploads/doc.pdf",
-       "virtual_path": "/mnt/user-data/uploads/doc.pdf",
+       "virtual_path": "/mnt/user-data/workspace/uploads/doc.pdf",
        "artifact_url": "/api/threads/.../artifacts/mnt/.../doc.pdf"
      }]
    }

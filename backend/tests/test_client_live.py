@@ -198,7 +198,7 @@ class TestLiveFileUpload:
         assert filenames == {"test_upload_a.txt", "test_upload_b.txt"}
         for r in result["files"]:
             assert int(r["size"]) > 0
-            assert r["virtual_path"].startswith("/mnt/user-data/uploads/")
+            assert r["virtual_path"].startswith("/mnt/user-data/workspace/uploads/")
             assert "artifact_url" in r
         print(f"  uploaded: {filenames}")
 

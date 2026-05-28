@@ -110,7 +110,7 @@ class UploadsMiddleware(AgentMiddleware[UploadsMiddlewareState]):
                 {
                     "filename": filename,
                     "size": int(f.get("size") or 0),
-                    "path": f"/mnt/user-data/uploads/{filename}",
+                    "path": f"/mnt/user-data/workspace/uploads/{filename}",
                     "extension": Path(filename).suffix,
                 }
             )
@@ -163,7 +163,7 @@ class UploadsMiddleware(AgentMiddleware[UploadsMiddlewareState]):
                         {
                             "filename": file_path.name,
                             "size": stat.st_size,
-                            "path": f"/mnt/user-data/uploads/{file_path.name}",
+                            "path": f"/mnt/user-data/workspace/uploads/{file_path.name}",
                             "extension": file_path.suffix,
                         }
                     )
