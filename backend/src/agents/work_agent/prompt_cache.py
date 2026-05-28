@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import os
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 _lock = threading.Lock()
+MAX_CACHE_ENTRIES = 64
 
 
 @dataclass
@@ -32,7 +34,7 @@ class _CacheEntry:
 
 
 # key → _CacheEntry
-_cache: dict[tuple, _CacheEntry] = {}
+_cache: OrderedDict[tuple, _CacheEntry] = OrderedDict()
 
 
 def _mtime(path: Path | None) -> float | None:
@@ -138,6 +140,7 @@ def get_cached_prompt(
     with _lock:
         entry = _cache.get(key)
         if entry is not None and not _is_stale(entry, agent_name):
+            _cache.move_to_end(key)
             return entry.prompt
 
         prompt = build_fn()
@@ -146,6 +149,9 @@ def get_cached_prompt(
             date=date.today(),
             mtimes=_current_mtimes(agent_name),
         )
+        _cache.move_to_end(key)
+        while len(_cache) > MAX_CACHE_ENTRIES:
+            _cache.popitem(last=False)
         return prompt
 
 

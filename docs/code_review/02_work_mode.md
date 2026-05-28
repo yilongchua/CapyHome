@@ -4,12 +4,12 @@
 Work Mode is a thoughtfully layered system: the `_RegistryContext` pattern centralizes
 factory wiring, the DAG todo middleware enforces cycles deterministically, and the
 phase-loop driver in `WorkModeMiddleware` is small enough to reason about. However the
-implementation carries several real correctness bugs (race conditions in the in-flight
-handoff guard, mutable per-instance snapshot state in a middleware that is supposed to
-be stateless, swallowed exceptions in `_get_memory_context`, an `await` performed via
-`asyncio.run` from inside daemon threads that the LangGraph SDK is likely already
-running inside an event loop, and a cycle-detection DFS that mutates a shared `visited`
-set incorrectly so cycles can be missed). Resource and safety hygiene is weaker than the
+implementation carries several real correctness bugs (a stale in-flight handoff guard
+entry if thread startup fails, mutable per-instance snapshot state in a middleware that
+is supposed to be stateless, swallowed exceptions in `_get_memory_context`, repeated
+`asyncio.run` calls from daemon threads against SDK awaitables that may be loop-bound,
+and DAG validation code whose cycle-checking helper is overloaded with unreachable
+dangling-dependency handling). Resource and safety hygiene is weaker than the
 architecture suggests: retries stack across middlewares without a global cap, prompt
 injection from todo content flows verbatim into `SystemMessage` text, and the daemon
 handoff thread has no upper bound for retries other than a config value. Several "god
@@ -20,17 +20,15 @@ reminder messages and `jump_to: "model"`) make the contract leaky.
 
 ## Critical Findings
 
-### 1. `_HANDOFF_GUARD` set-add is racy on duplicate detection
+### 1. `_HANDOFF_GUARD` can retain stale duplicate-detection entries
 - **File:** `backend/src/agents/middlewares/work_run_handoff.py:328-332`
 - **Severity:** Critical
-- **Issue:** `_IN_FLIGHT_HANDOFFS` is correctly protected by a lock, but the contract
-  the caller uses is "skip if duplicate". The guard sets membership under the lock
-  inside `spawn_work_mode_handoff`, but `_run_with_cleanup` (line 334-345) discards
-  membership in a `finally` block. Between the daemon thread starting and finishing
-  there is no liveness check — if a thread silently dies before reaching the
-  `finally` (e.g., interpreter crash, an exception in `threading.Thread.start`
-  callback), `_IN_FLIGHT_HANDOFFS` retains the stale `thread_id` forever and all
-  subsequent handoff attempts for that thread are dropped as duplicates.
+- **Issue:** `_IN_FLIGHT_HANDOFFS` is protected by a lock, so the set-add itself is
+  not racy. The real failure mode is that `spawn_work_mode_handoff` adds `thread_id`
+  to the set before `worker.start()`. If thread startup raises, `_run_with_cleanup`
+  never runs and the `finally` cleanup at lines 334-345 cannot discard the id. Normal
+  exceptions inside the worker are cleaned up correctly, but this startup edge case
+  leaves later handoff attempts for the same thread classified as duplicates.
 - **Impact:** Work handoff silently disabled until process restart.
 - **Recommendation:** Use a `WeakValueDictionary` keyed by `thread_id` → `Thread`
   object, and on the duplicate-check path probe `existing_thread.is_alive()` before
@@ -54,26 +52,20 @@ reminder messages and `jump_to: "model"`) make the contract leaky.
   `last_completed_ids: list[str]`) so the diff is checkpointed and stable across
   invocations.
 
-### 3. `_is_acyclic` DFS marks `visited` before fully exploring descendants
+### 3. `_is_acyclic` conflates cycle detection with dangling-dependency validation
 - **File:** `backend/src/agents/middlewares/todo_dag_middleware.py:44-64`
 - **Severity:** Critical
-- **Issue:** The DFS sets `visited.add(node_id)` (line 53) before recursing into
-  dependencies. If a recursive call hits a back-edge that returns `False`, the
-  outer caller propagates `False` correctly. **But** the function also returns
-  `False` when a dependency name doesn't exist in `graph` (line 57-58 — `if dep not
-  in graph: return False`). That branch is taken for "dangling deps" not for
-  cycles. The function is therefore overloaded: it claims to detect cycles but
-  silently fails-closed on dangling dependencies too. Callers (lines 172, 282) use
-  `_is_acyclic` to validate a graph and raise `"Todo dependency graph contains a
-  cycle."` — that message is misleading when the actual problem is a missing
-  dep.
-- **Impact:** Operator sees "cycle" errors that aren't cycles, and the plan
-  evaluator's "dangling deps auto-repair" advertised in `CLAUDE.md` is undermined
-  because `normalize_todo_nodes` filters out invalid deps at line 171 — only
-  intra-graph deps reach `_is_acyclic`. However `merge_todo_nodes` does the same
-  filter at line 275, so the dangling case is unreachable there too. Net: the
-  `if dep not in graph: return False` branch is dead in practice but still
-  obscures the intent.
+- **Issue:** The DFS cycle detection is structurally sound: `visited` plus the active
+  recursion `stack` correctly catches back-edges. The problematic part is instead the
+  dead/overloaded dangling-dependency branch at lines 57-58 (`if dep not in graph:
+  return False`). That branch would report a missing dependency as a cycle, while both
+  current callers filter invalid dependencies before `_is_acyclic` runs. The result is
+  code that suggests broader validation than it actually performs and obscures the
+  intended contract.
+- **Impact:** The current callers are unlikely to surface a false "cycle" error for
+  dangling deps because they filter those deps out first. The risk is maintainability:
+  future callers may rely on `_is_acyclic` for full graph validation and get a
+  misleading cycle failure for non-cycle input.
 - **Recommendation:** Split into two functions: `find_dangling_deps(...)` (returns
   list of missing dep ids) and `_is_acyclic(...)` (pure cycle check). Have callers
   raise distinct exceptions.
@@ -82,15 +74,12 @@ reminder messages and `jump_to: "model"`) make the contract leaky.
 - **File:** `backend/src/agents/middlewares/work_run_handoff.py:113-117, 125-129, 168-175, 274-278, 305-312`
 - **Severity:** Critical
 - **Issue:** Each `client.threads.get_state(...)` / `update_state(...)` returns
-  either a value or a coroutine depending on whether the LangGraph SDK is running
-  in sync or async mode. The code branches on `hasattr(state, "__await__")` and
-  calls `asyncio.run(state)`. `asyncio.run` creates a new event loop and **fails
-  with `RuntimeError: asyncio.run() cannot be called from a running event loop`**
-  if the calling context already has a loop. The daemon thread does not have a
-  loop, so it usually works — but this is fragile, and worse, `asyncio.run` cannot
-  be called multiple times in a row reliably (the SDK's HTTP client may bind to
-  the loop and become unusable on the next call). The retry loop at line 123 will
-  break the connection pool after one iteration.
+  either a value or an awaitable depending on the LangGraph SDK mode. The daemon
+  thread usually has no running event loop, so `asyncio.run(...)` does not normally
+  hit the classic "cannot be called from a running event loop" error here. The real
+  fragility is that repeated `asyncio.run(...)` calls create and close a fresh loop
+  for each SDK awaitable in the same worker. If the SDK client or its HTTP resources
+  bind to the first loop, later retries/state updates can fail intermittently.
 - **Impact:** Title handoff and work handoff intermittently fail on the retry path.
 - **Recommendation:** Use a dedicated, persistent event loop per worker thread
   via `loop = asyncio.new_event_loop(); loop.run_until_complete(coro)` reused for
@@ -107,6 +96,56 @@ reminder messages and `jump_to: "model"`) make the contract leaky.
 - **Impact:** Silent regression: users lose personalization without any signal.
 - **Recommendation:** Replace `print` with `logger.exception(...)` and emit a
   `memory_injection_failed` runtime event so the trajectory captures it.
+
+## Implemented Solutions
+
+### 1. Handoff duplicate guard cleanup
+- **Changed:** `spawn_work_mode_handoff(...)` now removes `thread_id` from
+  `_IN_FLIGHT_HANDOFFS` if `worker.start()` raises, so a failed thread startup
+  cannot permanently suppress future handoffs for that thread.
+- **Files:** `backend/src/agents/middlewares/work_run_handoff.py`,
+  `backend/tests/test_daemon_agent_invoke.py`
+- **Test:** `test_work_mode_handoff_spawn_cleans_guard_when_thread_start_fails`
+
+### 2. Work Mode completion snapshot isolation
+- **Changed:** Removed `WorkModeMiddleware._completed_before` instance state.
+  The completed-todo snapshot now lives in
+  `phase_execution["completed_snapshot_ids"]`, making the diff state-scoped,
+  checkpointed, and safe when one middleware instance is reused across runs.
+- **Files:** `backend/src/agents/middlewares/work_mode_middleware.py`,
+  `backend/tests/test_work_mode_middleware.py`
+- **Tests:** Updated first-cycle and second-cycle completion tests; added
+  `test_completion_snapshot_is_state_scoped_across_shared_middleware_instance`.
+
+### 3. DAG validation contract split
+- **Changed:** `_is_acyclic(...)` is now a pure cycle check. Missing dependency
+  detection lives in `find_dangling_deps(...)`, so future callers can report
+  dangling deps separately instead of conflating them with cycles.
+- **Files:** `backend/src/agents/middlewares/todo_dag_middleware.py`,
+  `backend/tests/test_todo_dag_middleware.py`
+- **Test:** `test_cycle_check_is_separate_from_dangling_dependency_detection`
+
+### 4. Persistent event loop for daemon-thread SDK awaitables
+- **Changed:** Added `_run_awaitable_in_worker(...)` and use one persistent event
+  loop per title/work handoff worker instead of repeated `asyncio.run(...)`
+  calls. The loop is closed in `finally` so both success and failure paths clean
+  up correctly.
+- **Files:** `backend/src/agents/middlewares/work_run_handoff.py`,
+  `backend/tests/test_daemon_agent_invoke.py`
+- **Test:** `test_worker_awaitable_helper_reuses_persistent_loop`
+
+### 5. Memory-context failure visibility
+- **Changed:** `_get_memory_context(...)` now uses `logger.exception(...)`
+  instead of `print(...)` while preserving the existing fail-open behavior of
+  returning an empty memory block on failure.
+- **Files:** `backend/src/agents/work_agent/prompt.py`,
+  `backend/tests/test_prompt_memory_context.py`
+- **Test:** `test_memory_context_logs_exception_instead_of_printing`
+
+### Verification
+- `uvx ruff check src/agents/middlewares/work_mode_middleware.py src/agents/middlewares/work_run_handoff.py src/agents/middlewares/todo_dag_middleware.py src/agents/work_agent/prompt.py tests/test_work_mode_middleware.py tests/test_daemon_agent_invoke.py tests/test_prompt_memory_context.py tests/test_todo_dag_middleware.py`
+- `PYTHONPATH=. uv run pytest tests/test_work_mode_middleware.py tests/test_daemon_agent_invoke.py tests/test_todo_dag_middleware.py tests/test_prompt_memory_context.py::test_memory_context_logs_exception_instead_of_printing -q`
+- Result: `42 passed`
 
 ## High Severity
 
@@ -241,6 +280,94 @@ reminder messages and `jump_to: "model"`) make the contract leaky.
 - **Recommendation:** Have `before_model` return a marker like
   `phase_execution.ephemeral_instruction_consumed_after: "<message_id>"` and
   clear it once consumed.
+
+## Implemented High Severity Solutions
+
+### 6. Todo recovery attempts reset per user turn
+- **Changed:** `TodoFailureRetryMiddleware` now tracks `todo_recovery_turn_key`
+  from the latest real user `HumanMessage`. Recovery attempts continue to
+  increment within the same turn but reset to `1` when a new user turn arrives,
+  avoiding permanent suppression on long-lived threads.
+- **Files:** `backend/src/agents/middlewares/todo_failure_retry_middleware.py`,
+  `backend/tests/test_todo_failure_retry_middleware.py`
+- **Tests:** `test_todo_recovery_attempts_increment_within_same_user_turn`,
+  `test_todo_recovery_attempts_reset_on_new_user_turn`
+
+### 7. Work-mode instruction content is escaped and bounded
+- **Changed:** Work-mode task instructions now escape untrusted todo content,
+  rationale, todo ids, subagent hints, and clarification text before they are
+  wrapped in `<work_mode_instruction>`. Long fields are capped with a truncation
+  marker so plan edits cannot balloon the system message.
+- **Files:** `backend/src/agents/middlewares/work_mode_middleware.py`,
+  `backend/tests/test_work_mode_middleware.py`
+- **Tests:** `test_escapes_todo_content_before_system_message_wrapping`,
+  `test_long_todo_content_is_capped_in_instruction`
+
+### 8. Report behavior requires explicit metadata
+- **Changed:** `_is_report_todo(...)` no longer triggers on broad words like
+  `report` or `comprehensive` in todo content. Report contracts are driven by
+  explicit todo metadata such as `kind="report"` or `artifact_type="report"`.
+  That metadata is preserved through todo normalization and canonical `plan.md`
+  serialization/parsing.
+- **Files:** `backend/src/agents/middlewares/work_mode_middleware.py`,
+  `backend/src/agents/middlewares/todo_dag_middleware.py`,
+  `backend/src/agents/common/handoff.py`,
+  `backend/tests/test_work_mode_middleware.py`
+- **Tests:** `test_report_contract_requires_explicit_report_metadata`,
+  `test_report_contract_uses_explicit_report_kind`
+
+### 9. Runtime memory injection uses a stable sentinel
+- **Changed:** Cached prompts now contain `<!--__MEMORY_INJECTION_POINT__-->`
+  instead of relying on the first `\n<thinking_style>` occurrence. Runtime memory
+  insertion replaces only that sentinel, removes it when memory is empty, and
+  avoids double insertion if a memory block already exists.
+- **Files:** `backend/src/agents/work_agent/prompt.py`,
+  `backend/tests/test_prompt_componentization.py`
+- **Tests:** `test_memory_injection_uses_sentinel_not_soul_thinking_style`,
+  `test_memory_injection_is_idempotent_when_memory_already_present`
+
+### 10. Prompt cache eviction
+- **Changed:** `prompt_cache._cache` is now a bounded `OrderedDict` with
+  LRU-style eviction (`MAX_CACHE_ENTRIES = 64`). Cache hits move entries to the
+  back; inserts evict oldest entries once the cap is exceeded.
+- **Files:** `backend/src/agents/work_agent/prompt_cache.py`,
+  `backend/tests/test_prompt_cache.py`
+- **Test:** `test_prompt_cache_evicts_oldest_entry_when_bounded`
+
+### 11. Canonical `plan.md` handoff validation
+- **Changed:** `_load_canonical_plan_overrides(...)` validates parsed todo nodes
+  before handoff: nodes must be object-shaped, DAG normalization/cycle checks
+  must pass, `ready_ids` are recomputed, and invalid `target_endpoint` values
+  cause fallback to checkpointed state.
+- **Files:** `backend/src/agents/middlewares/work_run_handoff.py`,
+  `backend/tests/test_canonical_plan_md_handoff.py`
+- **Tests:** `test_load_overrides_falls_back_when_plan_md_has_cycle`,
+  `test_load_overrides_falls_back_when_plan_md_has_invalid_target_endpoint`
+
+### 12. In-progress self-heal is age-aware
+- **Changed:** Work Mode records `phase_execution["in_progress_started_at"]`
+  when it assigns a todo. The self-heal path only resets `in_progress` todos
+  whose timestamp is missing or older than the grace threshold, so freshly
+  assigned/running work is not immediately re-queued.
+- **Files:** `backend/src/agents/middlewares/work_mode_middleware.py`,
+  `backend/tests/test_work_mode_middleware.py`
+- **Tests:** `test_fresh_in_progress_todo_is_not_self_healed_to_pending`,
+  `test_stale_in_progress_todo_is_self_healed_to_pending`
+
+### 13. Stale ephemeral instructions are cleared
+- **Changed:** Work Mode now clears `ephemeral_instruction_text` and
+  `ephemeral_instruction_todo_id` when all work is complete, when the plan stalls,
+  and when an in-progress run is waiting rather than assigning fresh work. The
+  injection path also verifies the stored instruction todo id still matches the
+  tracked last todo id.
+- **Files:** `backend/src/agents/middlewares/work_mode_middleware.py`,
+  `backend/tests/test_work_mode_middleware.py`
+- **Test:** `test_clears_ephemeral_instruction_when_no_plan_and_all_completed`
+
+### High Severity Verification
+- `uvx ruff check src/agents/middlewares/work_mode_middleware.py src/agents/middlewares/work_run_handoff.py src/agents/middlewares/todo_dag_middleware.py src/agents/common/handoff.py src/agents/work_agent/prompt.py src/agents/work_agent/prompt_cache.py src/agents/middlewares/todo_failure_retry_middleware.py tests/test_work_mode_middleware.py tests/test_canonical_plan_md_handoff.py tests/test_prompt_componentization.py tests/test_prompt_cache.py tests/test_todo_failure_retry_middleware.py`
+- `PYTHONPATH=. uv run pytest tests/test_work_mode_middleware.py tests/test_canonical_plan_md_handoff.py tests/test_prompt_componentization.py tests/test_prompt_cache.py tests/test_todo_failure_retry_middleware.py tests/test_plan_md_roundtrip.py tests/test_todo_dag_middleware.py -q`
+- Result: `84 passed`
 
 ## Medium Severity
 

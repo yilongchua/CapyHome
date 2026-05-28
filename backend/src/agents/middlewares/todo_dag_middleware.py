@@ -28,6 +28,8 @@ class TodoNodeInput(TypedDict, total=False):
     subagent_type: str | None
     target_endpoint: Literal["primary", "helper"] | None
     tool_budget: int | None
+    kind: str | None
+    artifact_type: str | None
 
 
 def _utc_now_iso() -> str:
@@ -54,14 +56,31 @@ def _is_acyclic(nodes: list[dict[str, Any]]) -> bool:
         visited.add(node_id)
         stack.add(node_id)
         for dep in graph.get(node_id, []):
-            if dep not in graph:
-                return False
-            if not dfs(dep):
+            if dep in graph and not dfs(dep):
                 return False
         stack.remove(node_id)
         return True
 
     return all(dfs(node_id) for node_id in graph)
+
+
+def find_dangling_deps(nodes: list[dict[str, Any]]) -> dict[str, list[str]]:
+    ids = {str(node.get("id")) for node in nodes if isinstance(node, dict) and str(node.get("id") or "").strip()}
+    dangling: dict[str, list[str]] = {}
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or "").strip()
+        if not node_id:
+            continue
+        missing = [
+            str(dep).strip()
+            for dep in (node.get("depends_on") or [])
+            if str(dep).strip() and str(dep).strip() not in ids
+        ]
+        if missing:
+            dangling[node_id] = missing
+    return dangling
 
 
 def _materialize_ready_ids(nodes: list[dict[str, Any]]) -> list[str]:
@@ -147,6 +166,10 @@ def normalize_todo_nodes(raw_todos: list[TodoNodeInput]) -> list[dict[str, Any]]
             "target_endpoint": raw.get("target_endpoint"),
             "tool_budget": raw.get("tool_budget"),
         }
+        for key in ("kind", "artifact_type"):
+            value = str(raw.get(key) or "").strip()
+            if value:
+                node[key] = value
         if rationale:
             node["rationale"] = rationale
         # Preserve planner-side rich fields so downstream consumers (plan
@@ -197,7 +220,7 @@ def merge_todo_nodes(existing_nodes: list[dict[str, Any]], raw_updates: list[Tod
         if "depends_on" in raw:
             deps = [str(dep).strip() for dep in (raw.get("depends_on") or []) if str(dep).strip()]
             target["depends_on"] = deps
-        for key in ("owner", "subagent_type", "target_endpoint", "tool_budget", "rationale"):
+        for key in ("owner", "subagent_type", "target_endpoint", "tool_budget", "rationale", "kind", "artifact_type"):
             if key in raw:
                 target[key] = raw.get(key)
         # Rich fields: preserve unless the patch explicitly sets a new value.
@@ -237,6 +260,10 @@ def merge_todo_nodes(existing_nodes: list[dict[str, Any]], raw_updates: list[Tod
             "target_endpoint": raw.get("target_endpoint"),
             "tool_budget": raw.get("tool_budget"),
         }
+        for key in ("kind", "artifact_type"):
+            value = str(raw.get(key) or "").strip()
+            if value:
+                candidate[key] = value
         rationale = str(raw.get("rationale") or "").strip()
         if rationale:
             candidate["rationale"] = rationale

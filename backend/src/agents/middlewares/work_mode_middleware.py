@@ -47,15 +47,56 @@ from src.agents.middlewares.todo_dag_middleware import _materialize_ready_ids
 logger = logging.getLogger(__name__)
 
 _WORK_MODE_REPEAT_THRESHOLD = 5
+_IN_PROGRESS_SELF_HEAL_GRACE_SECONDS = 60
+_INSTRUCTION_FIELD_MAX_CHARS = 4000
 
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _is_report_todo(todo_content: str) -> bool:
-    lowered = (todo_content or "").lower()
-    return "report" in lowered or "comprehensive" in lowered
+def _parse_utc_iso(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        raw = str(value).strip()
+        if raw.endswith("Z"):
+            raw = f"{raw[:-1]}+00:00"
+        parsed = datetime.fromisoformat(raw)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_stale_timestamp(value: Any, *, now: datetime, grace_seconds: int = _IN_PROGRESS_SELF_HEAL_GRACE_SECONDS) -> bool:
+    parsed = _parse_utc_iso(value)
+    if parsed is None:
+        return True
+    return (now - parsed).total_seconds() >= grace_seconds
+
+
+def _instruction_text(value: Any, *, max_chars: int = _INSTRUCTION_FIELD_MAX_CHARS) -> str:
+    text = str(value or "")
+    if len(text) > max_chars:
+        text = f"{text[:max_chars]}...[truncated]"
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _is_report_todo(node: dict[str, Any]) -> bool:
+    kind = str(node.get("kind") or node.get("todo_kind") or "").strip().lower()
+    artifact_type = str(node.get("artifact_type") or node.get("output_type") or "").strip().lower()
+    if kind == "report" or artifact_type == "report":
+        return True
+    artifacts = node.get("artifacts")
+    if isinstance(artifacts, list):
+        return any(str(item).strip().lower().endswith((".md", ".pdf")) and "report" in str(item).lower() for item in artifacts)
+    return False
 
 
 class WorkModeMiddlewareState(AgentState):
@@ -107,13 +148,6 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
 
     state_schema = WorkModeMiddlewareState
 
-    def __init__(self) -> None:
-        super().__init__()
-        # Snapshot of completed todo IDs from the previous cycle.
-        # None = first call; seeded from current state to suppress spurious
-        # phase_completed events when resuming a thread mid-execution.
-        self._completed_before: frozenset[str] | None = None
-
     def _ephemeral_work_instruction(self, state: dict[str, Any] | None) -> str | None:
         if not isinstance(state, dict):
             return None
@@ -124,6 +158,9 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
         if not instruction_text:
             return None
         todo_id = str(phase_execution.get("last_todo_id") or "").strip()
+        instruction_todo_id = str(phase_execution.get("ephemeral_instruction_todo_id") or "").strip()
+        if instruction_todo_id and instruction_todo_id != todo_id:
+            return None
         if not todo_id:
             return None
         todo_graph = state.get("todo_graph")
@@ -178,6 +215,7 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
         graph = state.get("todo_graph") or {}
         nodes: list[dict] | None = graph.get("nodes") if isinstance(graph, dict) else None
         graph_update: dict[str, Any] | None = None
+        existing_pe: dict = dict(state.get("phase_execution") or {})
 
         # ── No plan yet ────────────────────────────────────────────────────────
         if not nodes:
@@ -196,11 +234,15 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
             item for item in deferred_calls
             if isinstance(item, dict) and item.get("status") not in {"completed", "failed", "timed_out"}
         ]
-        stale_in_progress_ids = [
-            str(n.get("id"))
-            for n in nodes
-            if isinstance(n, dict) and n.get("status") == "in_progress" and n.get("id")
-        ]
+        in_progress_started_at = existing_pe.get("in_progress_started_at") if isinstance(existing_pe.get("in_progress_started_at"), dict) else {}
+        now = datetime.now(UTC)
+        stale_in_progress_ids = []
+        for node in nodes:
+            if not isinstance(node, dict) or node.get("status") != "in_progress" or not node.get("id"):
+                continue
+            node_id = str(node.get("id"))
+            if _is_stale_timestamp(in_progress_started_at.get(node_id), now=now):
+                stale_in_progress_ids.append(node_id)
         can_self_heal_in_progress = plan_status in {"approved", "executing"}
         if stale_in_progress_ids and not running_deferred and can_self_heal_in_progress:
             repaired_nodes: list[dict] = []
@@ -219,11 +261,15 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
         current_completed: frozenset[str] = frozenset(
             n["id"] for n in nodes if n.get("status") == "completed"
         )
-        # First cycle: seed from current state so we don't re-emit phase_completed
-        # for todos that were already done before this run started (resume case).
-        if self._completed_before is None:
-            self._completed_before = current_completed
-        newly_completed = current_completed - self._completed_before
+        completed_snapshot_raw = existing_pe.get("completed_snapshot_ids")
+        if isinstance(completed_snapshot_raw, list):
+            completed_before = frozenset(str(item) for item in completed_snapshot_raw if str(item).strip())
+        else:
+            # First cycle: seed from current state so we don't re-emit
+            # phase_completed for todos that were already done before this run
+            # started (resume case).
+            completed_before = current_completed
+        newly_completed = current_completed - completed_before
 
         writer = get_stream_writer()
 
@@ -245,9 +291,6 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
                     })
                 except Exception:
                     logger.exception("Failed to emit phase_completed SSE for %s", todo_id)
-
-        # Snapshot current completed set for next cycle's diff
-        self._completed_before = current_completed
 
         # ── Find next ready todo ───────────────────────────────────────────────
         ready_ids = _materialize_ready_ids(nodes)
@@ -273,6 +316,17 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
                 nodes=nodes,
                 pending_nodes=pending_nodes,
             )
+        if not pending_ready and has_in_progress:
+            if existing_pe.get("ephemeral_instruction_text"):
+                return {
+                    "phase_execution": {
+                        **existing_pe,
+                        "completed_snapshot_ids": sorted(current_completed),
+                        "ephemeral_instruction_text": "",
+                        "ephemeral_instruction_todo_id": "",
+                    }
+                }
+            return None
 
         # ── All phases complete ────────────────────────────────────────────────
         if not pending_ready:
@@ -285,10 +339,25 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
                         "completed_at": _utc_now_iso(),
                     },
                     "plan_history": _update_plan_history_status(plan_history, plan_id, "completed"),
+                    "phase_execution": {
+                        **existing_pe,
+                        "completed_snapshot_ids": sorted(current_completed),
+                        "ephemeral_instruction_text": "",
+                        "ephemeral_instruction_todo_id": "",
+                    },
                 }
                 if graph_update is not None:
                     update_payload["todo_graph"] = graph_update
                 return update_payload
+            if existing_pe.get("ephemeral_instruction_text"):
+                return {
+                    "phase_execution": {
+                        **existing_pe,
+                        "completed_snapshot_ids": sorted(current_completed),
+                        "ephemeral_instruction_text": "",
+                        "ephemeral_instruction_todo_id": "",
+                    }
+                }
             return None
 
         # ── Emit phase_started and inject instruction ──────────────────────────
@@ -298,11 +367,12 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
         total_phases = len(nodes)
 
         try:
+            safe_phase_content = _instruction_text(next_todo.get("content", ""))
             writer({
                 "type": "phase_started",
                 "source": "work_mode_middleware",
                 "todo_id": next_todo["id"],
-                "content": next_todo.get("content", ""),
+                "content": safe_phase_content,
                 "subagent_type": next_todo.get("subagent_type"),
                 "phase_index": phase_index,
                 "total_phases": total_phases,
@@ -310,21 +380,23 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
         except Exception:
             logger.exception("Failed to emit phase_started SSE for %s", next_todo["id"])
 
-        todo_content = next_todo.get("content", "")
-        rationale = str(next_todo.get("rationale") or "").strip()
+        raw_todo_content = next_todo.get("content", "")
+        todo_content = _instruction_text(raw_todo_content)
+        safe_todo_id = _instruction_text(next_todo.get("id", ""))
+        rationale = _instruction_text(str(next_todo.get("rationale") or "").strip())
         rationale_block = f"\nRationale: {rationale}" if rationale else ""
         subagent_hint = ""
         if next_todo.get("subagent_type"):
-            subagent_hint = f" Use a {next_todo['subagent_type']} subagent if available."
+            subagent_hint = f" Use a {_instruction_text(next_todo['subagent_type'])} subagent if available."
 
         clarification_block = ""
         if isinstance(plan_state, dict):
             clarification_text = format_clarification_context_for_work(plan_state)
             if clarification_text:
-                clarification_block = f"\n{clarification_text}\n"
+                clarification_block = f"\n{_instruction_text(clarification_text)}\n"
 
         report_contract = ""
-        if _is_report_todo(todo_content):
+        if _is_report_todo(next_todo):
             report_contract = (
                 "\nUse a two-stage generation contract for speed+accuracy:\n"
                 "Stage A: produce a compact outline plus section-level claims list before drafting full content.\n"
@@ -333,7 +405,6 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
                 "Write the final report to /mnt/user-data/workspace/ (e.g. report.md) and call `present_files` so the user receives it.\n"
                 "Before final write_file, self-check for duplicate table rows, repeated long paragraphs, heading numbering consistency, and required sections.\n"
             )
-        existing_pe: dict = dict(state.get("phase_execution") or {})
         repeat_counts_raw = existing_pe.get("repeat_counts") if isinstance(existing_pe.get("repeat_counts"), dict) else {}
         repeat_counts: dict[str, int] = {}
         for key, value in dict(repeat_counts_raw or {}).items():
@@ -343,6 +414,7 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
                 continue
         forced_reconcile_raw = existing_pe.get("forced_reconcile_done") if isinstance(existing_pe.get("forced_reconcile_done"), dict) else {}
         forced_reconcile_done: dict[str, bool] = {str(key): bool(value) for key, value in dict(forced_reconcile_raw or {}).items()}
+        in_progress_started_at = {str(key): str(value) for key, value in dict(in_progress_started_at or {}).items() if str(key).strip() and str(value).strip()}
         last_todo_id = str(existing_pe.get("last_todo_id") or "").strip()
         repeat_count = repeat_counts.get(next_todo_id, 0) + 1 if last_todo_id == next_todo_id else 1
         repeat_counts[next_todo_id] = repeat_count
@@ -364,8 +436,8 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
             f"Execute the following task now: {todo_content}.{subagent_hint}{rationale_block}\n"
             f"{clarification_block}"
             f"{report_contract}"
-            f"When done, call write_todos to mark todo id '{next_todo['id']}' as completed.\n"
-            f"If write_todos is unexpectedly unavailable, state that explicitly and include the intended status update for todo id '{next_todo['id']}'.\n"
+            f"When done, call write_todos to mark todo id '{safe_todo_id}' as completed.\n"
+            f"If write_todos is unexpectedly unavailable, state that explicitly and include the intended status update for todo id '{safe_todo_id}'.\n"
             f"Do NOT output any text — the system will automatically assign the next phase.\n"
         )
         instruction_kind = "task"
@@ -383,8 +455,8 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
                 },
             )
             instruction_body = (
-                f"Reconcile todo state now for todo id '{next_todo['id']}' only.\n"
-                f"Call write_todos immediately with an explicit status update for '{next_todo['id']}' "
+                f"Reconcile todo state now for todo id '{safe_todo_id}' only.\n"
+                f"Call write_todos immediately with an explicit status update for '{safe_todo_id}' "
                 "(`completed` if done, otherwise `in_progress` or `blocked` with a short reason).\n"
                 "Do not call other tools in this turn.\n"
                 "If write_todos is unexpectedly unavailable, state that explicitly and include the intended status update.\n"
@@ -397,7 +469,7 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
         new_entry: dict = {
             "phase_index": phase_index,
             "todo_id": next_todo["id"],
-            "content": todo_content,
+            "content": raw_todo_content,
             "status": "in_progress",
             "subagent_type": next_todo.get("subagent_type"),
         }
@@ -409,6 +481,7 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
         for todo_id in newly_completed:
             repeat_counts.pop(todo_id, None)
             forced_reconcile_done.pop(todo_id, None)
+            in_progress_started_at.pop(todo_id, None)
             idx = next((i for i, r in enumerate(phase_results) if r.get("todo_id") == todo_id), None)
             if idx is not None and phase_results[idx].get("status") != "completed":
                 phase_results[idx] = {
@@ -416,6 +489,9 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
                     "status": "completed",
                     "completed_at": _utc_now_iso(),
                 }
+
+        if next_todo_id not in in_progress_started_at:
+            in_progress_started_at[next_todo_id] = _utc_now_iso()
 
         plan_update = None
         if plan_state and plan_status == "approved":
@@ -442,9 +518,12 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
                 "phase_results": phase_results,
                 "repeat_counts": repeat_counts,
                 "forced_reconcile_done": forced_reconcile_done,
+                "in_progress_started_at": in_progress_started_at,
                 "last_todo_id": next_todo_id,
                 "last_instruction_kind": instruction_kind,
                 "ephemeral_instruction_text": instruction_body.strip(),
+                "ephemeral_instruction_todo_id": next_todo_id,
+                "completed_snapshot_ids": sorted(current_completed),
             },
         }
         if graph_update is not None:
@@ -499,6 +578,8 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
                 "plan_adapted": True,
                 "adaptation_notes": f"Blocked todos: {blocked_ids}",
                 "adaptation_attempts": current_attempts + 1,
+                "ephemeral_instruction_text": "",
+                "ephemeral_instruction_todo_id": "",
             },
         }
 

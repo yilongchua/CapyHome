@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
+from src.agents.middlewares import work_run_handoff
 from src.agents.middlewares.daemon_agent_invoke import invoke_agent_async, invoke_client_agent_async
 from src.agents.middlewares.pro_followup_middleware import _run_background_followup
 from src.agents.middlewares.work_run_handoff import _run_work_mode_handoff
@@ -52,6 +56,42 @@ def test_run_work_mode_handoff_uses_async_invoke(monkeypatch):
 
     mock_agent.invoke.assert_not_called()
     mock_agent.ainvoke.assert_awaited_once()
+
+
+def test_work_mode_handoff_spawn_cleans_guard_when_thread_start_fails(monkeypatch):
+    work_run_handoff._IN_FLIGHT_HANDOFFS.clear()
+
+    class _FailingThread:
+        def __init__(self, **kwargs):  # noqa: ANN003
+            self.kwargs = kwargs
+
+        def start(self):
+            raise RuntimeError("thread start failed")
+
+    monkeypatch.setattr(work_run_handoff.threading, "Thread", _FailingThread)
+
+    with pytest.raises(RuntimeError, match="thread start failed"):
+        work_run_handoff.spawn_work_mode_handoff(
+            thread_id="thread-start-fails",
+            requested_model_name=None,
+            auto_mode=False,
+        )
+
+    assert "thread-start-fails" not in work_run_handoff._IN_FLIGHT_HANDOFFS
+
+
+def test_worker_awaitable_helper_reuses_persistent_loop():
+    async def loop_id():
+        return id(asyncio.get_running_loop())
+
+    loop = asyncio.new_event_loop()
+    try:
+        first = work_run_handoff._run_awaitable_in_worker(loop_id(), loop)
+        second = work_run_handoff._run_awaitable_in_worker(loop_id(), loop)
+    finally:
+        loop.close()
+
+    assert first == second
 
 
 def test_run_background_followup_uses_async_invoke(monkeypatch):

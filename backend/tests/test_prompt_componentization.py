@@ -162,6 +162,30 @@ def test_build_componentized_prompt_contains_soul(monkeypatch):
     assert "Be precise." in result
 
 
+def test_memory_injection_uses_sentinel_not_soul_thinking_style(monkeypatch):
+    monkeypatch.setattr(prompt_module, "get_agent_soul", lambda name: "<soul>\nNote literal tag:\n<thinking_style>\n</soul>")
+    monkeypatch.setattr(prompt_module, "get_skills_prompt_section", lambda _: "")
+    set_prompt_config(PromptConfig(componentized=True))
+
+    base = prompt_module._build_prompt(False, 3, "research", None)
+    rendered = prompt_module._inject_memory_context(base, "<memory>\nRemember this.\n</memory>")
+
+    assert prompt_module.MEMORY_INJECTION_SENTINEL not in rendered
+    assert rendered.index("<memory>") > rendered.index("</soul>")
+    assert rendered.index("<memory>") < rendered.rindex("<thinking_style>")
+
+
+def test_memory_injection_is_idempotent_when_memory_already_present():
+    prompt = f"<memory>\nExisting.\n</memory>\n{prompt_module.MEMORY_INJECTION_SENTINEL}\n<thinking_style>"
+
+    rendered = prompt_module._inject_memory_context(prompt, "<memory>\nNew.\n</memory>")
+
+    assert prompt_module.MEMORY_INJECTION_SENTINEL not in rendered
+    assert rendered.count("<memory>") == 1
+    assert "Existing." in rendered
+    assert "New." not in rendered
+
+
 def test_build_legacy_prompt_contains_soul(monkeypatch):
     monkeypatch.setattr(prompt_module, "_get_memory_context", lambda agent_name=None: "")
     monkeypatch.setattr(prompt_module, "get_agent_soul", lambda name: "<soul>\nBe methodical.\n</soul>")
@@ -192,7 +216,7 @@ def test_fetch_policy_no_longer_pushes_web_search_first(monkeypatch):
     assert "use `web_search` only when fresh, external, or source-verifiable facts are actually needed" in lowered
 
 
-def test_plan_mode_prompt_overrides_fetch_policy(monkeypatch):
+def test_work_prompt_ignores_deprecated_plan_mode_flag(monkeypatch):
     monkeypatch.setattr(prompt_module, "_get_memory_context", lambda agent_name=None, current_turn_text="": "")
     monkeypatch.setattr(prompt_module, "get_agent_soul", lambda name: "")
     monkeypatch.setattr(prompt_module, "get_skills_prompt_section", lambda _: "")
@@ -200,5 +224,5 @@ def test_plan_mode_prompt_overrides_fetch_policy(monkeypatch):
     rendered = prompt_module.apply_prompt_template(plan_mode=True)
     lowered = rendered.lower()
 
-    assert "expected outcome of plan mode is a plan artifact plus well-scoped todos" in lowered
-    assert "best bubble tea spots in central singapore" in lowered
+    assert "expected outcome of plan mode is a plan artifact plus well-scoped todos" not in lowered
+    assert "<thinking_style>" in rendered

@@ -1,8 +1,12 @@
+import logging
 from datetime import datetime
 
 from src.config.agents_config import load_agent_soul
 from src.config.prompt_config import get_prompt_config
 from src.skills import load_skills
+
+logger = logging.getLogger(__name__)
+MEMORY_INJECTION_SENTINEL = "<!--__MEMORY_INJECTION_POINT__-->"
 
 
 def _build_subagent_section(max_concurrent: int) -> str:
@@ -332,8 +336,8 @@ def _get_memory_context(agent_name: str | None = None, *, current_turn_text: str
 {memory_content}
 </memory>
 """
-    except Exception as e:
-        print(f"Failed to load memory context: {e}")
+    except Exception:
+        logger.exception("Failed to load memory context")
         return ""
 
 
@@ -427,7 +431,7 @@ def _build_prompt(
     available_skills: set[str] | None,
 ) -> str:
     """Render the static system prompt string for prompt-cache storage."""
-    memory_context = ""
+    memory_context = MEMORY_INJECTION_SENTINEL
     n = max_concurrent_subagents
     subagent_section = _build_subagent_section(n) if subagent_enabled else ""
 
@@ -464,12 +468,17 @@ def _build_prompt(
 def _inject_memory_context(prompt: str, memory_context: str) -> str:
     """Insert runtime-scoped memory into a cached static prompt."""
     memory = memory_context.strip()
-    if not memory:
-        return prompt
-    marker = "\n<thinking_style>"
-    if marker not in prompt:
+    if MEMORY_INJECTION_SENTINEL not in prompt:
+        if not memory:
+            return prompt
+        if "<memory>" in prompt:
+            return prompt
         return f"{memory}\n\n{prompt}"
-    return prompt.replace(marker, f"\n{memory}\n\n<thinking_style>", 1)
+    if not memory:
+        return prompt.replace(MEMORY_INJECTION_SENTINEL, "").strip()
+    if "<memory>" in prompt:
+        return prompt.replace(MEMORY_INJECTION_SENTINEL, "").strip()
+    return prompt.replace(MEMORY_INJECTION_SENTINEL, memory, 1)
 
 
 def _build_componentized_prompt(

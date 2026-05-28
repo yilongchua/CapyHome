@@ -1,8 +1,9 @@
+import logging
 from types import SimpleNamespace
 
+from src.agents.memory import prompt as memory_prompt_module
 from src.agents.work_agent import prompt as prompt_module
 from src.agents.work_agent.prompt_cache import invalidate
-from src.agents.memory import prompt as memory_prompt_module
 
 
 def _memory_payload(summary: str) -> dict:
@@ -95,6 +96,18 @@ def test_memory_context_empty_when_all_scopes_disabled(monkeypatch):
 
     assert rendered == ""
     assert calls == []
+
+
+def test_memory_context_logs_exception_instead_of_printing(monkeypatch, caplog):
+    invalidate()
+    monkeypatch.setattr("src.config.memory_config.get_memory_config", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    with caplog.at_level(logging.ERROR, logger="src.agents.work_agent.prompt"):
+        rendered = prompt_module._get_memory_context()
+
+    assert rendered == ""
+    assert "Failed to load memory context" in caplog.text
+    assert "boom" in caplog.text
 
 
 def test_memory_injection_suppresses_irrelevant_fallback_facts(monkeypatch):

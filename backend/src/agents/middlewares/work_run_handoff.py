@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import threading
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from src.agents.common.handoff import parse_plan_md
+from src.agents.middlewares.todo_dag_middleware import _materialize_ready_ids, normalize_todo_nodes
 from src.config.handoffs_config import get_handoffs_config
 from src.sandbox.path_mapping import replace_virtual_path
 
@@ -17,6 +19,34 @@ logger = logging.getLogger(__name__)
 
 _HANDOFF_GUARD = threading.Lock()
 _IN_FLIGHT_HANDOFFS: set[str] = set()
+_VALID_TARGET_ENDPOINTS = {"primary", "helper"}
+
+
+def _run_awaitable_in_worker(value: Any, loop: asyncio.AbstractEventLoop | None) -> Any:
+    """Resolve SDK awaitables on the worker's persistent event loop."""
+    if not hasattr(value, "__await__"):
+        return value
+    if loop is None:
+        return asyncio.run(value)
+    return loop.run_until_complete(value)
+
+
+def _validate_canonical_todo_graph(parsed_graph: dict[str, Any]) -> dict[str, Any]:
+    raw_nodes = parsed_graph.get("nodes") if isinstance(parsed_graph, dict) else None
+    if not isinstance(raw_nodes, list):
+        raise ValueError("canonical plan todo_graph.nodes must be a list")
+    for node in raw_nodes:
+        if not isinstance(node, dict):
+            raise ValueError("canonical plan todo_graph.nodes must contain objects only")
+        target_endpoint = node.get("target_endpoint")
+        if target_endpoint is not None and str(target_endpoint).strip() not in _VALID_TARGET_ENDPOINTS:
+            raise ValueError(f"invalid target_endpoint for todo {node.get('id')!r}: {target_endpoint!r}")
+    nodes = normalize_todo_nodes(raw_nodes)
+    return {
+        **parsed_graph,
+        "nodes": nodes,
+        "ready_ids": _materialize_ready_ids(nodes),
+    }
 
 
 def _load_canonical_plan_overrides(values: dict[str, Any]) -> dict[str, Any]:
@@ -61,6 +91,11 @@ def _load_canonical_plan_overrides(values: dict[str, Any]) -> dict[str, Any]:
     if parsed is None:
         return {}
     parsed_plan, parsed_graph = parsed
+    try:
+        parsed_graph = _validate_canonical_todo_graph(parsed_graph)
+    except ValueError as exc:
+        logger.warning("plan.md failed canonical todo validation for thread handoff: %s", exc)
+        return {}
     # Carry forward fields that only the runtime knows about so we don't
     # accidentally clobber them with frontmatter defaults.
     for key in (
@@ -105,15 +140,13 @@ def _run_title_handoff_if_missing(*, thread_id: str, delay_seconds: float) -> No
     from langgraph_sdk import get_client
 
     time.sleep(delay_seconds)
+    loop = asyncio.new_event_loop()
     try:
         client = get_client(url=_langgraph_url())
         state = client.threads.get_state(thread_id)
         # Async SDK methods are awaited at call sites in routers; here we are in
-        # a daemon thread, so we use the sync-like wrappers exposed by the SDK.
-        if hasattr(state, "__await__"):
-            import asyncio
-
-            state = asyncio.run(state)
+        # a daemon thread, so resolve awaitables on one loop for the worker.
+        state = _run_awaitable_in_worker(state, loop)
         values = state.get("values") if isinstance(state, dict) else getattr(state, "values", {}) or {}
         current_title = _normalize_title(values.get("title")) if isinstance(values, dict) else ""
         if current_title:
@@ -123,15 +156,14 @@ def _run_title_handoff_if_missing(*, thread_id: str, delay_seconds: float) -> No
         for _ in range(4):
             try:
                 result = client.threads.update_state(thread_id, {"title": fallback_title})
-                if hasattr(result, "__await__"):
-                    import asyncio
-
-                    asyncio.run(result)
+                _run_awaitable_in_worker(result, loop)
                 return
             except Exception:
                 time.sleep(0.4)
     except Exception:
         logger.exception("Automatic title handoff failed for thread %s", thread_id)
+    finally:
+        loop.close()
 
 
 def spawn_title_handoff_if_missing(*, thread_id: str, delay_seconds: float = 0.6, thread_name_suffix: str = "") -> None:
@@ -165,12 +197,9 @@ def _handoff_context_message(original_user_request: str | None, clarification_bl
     return messages
 
 
-def _read_thread_values(client: Any, thread_id: str) -> dict[str, Any]:
+def _read_thread_values(client: Any, thread_id: str, *, loop: asyncio.AbstractEventLoop | None = None) -> dict[str, Any]:
     state = client.threads.get_state(thread_id)
-    if hasattr(state, "__await__"):
-        import asyncio
-
-        state = asyncio.run(state)
+    state = _run_awaitable_in_worker(state, loop)
     raw_values = state.get("values") if isinstance(state, dict) else getattr(state, "values", {}) or {}
     return raw_values if isinstance(raw_values, dict) else {}
 
@@ -194,124 +223,122 @@ def _run_work_mode_handoff(
     from src.client import CapyHomeClient
 
     time.sleep(delay_seconds)
-    lg_client = get_client(url=_langgraph_url())
-    # Ensure the thread has a visible title before work execution begins.
-    spawn_title_handoff_if_missing(thread_id=thread_id, thread_name_suffix="-pre-work")
-    handoff_cfg = get_handoffs_config()
-    max_attempts = 1 + int(handoff_cfg.work_handoff_retry_attempts)
-    recursion_limit = int(handoff_cfg.work_handoff_recursion_limit)
-    last_error: Exception | None = None
+    loop = asyncio.new_event_loop()
+    try:
+        lg_client = get_client(url=_langgraph_url())
+        # Ensure the thread has a visible title before work execution begins.
+        spawn_title_handoff_if_missing(thread_id=thread_id, thread_name_suffix="-pre-work")
+        handoff_cfg = get_handoffs_config()
+        max_attempts = 1 + int(handoff_cfg.work_handoff_retry_attempts)
+        recursion_limit = int(handoff_cfg.work_handoff_recursion_limit)
+        last_error: Exception | None = None
 
-    for attempt in range(1, max_attempts + 1):
-        values: dict[str, Any] = {}
-        try:
+        for attempt in range(1, max_attempts + 1):
+            values: dict[str, Any] = {}
             try:
-                values = _read_thread_values(lg_client, thread_id)
-            except Exception:
-                logger.debug("Could not read thread state before work handoff for %s", thread_id, exc_info=True)
-            client = CapyHomeClient(
-                model_name=requested_model_name,
-                thinking_enabled=True,
-                subagent_enabled=True,
-                plan_mode=False,
-                auto_mode=auto_mode,
-            )
-            config = client._get_runnable_config(  # noqa: SLF001
-                thread_id,
-                model_name=requested_model_name,
-                thinking_enabled=True,
-                subagent_enabled=True,
-                auto_mode=auto_mode,
-                mode="work",
-                current_turn_text=original_user_request or "",
-                original_user_request=original_user_request or "",
-            )
-            config["recursion_limit"] = recursion_limit
-            config["configurable"].update(
-                {
-                    "current_mode": "work",
-                    "mode": "work",  # legacy alias; remove after step 8
-                    "is_plan_mode": False,  # legacy dual-write; remove after step 8
-                    "background_followup": False,
-                    "plan_behavior": "work_interactive",
-                }
-            )
-            clarification_block = ""
-            if isinstance(values, dict):
-                plan = values.get("plan")
+                try:
+                    values = _read_thread_values(lg_client, thread_id, loop=loop)
+                except Exception:
+                    logger.debug("Could not read thread state before work handoff for %s", thread_id, exc_info=True)
+                client = CapyHomeClient(
+                    model_name=requested_model_name,
+                    thinking_enabled=True,
+                    subagent_enabled=True,
+                    plan_mode=False,
+                    auto_mode=auto_mode,
+                )
+                config = client._get_runnable_config(  # noqa: SLF001
+                    thread_id,
+                    model_name=requested_model_name,
+                    thinking_enabled=True,
+                    subagent_enabled=True,
+                    auto_mode=auto_mode,
+                    mode="work",
+                    current_turn_text=original_user_request or "",
+                    original_user_request=original_user_request or "",
+                )
+                config["recursion_limit"] = recursion_limit
+                config["configurable"].update(
+                    {
+                        "current_mode": "work",
+                        "mode": "work",  # legacy alias; remove after step 8
+                        "is_plan_mode": False,  # legacy dual-write; remove after step 8
+                        "background_followup": False,
+                        "plan_behavior": "work_interactive",
+                    }
+                )
+                clarification_block = ""
+                if isinstance(values, dict):
+                    plan = values.get("plan")
+                    if isinstance(plan, dict):
+                        clarification_block = format_clarification_context_for_work(plan)
+                handoff_messages = _handoff_context_message(original_user_request, clarification_block)
+                invoke_state: dict[str, Any] = {"messages": handoff_messages}
+                # Canonical plan.md handoff: if the on-disk plan.md was edited by
+                # the user between approval and now, honor those edits by parsing
+                # the file and overriding plan + todo_graph in the new run's input.
+                invoke_state.update(_load_canonical_plan_overrides(values))
+                invoke_client_agent_async(
+                    client,
+                    invoke_state,
+                    config=config,
+                    context={
+                        "thread_id": thread_id,
+                        "current_mode": "work",
+                        "mode": "work",  # legacy alias; remove after step 8
+                        "is_plan_mode": False,  # legacy dual-write; remove after step 8
+                        "background_followup": False,
+                        "plan_behavior": "work_interactive",
+                        "model_name": requested_model_name,
+                        "auto_mode": auto_mode,
+                        "current_turn_text": original_user_request or "",
+                        "original_user_request": original_user_request or "",
+                    },
+                )
+                try:
+                    latest_values = _read_thread_values(lg_client, thread_id, loop=loop)
+                except Exception:
+                    latest_values = values
+                plan = latest_values.get("plan") if isinstance(latest_values, dict) else None
                 if isinstance(plan, dict):
-                    clarification_block = format_clarification_context_for_work(plan)
-            handoff_messages = _handoff_context_message(original_user_request, clarification_block)
-            invoke_state: dict[str, Any] = {"messages": handoff_messages}
-            # Canonical plan.md handoff: if the on-disk plan.md was edited by
-            # the user between approval and now, honor those edits by parsing
-            # the file and overriding plan + todo_graph in the new run's input.
-            invoke_state.update(_load_canonical_plan_overrides(values))
-            invoke_client_agent_async(
-                client,
-                invoke_state,
-                config=config,
-                context={
-                    "thread_id": thread_id,
-                    "current_mode": "work",
-                    "mode": "work",  # legacy alias; remove after step 8
-                    "is_plan_mode": False,  # legacy dual-write; remove after step 8
-                    "background_followup": False,
-                    "plan_behavior": "work_interactive",
-                    "model_name": requested_model_name,
-                    "auto_mode": auto_mode,
-                    "current_turn_text": original_user_request or "",
-                    "original_user_request": original_user_request or "",
-                },
-            )
+                    try:
+                        result = lg_client.threads.update_state(thread_id, {"plan": mark_handoff_succeeded(plan)})
+                        _run_awaitable_in_worker(result, loop)
+                    except Exception:
+                        logger.exception("Failed to persist successful work handoff for thread %s", thread_id)
+                return
+            except Exception as exc:
+                last_error = exc
+                logger.exception(
+                    "Automatic work-mode handoff attempt %s/%s failed for thread %s",
+                    attempt,
+                    max_attempts,
+                    thread_id,
+                )
+                if attempt < max_attempts:
+                    time.sleep(0.8)
+                    continue
+                break
+
+        if last_error is not None:
+            exc = last_error
+            logger.exception("Automatic work-mode handoff failed for thread %s", thread_id)
             try:
-                latest_values = _read_thread_values(lg_client, thread_id)
+                values = _read_thread_values(lg_client, thread_id, loop=loop)
             except Exception:
-                latest_values = values
-            plan = latest_values.get("plan") if isinstance(latest_values, dict) else None
+                values = {}
+            plan = values.get("plan") if isinstance(values, dict) else None
             if isinstance(plan, dict):
                 try:
-                    result = lg_client.threads.update_state(thread_id, {"plan": mark_handoff_succeeded(plan)})
-                    if hasattr(result, "__await__"):
-                        import asyncio
-
-                        asyncio.run(result)
+                    result = lg_client.threads.update_state(
+                        thread_id,
+                        {"plan": mark_handoff_failed(plan, error=str(exc))},
+                    )
+                    _run_awaitable_in_worker(result, loop)
                 except Exception:
-                    logger.exception("Failed to persist successful work handoff for thread %s", thread_id)
-            return
-        except Exception as exc:
-            last_error = exc
-            logger.exception(
-                "Automatic work-mode handoff attempt %s/%s failed for thread %s",
-                attempt,
-                max_attempts,
-                thread_id,
-            )
-            if attempt < max_attempts:
-                time.sleep(0.8)
-                continue
-            break
-
-    if last_error is not None:
-        exc = last_error
-        logger.exception("Automatic work-mode handoff failed for thread %s", thread_id)
-        try:
-            values = _read_thread_values(lg_client, thread_id)
-        except Exception:
-            values = {}
-        plan = values.get("plan") if isinstance(values, dict) else None
-        if isinstance(plan, dict):
-            try:
-                result = lg_client.threads.update_state(
-                    thread_id,
-                    {"plan": mark_handoff_failed(plan, error=str(exc))},
-                )
-                if hasattr(result, "__await__"):
-                    import asyncio
-
-                    asyncio.run(result)
-            except Exception:
-                logger.exception("Failed to persist failed work handoff for thread %s", thread_id)
+                    logger.exception("Failed to persist failed work handoff for thread %s", thread_id)
+    finally:
+        loop.close()
 
 
 def spawn_work_mode_handoff(
@@ -349,4 +376,9 @@ def spawn_work_mode_handoff(
         name=f"work-mode-handoff-{thread_id[:8]}{thread_name_suffix}",
         daemon=True,
     )
-    worker.start()
+    try:
+        worker.start()
+    except Exception:
+        with _HANDOFF_GUARD:
+            _IN_FLIGHT_HANDOFFS.discard(thread_id)
+        raise

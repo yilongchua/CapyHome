@@ -37,6 +37,7 @@ class TodoFailureRetryState(AgentState):
     todo_graph: NotRequired[dict | None]
     todo_recovery_attempts: NotRequired[int]
     todo_schema_recovery_attempts: NotRequired[int]
+    todo_recovery_turn_key: NotRequired[str | None]
 
 
 def _has_incomplete_todos(state: TodoFailureRetryState) -> bool:
@@ -45,6 +46,25 @@ def _has_incomplete_todos(state: TodoFailureRetryState) -> bool:
     if not isinstance(nodes, list) or not nodes:
         return False
     return any(node.get("status") != "completed" for node in nodes if isinstance(node, dict))
+
+
+def _latest_user_turn_key(messages: list[Any]) -> str:
+    injected_names = {
+        "todo_failure_recovery",
+        "todo_reminder",
+        "todo_dag_reminder",
+        "task_deferred",
+        "work_mode_instruction",
+    }
+    for msg in reversed(messages):
+        if not isinstance(msg, HumanMessage):
+            continue
+        if str(getattr(msg, "name", "") or "") in injected_names:
+            continue
+        msg_id = str(getattr(msg, "id", "") or "").strip()
+        content = str(getattr(msg, "content", "") or "")
+        return msg_id or content
+    return ""
 
 
 class TodoFailureRetryMiddleware(AgentMiddleware[TodoFailureRetryState]):
@@ -67,6 +87,9 @@ class TodoFailureRetryMiddleware(AgentMiddleware[TodoFailureRetryState]):
         messages = state.get("messages") or []
         if not messages:
             return None
+        current_turn_key = _latest_user_turn_key(messages)
+        previous_turn_key = str(state.get("todo_recovery_turn_key") or "")
+        turn_changed = bool(current_turn_key and current_turn_key != previous_turn_key)
 
         last = messages[-1]
         if getattr(last, "type", None) != "ai":
@@ -100,7 +123,7 @@ class TodoFailureRetryMiddleware(AgentMiddleware[TodoFailureRetryState]):
                     "jump_to": "model",
                 }
 
-        attempts = int(state.get("todo_recovery_attempts", 0))
+        attempts = 0 if turn_changed else int(state.get("todo_recovery_attempts", 0))
         if attempts >= _MAX_TODO_RECOVERY_ATTEMPTS:
             logger.warning(
                 "todo_failure_recovery suppressed after max attempts. attempts=%s has_incomplete_todos=%s",
@@ -120,6 +143,7 @@ class TodoFailureRetryMiddleware(AgentMiddleware[TodoFailureRetryState]):
         return {
             "messages": [reminder],
             "todo_recovery_attempts": attempts + 1,
+            "todo_recovery_turn_key": current_turn_key or previous_turn_key,
             "jump_to": "model",
         }
 

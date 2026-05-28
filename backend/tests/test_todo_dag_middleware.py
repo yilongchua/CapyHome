@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import HumanMessage
 
-from src.agents.middlewares.todo_dag_middleware import TodoDagMiddleware, normalize_todo_nodes
+from src.agents.middlewares.todo_dag_middleware import TodoDagMiddleware, _is_acyclic, find_dangling_deps, normalize_todo_nodes
 from src.tools.builtins.write_todos_tool import write_todos_tool
 
 
@@ -27,6 +27,16 @@ def test_normalize_todos_rejects_cycles():
                 {"id": "b", "content": "B", "depends_on": ["a"]},
             ]
         )
+
+
+def test_cycle_check_is_separate_from_dangling_dependency_detection():
+    nodes = [
+        {"id": "a", "content": "A", "depends_on": ["missing"]},
+        {"id": "b", "content": "B", "depends_on": ["a"]},
+    ]
+
+    assert _is_acyclic(nodes) is True
+    assert find_dangling_deps(nodes) == {"a": ["missing"]}
 
 
 def test_write_todos_dual_writes_legacy_and_graph():

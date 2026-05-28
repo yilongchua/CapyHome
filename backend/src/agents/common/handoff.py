@@ -161,7 +161,7 @@ def _node_to_frontmatter(node: dict[str, Any]) -> dict[str, Any]:
         "depends_on": [str(d).strip() for d in (node.get("depends_on") or []) if str(d).strip()],
     }
     # Optional rich fields — only emit when present so frontmatter stays clean.
-    for key in ("rationale", "objective", "completion_requirement", "failure_fallback", "owner", "subagent_type", "target_endpoint"):
+    for key in ("rationale", "objective", "completion_requirement", "failure_fallback", "owner", "subagent_type", "target_endpoint", "kind", "artifact_type"):
         value = node.get(key)
         if value:
             out[key] = value
@@ -182,7 +182,7 @@ def _frontmatter_to_node(raw: dict[str, Any]) -> dict[str, Any]:
         "status": str(raw.get("status") or "pending"),
         "depends_on": [str(d).strip() for d in (raw.get("depends_on") or []) if str(d).strip()],
     }
-    for key in ("rationale", "objective", "completion_requirement", "failure_fallback", "owner", "subagent_type", "target_endpoint"):
+    for key in ("rationale", "objective", "completion_requirement", "failure_fallback", "owner", "subagent_type", "target_endpoint", "kind", "artifact_type"):
         if raw.get(key):
             node[key] = raw[key]
     if raw.get("tool_budget") is not None:

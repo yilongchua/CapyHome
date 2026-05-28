@@ -61,6 +61,7 @@ def test_load_overrides_reads_canonical_plan_md_from_workspace(tmp_path: Path):
     assert overrides["plan"]["plan_id"] == "plan-canonical-1"
     assert overrides["plan"]["status"] == "approved"
     assert len(overrides["todo_graph"]["nodes"]) == 2
+    assert overrides["todo_graph"]["ready_ids"] == ["t2"]
 
 
 def test_user_edit_to_plan_md_propagates_through_handoff(tmp_path: Path):
@@ -137,4 +138,47 @@ def test_load_overrides_falls_back_when_plan_md_is_legacy_format(tmp_path: Path)
         "plan": {"latest_alias_path": "/mnt/user-data/workspace/plan.md"},
         "thread_data": {"workspace_path": str(tmp_path)},
     }
+    assert _load_canonical_plan_overrides(values) == {}
+
+
+def test_load_overrides_falls_back_when_plan_md_has_cycle(tmp_path: Path):
+    plan = {"plan_id": "plan-cycle", "title": "Cycle", "status": "approved", "target_mode": "work"}
+    todo_graph = {
+        "nodes": [
+            {"id": "a", "content": "A", "status": "pending", "depends_on": ["b"]},
+            {"id": "b", "content": "B", "status": "pending", "depends_on": ["a"]},
+        ],
+        "ready_ids": [],
+    }
+    _write_canonical_plan_md(tmp_path, plan, todo_graph)
+
+    values = {
+        "plan": {"latest_alias_path": "/mnt/user-data/workspace/plan.md"},
+        "thread_data": {"workspace_path": str(tmp_path)},
+    }
+
+    assert _load_canonical_plan_overrides(values) == {}
+
+
+def test_load_overrides_falls_back_when_plan_md_has_invalid_target_endpoint(tmp_path: Path):
+    plan = {"plan_id": "plan-endpoint", "title": "Endpoint", "status": "approved", "target_mode": "work"}
+    todo_graph = {
+        "nodes": [
+            {
+                "id": "a",
+                "content": "A",
+                "status": "pending",
+                "depends_on": [],
+                "target_endpoint": "not-real",
+            },
+        ],
+        "ready_ids": ["a"],
+    }
+    _write_canonical_plan_md(tmp_path, plan, todo_graph)
+
+    values = {
+        "plan": {"latest_alias_path": "/mnt/user-data/workspace/plan.md"},
+        "thread_data": {"workspace_path": str(tmp_path)},
+    }
+
     assert _load_canonical_plan_overrides(values) == {}
