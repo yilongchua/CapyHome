@@ -102,17 +102,55 @@ def test_user_edit_to_todo_content_propagates_through_parse():
     assert t2["content"] == "Visit and rate top 7 (user expanded scope)"
 
 
-def test_clarifications_roundtrip_including_empty_state():
+def test_v6_plan_md_does_not_carry_clarifications_in_frontmatter():
+    """As of v6, clarifications live on ThreadState (top-level), not in the
+    plan frontmatter. Serializing a plan with clarifications attached should
+    silently drop them — the serializer is plan-only."""
     plan = _basic_plan()
-    plan["clarifications"] = [
-        {"question": "Vegan options only?", "options": [{"label": "yes"}, {"label": "no"}]},
-    ]
-    plan["clarification_answers"] = [{"question": "Vegan options only?", "answer": "no"}]
-    plan["clarification_pending"] = False
-    plan["clarification_resolved"] = True
+    plan["clarifications"] = [{"question": "Vegan options only?", "options": [{"label": "yes"}]}]
+    plan["clarification_pending"] = True
 
     text = serialize_plan_md(plan, _basic_todo_graph())
+    assert "clarifications:" not in text  # not emitted in v6 frontmatter
     parsed = parse_plan_md(text)
+    assert parsed is not None
+    parsed_plan, _ = parsed
+    # v6 parse path doesn't surface clarifications on the plan dict at all.
+    assert "clarifications" not in parsed_plan
+
+
+def test_v5_plan_md_still_parses_and_surfaces_clarifications_for_migration():
+    """Legacy v5 plan.md files (clarifications nested in frontmatter) must
+    still be readable so ThreadState can hoist the entries on first load."""
+    v5_text = (
+        "---\n"
+        "plan_version: 5\n"
+        "plan_id: legacy-1\n"
+        "title: Legacy\n"
+        "status: draft\n"
+        "domain: generic\n"
+        "target_mode: work\n"
+        "objective: x\n"
+        "summary: x\n"
+        "assumptions: []\n"
+        "constraints: []\n"
+        "risks: []\n"
+        "acceptance_criteria: []\n"
+        "todos: []\n"
+        "todo_ready_ids: []\n"
+        "clarifications:\n"
+        "  - question: Vegan options only?\n"
+        "    options:\n"
+        '      - label: "yes"\n'
+        '      - label: "no"\n'
+        "clarification_answers:\n"
+        "  - question: Vegan options only?\n"
+        '    answer: "no"\n'
+        "clarification_pending: false\n"
+        "clarification_resolved: true\n"
+        "---\n\n# Legacy\n"
+    )
+    parsed = parse_plan_md(v5_text)
     assert parsed is not None
     parsed_plan, _ = parsed
     assert parsed_plan["clarifications"][0]["question"] == "Vegan options only?"
@@ -156,14 +194,15 @@ def test_rich_todo_fields_survive_roundtrip():
     assert node["artifacts"] == ["candidates.md"]
 
 
-def test_empty_clarifications_default_to_empty_lists():
+def test_v6_plan_md_omits_clarification_fields_entirely():
+    """v6 plan dicts have no clarification fields at all (top-level state)."""
     plan = _basic_plan()  # no clarifications set
     text = serialize_plan_md(plan, _basic_todo_graph())
     parsed = parse_plan_md(text)
     assert parsed is not None
     parsed_plan, _ = parsed
-    assert parsed_plan["clarifications"] == []
-    assert parsed_plan["clarification_answers"] == []
+    for key in ("clarifications", "clarification_answers", "clarification_pending", "clarification_resolved"):
+        assert key not in parsed_plan
 
 
 def test_parser_returns_none_for_non_frontmatter_text():

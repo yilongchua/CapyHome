@@ -786,9 +786,13 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
         # rather than consulting stage-based routing. See src/models/resolver.py.
         model_name = resolve_model_name(self._requested_model)
         model = create_chat_model(name=model_name, thinking_enabled=False)
-        prompt = PLANNER_SYSTEM_PROMPT.replace("{max_steps}", str(self._max_plan_steps)).replace("{max_clarifications}", str(self._max_clarifications))
-        full_prompt = f"{prompt}\n\nUser request:\n{user_prompt}"
-        response = model.invoke(full_prompt)
+        system_prompt = PLANNER_SYSTEM_PROMPT.replace("{max_steps}", str(self._max_plan_steps)).replace("{max_clarifications}", str(self._max_clarifications))
+        response = model.invoke(
+            [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ]
+        )
         output = _parse_plan_response(extract_text(response.content), max_steps=self._max_plan_steps)
         return output, model_name
 

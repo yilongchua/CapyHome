@@ -12,9 +12,15 @@ Format: YAML frontmatter (canonical, machine-readable) + Markdown body
 The frontmatter carries every field needed to reconstruct ``PlanState`` and
 ``TodoGraphState``. The body is informational and is not parsed back.
 
-``plan_version: 5`` marks the canonical-handoff format. Older versions (1–4)
-do not carry structured todos in the frontmatter; ``parse_plan_md`` returns
-``None`` for those so callers fall back to checkpointed state.
+``plan_version: 6`` marks the current canonical-handoff format. Older versions
+(1–4) do not carry structured todos in the frontmatter; ``parse_plan_md``
+returns ``None`` for those so callers fall back to checkpointed state.
+
+Version 6 hoists ``clarifications`` to a top-level ``ThreadState`` field; the
+plan frontmatter no longer carries it. Version 5 plans are still read for
+back-compat — ``parse_plan_md`` returns the hoisted entries via the third
+tuple element so callers can seed ``ThreadState.clarifications`` once and
+re-serialise as v6.
 """
 
 from __future__ import annotations
@@ -24,7 +30,8 @@ from typing import Any
 
 import yaml
 
-CANONICAL_PLAN_VERSION = 5
+CANONICAL_PLAN_VERSION = 6
+MIN_READABLE_PLAN_VERSION = 5
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +44,17 @@ def serialize_plan_md(
 ) -> str:
     """Serialize a plan + todo graph into canonical ``plan.md`` text.
 
-    The frontmatter holds the canonical structured data (plan_version=5).
+    The frontmatter holds the canonical structured data (plan_version=6).
     The body is regenerated for human consumption via ``body_renderer`` if
     provided; otherwise a minimal markdown summary is rendered.
 
     ``body_renderer`` is called as ``body_renderer(plan, nodes)`` and must
     return a markdown string (without the frontmatter).
+
+    Note: as of v6, ``clarifications`` is no longer serialised in the plan
+    frontmatter — it lives at the top level of ``ThreadState``. The fields
+    are preserved here only when explicitly present on ``plan`` (legacy
+    callers that haven't migrated yet) so downstream code keeps working.
     """
     nodes = list((todo_graph or {}).get("nodes") or [])
     ready_ids = list((todo_graph or {}).get("ready_ids") or [])
@@ -64,10 +76,6 @@ def serialize_plan_md(
         "acceptance_criteria": list(plan.get("acceptance_criteria") or []),
         "todos": [_node_to_frontmatter(n) for n in nodes],
         "todo_ready_ids": ready_ids,
-        "clarifications": list(plan.get("clarifications") or []),
-        "clarification_answers": list(plan.get("clarification_answers") or []),
-        "clarification_pending": bool(plan.get("clarification_pending", False)),
-        "clarification_resolved": bool(plan.get("clarification_resolved", False)),
         "total_todos": len(nodes),
         "completed_todos": sum(1 for n in nodes if str(n.get("status") or "") == "completed"),
     }
@@ -84,9 +92,15 @@ def serialize_plan_md(
 def parse_plan_md(text: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
     """Parse canonical plan.md text into ``(plan, todo_graph)``.
 
-    Returns ``None`` if the text is not a canonical plan (no frontmatter, or
-    ``plan_version`` < ``CANONICAL_PLAN_VERSION``). Callers should fall back
-    to checkpointed ``ThreadState`` in that case.
+    Returns ``None`` if the text has no frontmatter or ``plan_version`` is
+    below ``MIN_READABLE_PLAN_VERSION``. Callers should fall back to
+    checkpointed ``ThreadState`` in that case.
+
+    Accepts v5 (legacy: clarifications nested in plan) and v6 (current:
+    clarifications at top level). For v5 input, clarifications are surfaced
+    on ``plan["clarifications"]`` for the caller to hoist into
+    ``ThreadState.clarifications`` — they will not be written back as part of
+    a v6 plan.md the next time the plan is serialised.
 
     Raises ``ValueError`` if the frontmatter is malformed.
     """
@@ -94,7 +108,7 @@ def parse_plan_md(text: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
     if fm is None:
         return None
     version = fm.get("plan_version")
-    if not isinstance(version, int) or version < CANONICAL_PLAN_VERSION:
+    if not isinstance(version, int) or version < MIN_READABLE_PLAN_VERSION:
         return None
 
     plan: dict[str, Any] = {
@@ -111,11 +125,15 @@ def parse_plan_md(text: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
         "constraints": list(fm.get("constraints") or []),
         "risks": list(fm.get("risks") or []),
         "acceptance_criteria": list(fm.get("acceptance_criteria") or []),
-        "clarifications": list(fm.get("clarifications") or []),
-        "clarification_answers": list(fm.get("clarification_answers") or []),
-        "clarification_pending": bool(fm.get("clarification_pending", False)),
-        "clarification_resolved": bool(fm.get("clarification_resolved", False)),
     }
+    # v5 carried clarifications inside the plan frontmatter; surface them so the
+    # caller can hoist them into top-level ThreadState.clarifications. v6 plans
+    # omit these fields entirely.
+    if version == 5:
+        plan["clarifications"] = list(fm.get("clarifications") or [])
+        plan["clarification_answers"] = list(fm.get("clarification_answers") or [])
+        plan["clarification_pending"] = bool(fm.get("clarification_pending", False))
+        plan["clarification_resolved"] = bool(fm.get("clarification_resolved", False))
 
     raw_todos = fm.get("todos") or []
     nodes: list[dict[str, Any]] = []

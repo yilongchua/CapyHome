@@ -294,35 +294,47 @@ function ChatPageContent({
   );
   const clarificationPending =
     clarificationPendingOverride ?? (
+      (thread.values as { clarification_pending?: unknown }).clarification_pending === true ||
       planCreatedEvent?.clarification_pending === true ||
       thread.values.plan?.clarification_pending === true
     );
 
-  const activeClarificationIndex = useMemo(() => {
-    const indexFromEvent = planCreatedEvent?.clarification_index;
-    if (typeof indexFromEvent === "number" && Number.isFinite(indexFromEvent) && indexFromEvent >= 0) {
-      return indexFromEvent;
-    }
-    const indexFromPlan = thread.values.plan?.clarification_index;
-    if (typeof indexFromPlan === "number" && Number.isFinite(indexFromPlan) && indexFromPlan >= 0) {
-      return indexFromPlan;
-    }
-    return 0;
-  }, [planCreatedEvent?.clarification_index, thread.values.plan?.clarification_index]);
+  // NOTE: activeClarificationIndex was used by the legacy per-index submit
+  // flow (POST /plan/clarify with clarification_index). The new batch flow
+  // (POST /clarify) drives tab selection from local state in the popup, so
+  // the index is no longer needed at this layer.
 
   const normalizedClarifications = useMemo(() => {
+    // Source order: (1) top-level ThreadState.clarifications (canonical, post-v6),
+    // (2) plan_created SSE event payload, (3) nested plan.clarifications (legacy
+    // v5 thread state). Only PENDING entries flow through to the UI — answered
+    // entries stay in state for audit but don't render as open tabs.
+    const topLevel = Array.isArray((thread.values as { clarifications?: unknown }).clarifications)
+      ? ((thread.values as { clarifications?: unknown[] }).clarifications ?? [])
+      : null;
     const clarificationsFromEvent = Array.isArray(planCreatedEvent?.clarifications)
       ? planCreatedEvent?.clarifications
       : null;
     const clarificationsFromPlan = Array.isArray(thread.values.plan?.clarifications)
       ? thread.values.plan?.clarifications
       : null;
-    const source = clarificationsFromEvent ?? clarificationsFromPlan ?? [];
+    const source = topLevel ?? clarificationsFromEvent ?? clarificationsFromPlan ?? [];
     return source
       .filter((entry) => Boolean(entry) && typeof entry === "object")
-      .map((entry) => {
-        const raw = entry as { question?: unknown; options?: unknown };
+      .map((entry, idx) => {
+        const raw = entry as {
+          id?: unknown;
+          question?: unknown;
+          options?: unknown;
+          status?: unknown;
+          answer?: unknown;
+        };
+        const id = typeof raw.id === "string" && raw.id.trim().length > 0
+          ? String(raw.id)
+          : `legacy-${idx}`;
         const question = typeof raw.question === "string" ? raw.question : "";
+        const status = raw.status === "answered" ? "answered" : "pending";
+        const answer = typeof raw.answer === "string" ? raw.answer : null;
         const options = Array.isArray(raw.options)
           ? raw.options
               .filter(
@@ -339,9 +351,14 @@ function ChatPageContent({
                   typeof option.description === "string" ? option.description : null,
               }))
           : [];
-        return { question, options };
-      });
-  }, [planCreatedEvent?.clarifications, thread.values.plan?.clarifications]);
+        return { id, question, options, status, answer };
+      })
+      .filter((entry) => entry.status === "pending");
+  }, [
+    (thread.values as { clarifications?: unknown }).clarifications,
+    planCreatedEvent?.clarifications,
+    thread.values.plan?.clarifications,
+  ]);
 
 
   const effectivePlanCreatedEvent = useMemo(() => {
@@ -489,53 +506,52 @@ function ChatPageContent({
     thread.isLoading,
   ]);
 
-  const handleClarifyPlan = useCallback((clarificationIndex: number, selectedOptionLabel: string) => {
-    const run = async () => {
-      try {
-        if (!selectedOptionLabel.trim() || isClarifyingPlan) {
-          return;
+  const handleSubmitClarifications = useCallback(
+    (answers: { clarification_id: string; answer: string }[]) => {
+      const run = async () => {
+        try {
+          if (answers.length === 0 || isClarifyingPlan) {
+            return;
+          }
+          setIsClarifyingPlan(true);
+          const response = await fetch(`${getBackendBaseURL()}/api/threads/${threadId}/clarify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ answers }),
+          });
+          if (!response.ok) {
+            const raw = await response.text();
+            throw new Error(parseErrorDetail(raw));
+          }
+          const result = (await response.json()) as {
+            clarification_pending?: boolean;
+            applied?: number;
+            unresolved?: number;
+          };
+          const pending = result.clarification_pending === true;
+          setClarificationPendingOverride(pending);
+          setPlanCreatedEvent((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  clarification_pending: pending,
+                }
+              : prev,
+          );
+          publishWorkspaceRefresh(["threads", `thread:${threadId}`], {
+            source: "plan-clarify",
+          });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "Unknown error";
+          toast.error(`Failed to save clarifications. ${detail}`);
+        } finally {
+          setIsClarifyingPlan(false);
         }
-        setIsClarifyingPlan(true);
-        const response = await fetch(`${getBackendBaseURL()}${api.threads.clarifyPlan(threadId)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            clarification_index: clarificationIndex,
-            selected_option_label: selectedOptionLabel,
-          }),
-        });
-        if (!response.ok) {
-          const raw = await response.text();
-          throw new Error(parseErrorDetail(raw));
-        }
-        const result = await response.json() as {
-          clarification_pending?: boolean;
-          clarification_index?: number;
-          status?: string;
-        };
-        const pending = result.clarification_pending === true;
-        setClarificationPendingOverride(pending);
-        setPlanCreatedEvent((prev) => (
-          prev
-            ? {
-                ...prev,
-                clarification_pending: pending,
-                clarification_index: typeof result.clarification_index === "number" ? result.clarification_index : prev.clarification_index,
-              }
-            : prev
-        ));
-        publishWorkspaceRefresh(["threads", `thread:${threadId}`], {
-          source: "plan-clarify",
-        });
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : "Unknown error";
-        toast.error(`Failed to save clarification. ${detail}`);
-      } finally {
-        setIsClarifyingPlan(false);
-      }
-    };
-    void run();
-  }, [activeClarificationIndex, isClarifyingPlan, threadId]);
+      };
+      void run();
+    },
+    [isClarifyingPlan, threadId],
+  );
 
   // Auto-trigger Execute Plan when a plan is created and auto_mode is on.
   useEffect(() => {
@@ -985,12 +1001,17 @@ function ChatPageContent({
                       effectivePlanCreatedEvent && !isNewThread && effectivePlanEventKey !== hiddenPlanEventKey,
                     )}
                   />
-                  {effectivePlanCreatedEvent && !isNewThread && clarificationPending && normalizedClarifications.length > 0 && (
+                  {/*
+                    Mount the popup whenever clarifications are pending — no
+                    longer gated on the plan-approval event. Work-mode runs
+                    that surface ask_user_for_clarification mid-execution show
+                    the same tabbed panel as plan-mode draft clarifications.
+                  */}
+                  {!isNewThread && clarificationPending && normalizedClarifications.length > 0 && (
                     <PlanClarificationPopup
                       clarifications={normalizedClarifications}
-                      activeClarificationIndex={activeClarificationIndex}
-                      onClarify={handleClarifyPlan}
-                      isClarifying={isClarifyingPlan}
+                      onSubmit={handleSubmitClarifications}
+                      isSubmitting={isClarifyingPlan}
                     />
                   )}
                   <InputBox

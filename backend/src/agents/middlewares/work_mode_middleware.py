@@ -20,19 +20,15 @@ Instruction rule: The work_mode_instruction HumanMessage must end with
 "Do NOT output any text — the system will automatically assign the next phase."
 If the model outputs text the ReAct loop terminates before all phases complete.
 
-Auto-cycle (Phase 4): when auto_mode=True in the runtime context, plan_adapted
-events automatically spawn a daemon thread that re-invokes the agent with
-mode="plan" after the current run finishes (same pattern as
-ProFollowupMiddleware).  Adaptation attempts are capped at 2; on the third the
-user must intervene manually.  Complexity-based escalation has been removed —
-users opt into Plan Mode directly via the UI (Shift+Tab).
+Plan Mode entry: fully user-initiated via the UI (Shift+Tab). Work Mode never
+auto-escalates to Plan Mode. When a plan paints itself into a corner (all
+remaining todos blocked), a plan_adapted SSE event fires so the UI can surface
+the stall; the user decides whether to switch into Plan Mode to revise.
 """
 
 from __future__ import annotations
 
 import logging
-import threading
-import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, NotRequired, override
@@ -40,7 +36,7 @@ from typing import Any, NotRequired, override
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import SystemMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 
@@ -50,7 +46,6 @@ from src.agents.middlewares.todo_dag_middleware import _materialize_ready_ids
 
 logger = logging.getLogger(__name__)
 
-_MAX_AUTO_ADAPTATION_ATTEMPTS = 2
 _WORK_MODE_REPEAT_THRESHOLD = 5
 
 
@@ -95,79 +90,6 @@ def _update_plan_history_status(history: list[dict] | None, plan_id: str | None,
     return updated
 
 
-def _run_plan_mode_rerun(
-    *,
-    thread_id: str,
-    requested_model_name: str | None,
-    system_message: str,
-) -> None:
-    """Daemon target: re-invoke the agent with mode='plan' after current run finishes.
-
-    Mirrors _run_background_followup in ProFollowupMiddleware. Sleeps briefly to
-    let the Work Mode run reach its checkpoint before starting a new run on the
-    same thread (LangGraph serialises runs per thread via the checkpoint lock).
-    """
-    from src.agents.middlewares.daemon_agent_invoke import invoke_client_agent_async
-    from src.client import CapyHomeClient
-
-    time.sleep(2.0)
-    try:
-        client = CapyHomeClient(
-            model_name=requested_model_name,
-            thinking_enabled=True,
-            subagent_enabled=True,
-            plan_mode=True,
-        )
-        config = client._get_runnable_config(  # noqa: SLF001
-            thread_id,
-            model_name=requested_model_name,
-            thinking_enabled=True,
-            subagent_enabled=True,
-        )
-        config["configurable"].update(
-            {
-                "current_mode": "plan",
-                "mode": "plan",  # legacy alias; remove after step 8
-                "is_plan_mode": True,  # legacy dual-write; remove after step 8
-            }
-        )
-        invoke_client_agent_async(
-            client,
-            {"messages": [HumanMessage(name="work_mode_plan_rerun", content=system_message)]},
-            config=config,
-            context={
-                "thread_id": thread_id,
-                "current_mode": "plan",
-                "mode": "plan",  # legacy alias; remove after step 8
-                "is_plan_mode": True,  # legacy dual-write; remove after step 8
-                "model_name": requested_model_name,
-            },
-        )
-    except Exception:
-        logger.exception("Auto Plan Mode re-invocation failed for thread %s", thread_id)
-
-
-def _spawn_plan_rerun(
-    *,
-    thread_id: str,
-    requested_model_name: str | None,
-    system_message: str,
-    thread_name_suffix: str = "",
-) -> None:
-    """Spawn a daemon thread to re-invoke with mode='plan'."""
-    worker = threading.Thread(
-        target=_run_plan_mode_rerun,
-        kwargs={
-            "thread_id": thread_id,
-            "requested_model_name": requested_model_name,
-            "system_message": system_message,
-        },
-        name=f"work-mode-plan-rerun-{thread_id[:8]}{thread_name_suffix}",
-        daemon=True,
-    )
-    worker.start()
-
-
 class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
     """Drives automatic phase-loop execution in Work Mode.
 
@@ -178,8 +100,9 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
     4. Emits phase_started SSE and injects a HumanMessage instruction
     5. Returns None when all phases are done → model summarises and terminates
 
-    Phase 4 (auto-cycle): when auto_mode=True in runtime context, blocked plans
-    automatically trigger a Plan Mode re-run (capped at 2).
+    When a plan stalls (no ready todos but pending ones remain), a plan_adapted
+    SSE fires so the UI can prompt the user to switch into Plan Mode. Work Mode
+    never auto-escalates on its own.
     """
 
     state_schema = WorkModeMiddlewareState
@@ -248,10 +171,6 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
 
     @override
     def before_model(self, state: WorkModeMiddlewareState, runtime: Runtime) -> dict[str, Any] | None:  # noqa: ARG002
-        runtime_context: dict = getattr(runtime, "context", None) or {}
-        auto_mode: bool = bool(runtime_context.get("auto_mode"))
-        thread_id: str | None = runtime_context.get("thread_id")
-        requested_model_name: str | None = runtime_context.get("model_name")
         plan_state = dict(state.get("plan") or {})
         plan_history = [item for item in (state.get("plan_history") or []) if isinstance(item, dict)]
         plan_status = _normalize_plan_status(plan_state.get("status"))
@@ -353,9 +272,6 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
                 state=state,
                 nodes=nodes,
                 pending_nodes=pending_nodes,
-                auto_mode=auto_mode,
-                thread_id=thread_id,
-                requested_model_name=requested_model_name,
             )
 
         # ── All phases complete ────────────────────────────────────────────────
@@ -550,16 +466,17 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
         state: WorkModeMiddlewareState,
         nodes: list[dict],
         pending_nodes: list[dict],
-        auto_mode: bool,
-        thread_id: str | None,
-        requested_model_name: str | None,
     ) -> dict[str, Any] | None:
-        """Emit plan_adapted SSE. If auto_mode and under the attempt limit, spawn a Plan Mode re-run."""
+        """Emit a plan_adapted SSE so the UI can surface the stall.
+
+        Work Mode does not auto-respawn Plan Mode — the user decides whether to
+        switch into Plan Mode to revise the plan. The adaptation_attempts counter
+        is kept as a diagnostic so repeated stalls are visible in state.
+        """
         existing_pe: dict = dict(state.get("phase_execution") or {})
         current_attempts: int = int(existing_pe.get("adaptation_attempts") or 0)
 
         blocked_ids = [n["id"] for n in nodes if n.get("status") == "blocked"]
-        pending_ids = [n["id"] for n in pending_nodes]
 
         try:
             writer = get_stream_writer()
@@ -569,48 +486,19 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
                 "blocked_ids": blocked_ids,
                 "message": (
                     f"{len(pending_nodes)} pending todo(s) have unmet dependencies. "
-                    "The plan needs revision."
+                    "Switch to Plan Mode to revise the plan."
                 ),
                 "adaptation_attempt": current_attempts + 1,
-                "max_attempts": _MAX_AUTO_ADAPTATION_ATTEMPTS,
             })
         except Exception:
             logger.exception("Failed to emit plan_adapted SSE")
-
-        new_attempts = current_attempts + 1
-
-        # Cap auto-cycle at _MAX_AUTO_ADAPTATION_ATTEMPTS; beyond that require user confirmation.
-        if auto_mode and isinstance(thread_id, str) and thread_id and current_attempts < _MAX_AUTO_ADAPTATION_ATTEMPTS:
-            blocked_context = ", ".join(blocked_ids) if blocked_ids else "none"
-            pending_context = ", ".join(pending_ids)
-            _spawn_plan_rerun(
-                thread_id=thread_id,
-                requested_model_name=requested_model_name,
-                system_message=(
-                    "The current Work Mode execution has encountered blocked todos. "
-                    f"Blocked todo IDs: [{blocked_context}]. "
-                    f"Pending (unstarted) todo IDs: [{pending_context}]. "
-                    "Please revise the plan to resolve these dependency issues and generate "
-                    "an updated plan that can be executed without circular or unresolved dependencies."
-                ),
-                thread_name_suffix=f"-adapt{new_attempts}",
-            )
-            logger.info(
-                "Auto-cycle: spawned Plan Mode re-run (adaptation attempt %d/%d) for thread %s",
-                new_attempts, _MAX_AUTO_ADAPTATION_ATTEMPTS, thread_id,
-            )
-        elif auto_mode and current_attempts >= _MAX_AUTO_ADAPTATION_ATTEMPTS:
-            logger.warning(
-                "Auto-cycle adaptation limit reached (%d attempts) for thread %s — user intervention required",
-                current_attempts, thread_id,
-            )
 
         return {
             "phase_execution": {
                 **existing_pe,
                 "plan_adapted": True,
                 "adaptation_notes": f"Blocked todos: {blocked_ids}",
-                "adaptation_attempts": new_attempts,
+                "adaptation_attempts": current_attempts + 1,
             },
         }
 

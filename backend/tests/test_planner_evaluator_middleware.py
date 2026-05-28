@@ -119,10 +119,16 @@ def test_planner_uses_original_request_when_latest_human_is_synthetic(monkeypatc
     update = middleware.before_model(state, _runtime())
 
     assert update is not None
-    assert original in captured["prompt"]
-    assert "previous user request" not in captured["prompt"].split("User request:", 1)[1]
-    handoff = next(msg for msg in update["messages"] if getattr(msg, "name", "") == "planner_handoff")
-    assert f"Original request: {original}" in handoff.content
+    # _invoke_planner now sends [SystemMessage(rules), HumanMessage(user_request)].
+    # The HumanMessage carries the ORIGINAL request, not the synthetic later one.
+    prompt_messages = captured["prompt"]
+    assert isinstance(prompt_messages, list)
+    human_messages = [m for m in prompt_messages if isinstance(m, HumanMessage)]
+    assert len(human_messages) == 1
+    assert human_messages[0].content == original
+    assert "previous user request" not in human_messages[0].content
+    handoff_text = update.get("planner_ephemeral_handoff") or ""
+    assert f"Original request: {original}" in handoff_text
 
 
 def test_planner_skips_direct_answer_comparison_without_llm(monkeypatch, tmp_path: Path):

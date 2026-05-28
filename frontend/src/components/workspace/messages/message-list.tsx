@@ -57,6 +57,22 @@ import { MessageListItem } from "./message-list-item";
 import { MessageListSkeleton } from "./skeleton";
 import { SubtaskCard } from "./subtask-card";
 
+/**
+ * Inline breadcrumb for clarification tool messages. The full Q/A flow lives
+ * in the side-panel `PlanClarificationPopup` (tabbed UI); this is just a
+ * one-line audit trail in the chat so the user can scroll back and see
+ * "yes, the agent paused to ask X here".
+ */
+function ClarificationBreadcrumb({ content }: { content: string }) {
+  // Trim noisy whitespace / leading newlines the middleware may emit.
+  const text = content.trim() || "🤚 Clarification queued — see panel";
+  return (
+    <div className="text-muted-foreground my-1 flex items-start gap-2 rounded-md border border-dashed bg-muted/20 px-3 py-1.5 text-xs italic">
+      <span className="leading-relaxed">{text}</span>
+    </div>
+  );
+}
+
 function ProgressOperationRow({ operation }: { operation: ProgressOperation }) {
   const isActive = operation.status === "active";
   const isFailed = operation.status === "failed";
@@ -526,18 +542,19 @@ export function MessageList({
               );
             });
           } else if (group.type === "assistant:clarification") {
+            // ClarificationMiddleware now writes a one-line breadcrumb
+            // (e.g. "🤚 Clarification queued: ... — see panel") while the
+            // full Q/A flow lives in PlanClarificationPopup. Render as a
+            // compact note rather than full markdown — the user is meant
+            // to act on the side-panel tabs, not the inline message.
             const message = group.messages[0];
-            if (message && hasContent(message)) {
-              return (
-                <MarkdownContent
-                  key={group.id}
-                  content={extractContentFromMessage(message)}
-                  isLoading={thread.isLoading}
-                  rehypePlugins={rehypePlugins}
-                />
-              );
+            const content = message && hasContent(message) ? extractContentFromMessage(message) : "";
+            if (!content) {
+              return null;
             }
-            return null;
+            return (
+              <ClarificationBreadcrumb key={group.id} content={content} />
+            );
           } else if (group.type === "assistant:present-files") {
             const files: string[] = [];
             for (const message of group.messages) {

@@ -23,41 +23,26 @@ def ask_user_for_clarification_tool(
     ],
     context: str | None = None,
     options: list[ClarificationOption] | None = None,
+    blocks: list[str] | None = None,
+    urgency: Literal["deferrable", "blocking"] = "deferrable",
 ) -> str:
-    """Ask the user for clarification when you need more information to proceed.
+    """Ask the user for clarification when you need their input.
 
-    Use this tool when you encounter situations where you cannot proceed without user input:
-
-    - **Missing information**: Required details not provided (e.g., file paths, URLs, specific requirements)
-    - **Ambiguous requirements**: Multiple valid interpretations exist
-    - **Approach choices**: Several valid approaches exist and you need user preference
-    - **Risky operations**: Destructive actions that need explicit confirmation (e.g., deleting files, modifying production)
-    - **Suggestions**: You have a recommendation but want user approval before proceeding
-
-    The execution will be interrupted and the question will be presented to the user.
-    Wait for the user's response before continuing.
-
-    When to use ask_user_for_clarification:
-    - You need information that wasn't provided in the user's request
-    - The requirement can be interpreted in multiple ways
-    - Multiple valid implementation approaches exist
-    - You're about to perform a potentially dangerous operation
-    - You have a recommendation but need user approval
-
-    Best practices:
-    - Ask ONE clarification at a time for clarity
-    - Be specific and clear in your question
-    - Don't make assumptions when clarification is needed
-    - For risky operations, ALWAYS ask for confirmation
-    - After calling this tool, execution will be interrupted automatically
+    By default this call is non-blocking: the question is appended to a
+    queue that the user sees as tabs in a side panel, and the run continues
+    on any todos that are not gated by an unanswered clarification. Call
+    this tool multiple times in one turn to surface several questions at
+    once — the user prefers to answer them in a batch.
 
     Args:
-        question: The clarification question to ask the user. Be specific and clear.
-        clarification_type: The type of clarification needed (missing_info, ambiguous_requirement, approach_choice, risk_confirmation, suggestion).
-        context: Optional context explaining why clarification is needed. Helps the user understand the situation.
-        options: Optional list of structured choices (for approach_choice or suggestion types), where each option may include `label`, `recommended`, and `description`.
+        question: The clarification question to ask. Be specific and clear.
+        clarification_type: missing_info, ambiguous_requirement, approach_choice, risk_confirmation, or suggestion.
+        context: Optional one-sentence context explaining why you are asking.
+        options: Optional structured choices. Each option may include `label`, `recommended`, and `description`.
+        blocks: Optional list of todo ids whose readiness depends on this answer. The DAG gate hides them from `ready_ids` until the user answers. Pass `[]` (or omit) for questions that don't gate any specific todo.
+        urgency: `deferrable` (default) queues the question without interrupting the run. `blocking` halts execution immediately until the user answers — use only when no useful progress is possible without the answer.
     """
-    # This is a placeholder implementation
-    # The actual logic is handled by ClarificationMiddleware which intercepts this tool call
-    # and interrupts execution to present the question to the user
+    # Placeholder implementation. ClarificationMiddleware intercepts the call,
+    # appends the question to ThreadState.clarifications, and decides whether
+    # to interrupt the run.
     return "Clarification request processed by middleware"

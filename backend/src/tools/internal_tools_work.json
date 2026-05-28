@@ -1,7 +1,7 @@
 [
   {
     "name": "ask_user_for_clarification",
-    "description": "While executing the plan (or running in Work/Auto mode without a plan), pause and ask the user a single, focused question only when you genuinely cannot proceed without their input. In Work Mode, bias toward making the reasonable call and continuing — the user will redirect you if needed. Execution is interrupted by ClarificationMiddleware via a LangGraph `Command(goto=END)`; control resumes on the user's reply, with their answer threaded back into the next turn. Use for: (1) missing information (a required path, URL, or value was not supplied and cannot be inferred); (2) ambiguous requirements where two or more interpretations would produce materially different output; (3) approach choices when the right call genuinely depends on user preference; (4) risk confirmation for any destructive or irreversible action — required, never assume; (5) suggestion when you have a recommendation and want approval before executing. Do NOT use for: questions you can answer yourself by reading code, calling `recall`, or making a reasonable judgement call. Ask one question per call; do not stack multiple unrelated questions. After this tool is called the run halts — do not emit further tool calls in the same step.",
+    "description": "While executing the plan (or running in Work/Auto mode without a plan), surface a question to the user when their input is needed. Questions are queued into a side panel as tabs; the user reads them and answers in a batch. BY DEFAULT this call is non-blocking: the run continues on any todos that are not gated by an unanswered clarification. Call this tool multiple times in one turn (one question per call) to surface several questions at once — the user prefers a batch over one-at-a-time popups. Use `blocks` to declare which todo ids depend on each answer; TodoDagMiddleware keeps those todos out of `ready_ids` until the user answers. Use `urgency: \"blocking\"` only when no useful progress is possible without the answer (run halts via `Command(goto=END)`). Use for: (1) missing information that cannot be inferred; (2) ambiguous requirements producing materially different output; (3) approach choices that genuinely depend on user preference; (4) risk confirmation for any destructive action (required, never assume); (5) suggestion when you have a recommendation. Do NOT use for: questions you can answer by reading code, calling `recall`, or making a reasonable judgement call. One focused question per call.",
     "handler": "src.tools.builtins.clarification_tool:ask_user_for_clarification_tool",
     "mode": ["work", "auto"],
     "phase": ["draft", "approved"],
@@ -9,13 +9,13 @@
     "endpoint": "any",
     "requires_vision": false,
     "requires_subagent_enabled": false,
-    "returns": "Sentinel string ('Clarification request processed by middleware'); the real effect is a LangGraph interrupt that surfaces the question and any options to the client and resumes the run when the user responds. The user's reply arrives as the next message.",
+    "returns": "Sentinel string ('Clarification request processed by middleware'). The real effect: ClarificationMiddleware appends the question to ThreadState.clarifications, flips `clarification_pending=true`, and recomputes DAG readiness so todos listed in `blocks` are gated. Deferrable calls do not halt the run; blocking calls halt via Command(goto=END). The user answers via POST /api/threads/{id}/clarify; the next turn sees the answer in state.",
     "examples": [
-      "ask_user_for_clarification(question=\"Which database should I migrate?\", clarification_type=\"approach_choice\", context=\"The repo has both a staging and a prod connection string in env.\", options=[{\"label\": \"staging\", \"description\": \"Safer first target.\", \"recommended\": true}, {\"label\": \"prod\", \"description\": \"Affects live users.\"}])",
-      "ask_user_for_clarification(question=\"This will delete 3,200 records in `orders`. Proceed?\", clarification_type=\"risk_confirmation\", context=\"Bulk cleanup requested in the user's prompt; effect is irreversible.\")",
-      "ask_user_for_clarification(question=\"Should I update the README to reflect this rename?\", clarification_type=\"suggestion\", context=\"The README still references the old module name in three places.\")",
-      "ask_user_for_clarification(question=\"Which client's invoice should I draft first?\", clarification_type=\"approach_choice\", context=\"Two unpaid engagements are in scope this week.\", options=[{\"label\": \"Acme Corp\", \"description\": \"Invoice due tomorrow.\", \"recommended\": true}, {\"label\": \"Beta Pte Ltd\", \"description\": \"Invoice due next week.\"}])",
-      "ask_user_for_clarification(question=\"Filter weekend events to family-friendly only?\", clarification_type=\"approach_choice\", context=\"You asked for Singapore events this weekend; the source has 40+ entries.\", options=[{\"label\": \"Family-friendly only\", \"recommended\": true}, {\"label\": \"All events\", \"description\": \"Includes nightlife and 18+.\"}])"
+      "ask_user_for_clarification(question=\"How much do you intend to invest?\", clarification_type=\"missing_info\", context=\"The recommendation step needs a budget range.\", blocks=[\"todo-sizing\", \"todo-recommend\"], options=[{\"label\": \"Under SGD 50k\"}, {\"label\": \"SGD 50k–200k\"}, {\"label\": \"Above SGD 200k\"}])",
+      "ask_user_for_clarification(question=\"Which region of Indonesia is in scope?\", clarification_type=\"approach_choice\", blocks=[\"todo-region-deepdive\", \"todo-recommend\"], options=[{\"label\": \"Java\", \"recommended\": true}, {\"label\": \"Sumatra\"}, {\"label\": \"Eastern Indonesia\"}])",
+      "ask_user_for_clarification(question=\"Which sectors should the screen include?\", clarification_type=\"approach_choice\", blocks=[\"todo-sector-screen\", \"todo-recommend\"])",
+      "ask_user_for_clarification(question=\"This will delete 3,200 records in `orders`. Proceed?\", clarification_type=\"risk_confirmation\", context=\"Effect is irreversible.\", urgency=\"blocking\")",
+      "ask_user_for_clarification(question=\"Should I update the README to reflect this rename?\", clarification_type=\"suggestion\", context=\"The README still references the old module name in three places.\", blocks=[])"
     ],
     "parameters": {
       "type": "object",
@@ -55,6 +55,16 @@
               }
             }
           }
+        },
+        "blocks": {
+          "type": "array",
+          "description": "Optional list of todo ids whose readiness depends on this answer. TodoDagMiddleware will keep these todos out of `ready_ids` until the user answers. Pass `[]` (or omit) for questions that don't gate any specific todo.",
+          "items": {"type": "string"}
+        },
+        "urgency": {
+          "type": "string",
+          "enum": ["deferrable", "blocking"],
+          "description": "`deferrable` (default) queues the question and lets the run continue on unblocked todos. `blocking` halts the run immediately until the user answers — use only when no useful progress is possible without the answer."
         }
       }
     }

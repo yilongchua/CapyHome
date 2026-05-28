@@ -4,6 +4,7 @@ import { PencilIcon, PlayIcon, SendIcon, XIcon } from "lucide-react";
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -22,8 +23,18 @@ export type ClarificationOption = {
 };
 
 export type ClarificationItem = {
+  /** Stable id from ThreadState.clarifications. Required for batch submit. */
+  id: string;
   question: string;
   options: ClarificationOption[];
+  /** Pre-existing answer (server-side) — pre-fills the tab and marks it done. */
+  status?: "pending" | "answered";
+  answer?: string | null;
+};
+
+export type ClarificationAnswer = {
+  clarification_id: string;
+  answer: string;
 };
 
 export function PlanApprovalOverlay({
@@ -182,32 +193,50 @@ export function PlanApprovalOverlay({
 
 export function PlanClarificationPopup({
   clarifications,
-  activeClarificationIndex = 0,
-  onClarify,
-  isClarifying = false,
+  onSubmit,
+  isSubmitting = false,
   onDismiss,
   className,
 }: {
   clarifications: ClarificationItem[];
-  activeClarificationIndex?: number;
-  onClarify: (clarificationIndex: number, selectedOptionLabel: string) => void;
-  isClarifying?: boolean;
+  /** Batch submit. Called once with one answer per pending tab. */
+  onSubmit: (answers: ClarificationAnswer[]) => void;
+  isSubmitting?: boolean;
   onDismiss?: () => void;
   className?: string;
 }) {
-  const [selectedTab, setSelectedTab] = useState<number>(
-    Math.min(Math.max(activeClarificationIndex, 0), Math.max(clarifications.length - 1, 0)),
-  );
-
-  useEffect(() => {
-    if (clarifications.length === 0) {
-      return;
+  // Local per-tab draft answers, keyed by clarification id. Server-supplied
+  // answers (status="answered") pre-fill the map so already-resolved tabs
+  // don't appear unanswered.
+  const initialAnswers = useMemo(() => {
+    const seed: Record<string, string> = {};
+    for (const c of clarifications) {
+      if (c.status === "answered" && typeof c.answer === "string" && c.answer.trim()) {
+        seed[c.id] = c.answer;
+      }
     }
-    setSelectedTab((current) => {
-      const bounded = Math.min(Math.max(activeClarificationIndex, 0), clarifications.length - 1);
-      return Number.isFinite(bounded) ? bounded : current;
+    return seed;
+  }, [clarifications]);
+
+  const [answers, setAnswers] = useState<Record<string, string>>(initialAnswers);
+  const [selectedTab, setSelectedTab] = useState<number>(0);
+
+  // When the upstream clarifications list grows (new tab appended), keep the
+  // local draft and merge in any new server-provided answers without clobbering
+  // already-typed drafts.
+  useEffect(() => {
+    setAnswers((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const c of clarifications) {
+        if (c.status === "answered" && typeof c.answer === "string" && c.answer.trim() && !next[c.id]) {
+          next[c.id] = c.answer;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
     });
-  }, [activeClarificationIndex, clarifications.length]);
+  }, [clarifications]);
 
   if (clarifications.length === 0) {
     return null;
@@ -218,6 +247,31 @@ export function PlanClarificationPopup({
   if (!active) {
     return null;
   }
+
+  const isTabAnswered = (id: string) => Boolean((answers[id] ?? "").trim());
+  const allAnswered = clarifications.every((c) => isTabAnswered(c.id));
+  const pendingCount = clarifications.filter((c) => !isTabAnswered(c.id)).length;
+
+  const handleOptionClick = (label: string) => {
+    setAnswers((current) => ({ ...current, [active.id]: label }));
+    // Auto-advance to the next unanswered tab so the user moves through the
+    // batch quickly. If everything else is answered, stay put.
+    const nextIdx = clarifications.findIndex((c, idx) => idx !== safeIndex && !isTabAnswered(c.id) && c.id !== active.id);
+    if (nextIdx >= 0) {
+      setSelectedTab(nextIdx);
+    }
+  };
+
+  const handleSubmit = () => {
+    if (!allAnswered || isSubmitting) {
+      return;
+    }
+    const payload: ClarificationAnswer[] = clarifications.map((c) => ({
+      clarification_id: c.id,
+      answer: answers[c.id] ?? "",
+    }));
+    onSubmit(payload);
+  };
 
   return (
     <div
@@ -230,7 +284,12 @@ export function PlanClarificationPopup({
     >
       <div className="flex items-start justify-between gap-2 px-4 pt-3">
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Clarification needed
+          Clarifications needed
+          {pendingCount > 0 ? (
+            <span className="ml-2 text-foreground">
+              ({pendingCount} pending)
+            </span>
+          ) : null}
         </p>
         {onDismiss ? (
           <Button
@@ -239,7 +298,7 @@ export function PlanClarificationPopup({
             className="text-muted-foreground shrink-0"
             onClick={onDismiss}
             aria-label="Dismiss clarification"
-            disabled={isClarifying}
+            disabled={isSubmitting}
           >
             <XIcon className="size-3.5" />
           </Button>
@@ -251,42 +310,75 @@ export function PlanClarificationPopup({
           aria-label="Clarification questions"
           className="mt-2 flex flex-wrap gap-1 border-b"
         >
-          {clarifications.map((_, index) => (
-            <button
-              key={index}
-              role="tab"
-              type="button"
-              aria-selected={index === safeIndex}
-              onClick={() => setSelectedTab(index)}
-              className={cn(
-                "rounded-t-md border-b-2 px-3 py-1 text-xs font-medium transition-colors",
-                index === safeIndex
-                  ? "border-primary text-foreground"
-                  : "text-muted-foreground border-transparent hover:text-foreground",
-              )}
-            >
-              Q{index + 1}
-            </button>
-          ))}
+          {clarifications.map((c, index) => {
+            const answered = isTabAnswered(c.id);
+            return (
+              <button
+                key={c.id}
+                role="tab"
+                type="button"
+                aria-selected={index === safeIndex}
+                onClick={() => setSelectedTab(index)}
+                className={cn(
+                  "rounded-t-md border-b-2 px-3 py-1 text-xs font-medium transition-colors",
+                  index === safeIndex
+                    ? "border-primary text-foreground"
+                    : "text-muted-foreground border-transparent hover:text-foreground",
+                )}
+                title={answered ? "Answered" : "Awaiting answer"}
+              >
+                Q{index + 1}
+                {!answered ? <span className="ml-0.5 text-amber-500">*</span> : null}
+              </button>
+            );
+          })}
         </div>
         <div className="mt-2 flex max-h-56 flex-col gap-2 overflow-y-auto">
           {active.question ? (
             <p className="text-sm">{active.question}</p>
           ) : null}
-          <div className="flex flex-wrap gap-2">
-            {active.options.map((option) => (
-              <Button
-                key={option.label}
-                size="sm"
-                variant={option.recommended ? "default" : "outline"}
-                onClick={() => onClarify(safeIndex, option.label)}
-                disabled={isClarifying}
-                title={option.description ?? undefined}
-              >
-                {option.label}
-              </Button>
-            ))}
-          </div>
+          {active.options.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {active.options.map((option) => {
+                const selected = (answers[active.id] ?? "") === option.label;
+                return (
+                  <Button
+                    key={option.label}
+                    size="sm"
+                    variant={selected ? "default" : option.recommended ? "default" : "outline"}
+                    onClick={() => handleOptionClick(option.label)}
+                    disabled={isSubmitting}
+                    title={option.description ?? undefined}
+                    className={cn(selected ? "ring-2 ring-primary" : null)}
+                  >
+                    {option.label}
+                  </Button>
+                );
+              })}
+            </div>
+          ) : (
+            <input
+              type="text"
+              value={answers[active.id] ?? ""}
+              onChange={(event) =>
+                setAnswers((current) => ({ ...current, [active.id]: event.target.value }))
+              }
+              placeholder="Type your answer…"
+              className="bg-background placeholder:text-muted-foreground w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-1"
+              disabled={isSubmitting}
+            />
+          )}
+        </div>
+        <div className="mt-3 flex items-center justify-end gap-2">
+          <Button
+            size="sm"
+            onClick={handleSubmit}
+            disabled={!allAnswered || isSubmitting}
+            aria-label="Submit all answers"
+          >
+            <SendIcon className="mr-1 size-3.5" />
+            {isSubmitting ? "Sending…" : `Submit ${clarifications.length} answer${clarifications.length === 1 ? "" : "s"}`}
+          </Button>
         </div>
       </div>
     </div>

@@ -16,6 +16,7 @@ from langgraph.runtime import Runtime
 class TodoDagState(AgentState):
     todo_graph: NotRequired[dict | None]
     todos: NotRequired[list[dict[str, str]] | None]
+    clarifications: NotRequired[list[dict[str, Any]] | None]
 
 
 class TodoNodeInput(TypedDict, total=False):
@@ -73,6 +74,44 @@ def _materialize_ready_ids(nodes: list[dict[str, Any]]) -> list[str]:
         if all(by_id.get(dep, {}).get("status") == "completed" for dep in deps):
             ready.append(node["id"])
     return ready
+
+
+def collect_clarification_blocked_todo_ids(clarifications: list[dict[str, Any]] | None) -> set[str]:
+    """Todo ids gated by at least one pending clarification.
+
+    A clarification's ``blocks`` list names todo ids whose readiness depends
+    on the answer. While the clarification is in ``pending`` status, those
+    todos must NOT appear in ``ready_ids`` even if their dependency chain
+    is otherwise satisfied. Once the clarification flips to ``answered``,
+    the gate releases automatically on the next recompute.
+    """
+    blocked: set[str] = set()
+    if not clarifications:
+        return blocked
+    for entry in clarifications:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("status") or "pending") != "pending":
+            continue
+        for tid in entry.get("blocks") or []:
+            tid_s = str(tid).strip()
+            if tid_s:
+                blocked.add(tid_s)
+    return blocked
+
+
+def compute_effective_ready_ids(
+    nodes: list[dict[str, Any]] | None,
+    clarifications: list[dict[str, Any]] | None,
+) -> list[str]:
+    """Ready ids minus those gated by pending clarifications."""
+    if not nodes:
+        return []
+    base = _materialize_ready_ids(nodes)
+    blocked = collect_clarification_blocked_todo_ids(clarifications)
+    if not blocked:
+        return base
+    return [tid for tid in base if tid not in blocked]
 
 
 def normalize_todo_nodes(raw_todos: list[TodoNodeInput]) -> list[dict[str, Any]]:
@@ -288,7 +327,7 @@ class TodoDagMiddleware(AgentMiddleware[TodoDagState]):
         new_system_message = SystemMessage(content=cast("list[str | dict[str, str]]", new_system_content))
         return await handler(request.override(system_message=new_system_message))
 
-    def _build_reminder(self, state: TodoDagState) -> HumanMessage | None:
+    def _build_reminder(self, state: TodoDagState, effective_ready_ids: list[str]) -> HumanMessage | None:
         graph = state.get("todo_graph") or {}
         nodes = graph.get("nodes") if isinstance(graph, dict) else None
         if not isinstance(nodes, list) or not nodes:
@@ -300,24 +339,51 @@ class TodoDagMiddleware(AgentMiddleware[TodoDagState]):
         recent = messages[-6:] if len(messages) >= 6 else messages
         if any(isinstance(m, HumanMessage) and getattr(m, "name", None) == "todo_reminder" for m in recent):
             return None
-        ready_ids = graph.get("ready_ids") if isinstance(graph, dict) else []
+        # Surface clarification-gated todos so the agent sees why some todos
+        # are not ready even though their deps are satisfied.
+        blocked_by_clarif = collect_clarification_blocked_todo_ids(state.get("clarifications"))
+        clarif_note = ""
+        if blocked_by_clarif:
+            clarif_note = f"\nBlocked by pending clarifications: {sorted(blocked_by_clarif)}"
         return HumanMessage(
             name="todo_reminder",
             content=(
                 "<system_reminder>\n"
                 "Todo DAG remains active. Keep statuses current using `write_todos`.\n"
-                f"Ready todos: {ready_ids}\n"
+                f"Ready todos: {effective_ready_ids}{clarif_note}\n"
                 "</system_reminder>"
             ),
         )
 
+    def _recompute_state(self, state: TodoDagState) -> dict[str, Any] | None:
+        """Recompute effective ready_ids on every before_model.
+
+        Clarification answers and todo-status changes both invalidate the
+        previously-stored ``ready_ids``; recomputing here keeps state in
+        sync without requiring every mutating site to remember to do so.
+        """
+        graph = state.get("todo_graph") or {}
+        nodes = graph.get("nodes") if isinstance(graph, dict) else None
+        if not isinstance(nodes, list) or not nodes:
+            return None
+        effective = compute_effective_ready_ids(nodes, state.get("clarifications"))
+        update: dict[str, Any] = {}
+        existing_ready = list(graph.get("ready_ids") or []) if isinstance(graph, dict) else []
+        if effective != existing_ready:
+            new_graph = dict(graph) if isinstance(graph, dict) else {}
+            new_graph["nodes"] = nodes
+            new_graph["ready_ids"] = effective
+            new_graph["updated_at"] = _utc_now_iso()
+            update["todo_graph"] = new_graph
+        reminder = self._build_reminder(state, effective)
+        if reminder is not None:
+            update["messages"] = [reminder]
+        return update or None
+
     @override
     def before_model(self, state: TodoDagState, runtime: Runtime) -> dict[str, Any] | None:  # noqa: ARG002
-        reminder = self._build_reminder(state)
-        if reminder is None:
-            return None
-        return {"messages": [reminder]}
+        return self._recompute_state(state)
 
     @override
     async def abefore_model(self, state: TodoDagState, runtime: Runtime) -> dict[str, Any] | None:
-        return self.before_model(state, runtime)
+        return self._recompute_state(state)

@@ -1,4 +1,4 @@
-from typing import Annotated, NotRequired, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 
 from langchain.agents import AgentState
 
@@ -181,7 +181,7 @@ class WorkModeState(TypedDict, total=False):
     """Tracks work mode activation and current execution position."""
 
     active: bool
-    plan_source: str  # "prior_run" | "inline_generation" | "escalated"
+    plan_source: str  # "prior_run" | "inline_generation"
     current_phase_index: int
     total_phases: int
     phases_completed: int
@@ -199,7 +199,7 @@ class PhaseExecutionState(TypedDict, total=False):
     phase_results: list[dict]  # [{phase_index, todo_id, content, status, subagent_type, completed_at}]
     plan_adapted: bool
     adaptation_notes: str
-    adaptation_attempts: int  # how many times plan adaptation has been auto-triggered (capped at 2)
+    adaptation_attempts: int  # diagnostic counter — increments each time the plan stalls
 
 
 class QualityGateState(TypedDict, total=False):
@@ -214,6 +214,66 @@ class HandoffMetaState(TypedDict, total=False):
     handoff_root_virtual_path: str
     package_manifest_virtual_path: str | None
     created_at: str
+
+
+class ClarificationOptionEntry(TypedDict, total=False):
+    label: str
+    recommended: bool
+    description: str | None
+
+
+class Clarification(TypedDict, total=False):
+    """Top-level clarification record.
+
+    Lifecycle: agent calls `ask_user_for_clarification` → middleware appends a
+    `pending` entry → user answers via POST /api/threads/{id}/clarify → entry
+    flips to `answered`. TodoDagMiddleware reads `blocks` to keep gated todos
+    out of `ready_ids` until the clarification resolves.
+    """
+
+    id: str
+    question: str
+    clarification_type: str
+    context: str | None
+    options: list[ClarificationOptionEntry]
+    blocks: list[str]  # todo ids whose readiness this question gates
+    urgency: Literal["deferrable", "blocking"]
+    status: Literal["pending", "answered"]
+    answer: str | None
+    asked_at: str
+    answered_at: str | None
+    tool_call_id: str | None
+
+
+def merge_clarifications(existing: list[Clarification] | None, new: list[Clarification] | None) -> list[Clarification]:
+    """Reducer for top-level clarifications.
+
+    Merges by `id`: existing entries are patched with any fields supplied by
+    matching new entries (so answer/status updates land cleanly), unseen ids
+    are appended. Never drops entries — clarification history is auditable.
+    """
+    if existing is None:
+        existing = []
+    if not new:
+        return list(existing)
+    merged: list[Clarification] = [dict(c) for c in existing]  # type: ignore[misc]
+    by_id: dict[str, int] = {}
+    for idx, entry in enumerate(merged):
+        cid = str(entry.get("id") or "").strip()
+        if cid:
+            by_id[cid] = idx
+    for raw in new:
+        if not isinstance(raw, dict):
+            continue
+        cid = str(raw.get("id") or "").strip()
+        if not cid:
+            continue
+        if cid in by_id:
+            merged[by_id[cid]] = {**merged[by_id[cid]], **raw}  # type: ignore[misc]
+        else:
+            merged.append(dict(raw))  # type: ignore[arg-type]
+            by_id[cid] = len(merged) - 1
+    return merged
 
 
 def merge_artifacts(existing: list[str] | None, new: list[str] | None) -> list[str]:
@@ -258,6 +318,12 @@ class ThreadState(AgentState):
     skill_disclosure: NotRequired[SkillDisclosureState | None]
     plan: NotRequired[PlanState | None]
     plan_history: NotRequired[list[PlanHistoryItem] | None]
+    # Top-level clarification queue. Source of truth for both plan-mode and
+    # work-mode clarifications; replaces nested `plan.clarifications` for new
+    # runs (legacy plan.md v5 still reads/writes the nested field for back-
+    # compat — see handoff.py).
+    clarifications: Annotated[list[Clarification], merge_clarifications]
+    clarification_pending: NotRequired[bool]
     eval_attempts: NotRequired[int]
     todo_graph: NotRequired[TodoGraphState | None]
     deferred_task_calls: NotRequired[list[dict] | None]

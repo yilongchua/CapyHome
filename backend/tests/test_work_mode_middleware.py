@@ -2,24 +2,10 @@
 
 from __future__ import annotations
 
-import sys
-import types
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-# ---------------------------------------------------------------------------
-# Stubs for heavy deps that must not be imported during unit testing
-# ---------------------------------------------------------------------------
-
-# Stub out src.client so _run_plan_mode_rerun can be imported without
-# pulling in the full CapyHomeClient dependency tree.
-_stub_client_module = types.ModuleType("src.client")
-_stub_client_module.CapyHomeClient = MagicMock()  # type: ignore[attr-defined]
-sys.modules.setdefault("src.client", _stub_client_module)
-
-
-from src.agents.middlewares.work_mode_middleware import (  # noqa: E402
-    _MAX_AUTO_ADAPTATION_ATTEMPTS,
+from src.agents.middlewares.work_mode_middleware import (
     WorkModeMiddleware,
     _create_work_mode,
 )
@@ -351,11 +337,21 @@ class TestPlanAdaptation:
         assert result is not None
         assert result["phase_execution"]["adaptation_attempts"] == 2
 
-    def test_spawns_plan_rerun_when_auto_mode_and_under_limit(self):
+    def test_no_auto_respawn_even_in_auto_mode(self):
+        """Auto mode used to spawn Plan Mode re-runs; that path has been removed.
+
+        Work Mode now only emits the diagnostic SSE — the user must opt into
+        Plan Mode manually via the UI.
+        """
+        import src.agents.middlewares.work_mode_middleware as wm
+
         mw = WorkModeMiddleware()
-        spawned: list[dict] = []
         nodes = [_node("t1", "Task", status="blocked")]
         pe = {"adaptation_attempts": 0}
+
+        assert not hasattr(wm, "_spawn_plan_rerun")
+        assert not hasattr(wm, "_run_plan_mode_rerun")
+        assert not hasattr(wm, "_MAX_AUTO_ADAPTATION_ATTEMPTS")
 
         with patch(
             "src.agents.middlewares.work_mode_middleware.get_stream_writer",
@@ -363,43 +359,14 @@ class TestPlanAdaptation:
         ), patch(
             "src.agents.middlewares.work_mode_middleware._materialize_ready_ids",
             return_value=[],
-        ), patch(
-            "src.agents.middlewares.work_mode_middleware._spawn_plan_rerun",
-            side_effect=lambda **kw: spawned.append(kw),
         ):
-            mw.before_model(
+            result = mw.before_model(
                 _state(nodes=nodes, phase_execution=pe),
                 _runtime(auto_mode=True, thread_id="t-adapt"),
             )
 
-        assert len(spawned) == 1
-        assert spawned[0]["thread_id"] == "t-adapt"
-
-    def test_no_spawn_when_adaptation_limit_reached(self):
-        mw = WorkModeMiddleware()
-        spawned: list[dict] = []
-        nodes = [_node("t1", "Task", status="blocked")]
-        pe = {"adaptation_attempts": _MAX_AUTO_ADAPTATION_ATTEMPTS}
-
-        with patch(
-            "src.agents.middlewares.work_mode_middleware.get_stream_writer",
-            return_value=lambda e: None,
-        ), patch(
-            "src.agents.middlewares.work_mode_middleware._materialize_ready_ids",
-            return_value=[],
-        ), patch(
-            "src.agents.middlewares.work_mode_middleware._spawn_plan_rerun",
-            side_effect=lambda **kw: spawned.append(kw),
-        ):
-            mw.before_model(
-                _state(nodes=nodes, phase_execution=pe),
-                _runtime(auto_mode=True),
-            )
-
-        assert spawned == []
-
-    def test_adaptation_limit_constant_is_two(self):
-        assert _MAX_AUTO_ADAPTATION_ATTEMPTS == 2
+        assert result is not None
+        assert result["phase_execution"]["adaptation_attempts"] == 1
 
 
 # ---------------------------------------------------------------------------
