@@ -47,6 +47,7 @@ import {
   startAutoresearchObjective,
   startPipelineRun,
   startVaultIngest,
+  cancelVaultIngest,
   getVaultIngestStatus,
   refreshVaultExplorer,
   resumeAutoresearchObjective,
@@ -319,6 +320,17 @@ export function useStartVaultIngest() {
       void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-ingest-status"] });
       void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-status"] });
       void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-explorer"] });
+      publishControlPlaneRefresh(["vault"]);
+    },
+  });
+}
+
+export function useCancelVaultIngest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => cancelVaultIngest(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-ingest-status"] });
       publishControlPlaneRefresh(["vault"]);
     },
   });

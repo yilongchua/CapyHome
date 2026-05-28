@@ -313,6 +313,16 @@ export async function getVaultIngestStatus(): Promise<VaultIngestStatusResponse>
   return response.json() as Promise<VaultIngestStatusResponse>;
 }
 
+export async function cancelVaultIngest(): Promise<VaultIngestStatusResponse> {
+  const response = await fetch(`${getBackendBaseURL()}/api/vault/ingest/cancel`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    await parseError(response, `Failed to cancel vault ingest: ${response.statusText}`);
+  }
+  return response.json() as Promise<VaultIngestStatusResponse>;
+}
+
 export async function getVaultFile(path: string): Promise<VaultFileResponse> {
   const response = await fetch(
     `${getBackendBaseURL()}/api/vault/file?path=${encodeURIComponent(path)}`,

@@ -12,7 +12,7 @@ export function Welcome({
   return (
     <div
       className={cn(
-        "mx-auto flex w-full flex-col items-center justify-center gap-2 px-8 py-4 text-center",
+        "mx-auto flex w-full -translate-y-3 flex-col items-center justify-center gap-2 px-8 py-4 text-center",
         className,
       )}
     >

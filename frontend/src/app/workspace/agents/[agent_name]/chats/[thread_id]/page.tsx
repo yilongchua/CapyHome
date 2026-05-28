@@ -79,6 +79,10 @@ export default function AgentChatPage() {
   }>();
   const { threadId, isNewThread, setIsNewThread } = useThreadChat();
 
+  if (!threadId) {
+    return null;
+  }
+
   return (
     <AgentChatPageContent
       key={threadId}
@@ -109,7 +113,7 @@ function AgentChatPageContent({
   const [uiNotices, setUiNotices] = useState<LiveGenerationNotice[]>([]);
   const [runPollBump, setRunPollBump] = useState(0);
   const { notices: generationNotices, artifactPaths: generationArtifacts } =
-    useGenerationCompletions(threadId);
+    useGenerationCompletions(threadId, { enabled: !isNewThread });
   const { showNotification } = useNotification();
   const [thread, sendMessage, , queueControls] = useThreadStream({
     threadId: isNewThread ? undefined : threadId,

@@ -508,6 +508,7 @@ export interface VaultIngestStatusResponse {
   finished_at?: string | null;
   updated_at?: string | null;
   log_path: string;
+  cancel_requested?: boolean;
   accepted?: boolean | null;
   message?: string | null;
 }

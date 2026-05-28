@@ -25,7 +25,14 @@ function noticeText(job: GenerationJob): string {
   return `Generation timed out (${job.kind}) for job \`${job.id}\`.`;
 }
 
-export function useGenerationCompletions(threadId: string) {
+export function useGenerationCompletions(
+  threadId: string,
+  options?: { enabled?: boolean },
+) {
+  // A brand-new thread that hasn't been submitted yet can't have any
+  // generation jobs server-side, so callers pass `enabled: false` while
+  // `isNewThread` is true to skip the initial fetch + polling loop.
+  const enabled = options?.enabled ?? true;
   const [notices, setNotices] = useState<LiveGenerationNotice[]>([]);
   const [artifactPaths, setArtifactPaths] = useState<string[]>([]);
   const [refreshSignal, setRefreshSignal] = useState(0);
@@ -70,7 +77,7 @@ export function useGenerationCompletions(threadId: string) {
   }, [threadId]);
 
   useEffect(() => {
-    if (!threadId) {
+    if (!threadId || !enabled) {
       return;
     }
     let active = true;
@@ -170,7 +177,7 @@ export function useGenerationCompletions(threadId: string) {
       active = false;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [isDocumentVisible, refreshSignal, threadId]);
+  }, [enabled, isDocumentVisible, refreshSignal, threadId]);
 
   return useMemo(
     () => ({

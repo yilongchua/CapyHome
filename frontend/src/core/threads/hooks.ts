@@ -1827,7 +1827,7 @@ export function useThreads(
       // If this fails (e.g. oversized/invalid state payload in one thread), fall
       // back to a lightweight list so the sidebar still renders past chats.
       try {
-        const response = await searchWithTimeout(effectiveParams, 8_000);
+        const response = await searchWithTimeout(effectiveParams, 3_500);
         if (!Array.isArray(response)) {
           return [];
         }
@@ -1844,7 +1844,7 @@ export function useThreads(
           ids: effectiveParams.ids,
           // Avoid selecting values in fallback to bypass state serialization issues.
           select: ["thread_id", "updated_at"],
-        }, 5_000);
+        }, 3_000);
         if (!Array.isArray(fallbackResponse)) {
           return [];
         }

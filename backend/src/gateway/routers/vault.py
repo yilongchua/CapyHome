@@ -122,6 +122,7 @@ class VaultIngestStatusResponse(BaseModel):
     finished_at: str | None = None
     updated_at: str | None = None
     log_path: str = ""
+    cancel_requested: bool = False
     accepted: bool | None = None
     message: str | None = None
 
@@ -346,6 +347,13 @@ async def start_vault_ingest(request: VaultIngestStartRequest | None = None) -> 
 async def get_vault_ingest_status() -> VaultIngestStatusResponse:
     service = get_control_plane_service()
     payload = service.get_vault_ingest_status()
+    return VaultIngestStatusResponse.model_validate(payload)
+
+
+@router.post("/ingest/cancel", response_model=VaultIngestStatusResponse)
+async def cancel_vault_ingest() -> VaultIngestStatusResponse:
+    service = get_control_plane_service()
+    payload = service.cancel_vault_ingest_job()
     return VaultIngestStatusResponse.model_validate(payload)
 
 

@@ -13,6 +13,7 @@ import {
   PlayIcon,
   RefreshCwIcon,
   SaveIcon,
+  SquareIcon,
   Trash2Icon,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -30,6 +31,7 @@ import {
   WorkspaceHeader,
 } from "@/components/workspace/workspace-container";
 import {
+  useCancelVaultIngest,
   useDeleteVaultFile,
   useRefreshVaultExplorer,
   useSaveVaultFile,
@@ -49,6 +51,16 @@ type TreeNode = {
   kind: "directory" | "file";
   children?: TreeNode[];
 };
+
+function formatEtaLabel(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} secs`;
+  const totalMinutes = Math.round(seconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes} min${totalMinutes === 1 ? "" : "s"}`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}min${minutes === 1 ? "" : "s"}`;
+}
 
 function sortTree(nodes: TreeNode[]): TreeNode[] {
   return [...nodes]
@@ -74,7 +86,21 @@ export default function VaultPage() {
   const deleteVaultFile = useDeleteVaultFile();
   const { ingestStatus } = useVaultIngestStatus();
   const startIngest = useStartVaultIngest();
+  const cancelIngest = useCancelVaultIngest();
   const ingestRunning = ingestStatus?.status === "running" || startIngest.isPending;
+  const cancelRequested = Boolean(ingestStatus?.cancel_requested) || cancelIngest.isPending;
+  const ingestEtaLabel = (() => {
+    if (!ingestStatus || ingestStatus.status !== "running") return "";
+    const total = ingestStatus.total || 0;
+    const current = ingestStatus.current_index || 0;
+    const startedAt = ingestStatus.started_at ? Date.parse(ingestStatus.started_at) : NaN;
+    if (!total || current < 1 || Number.isNaN(startedAt)) return "";
+    const elapsedSec = Math.max(0, (Date.now() - startedAt) / 1000);
+    const remaining = Math.max(0, total - current);
+    if (remaining === 0) return "";
+    const etaSec = (elapsedSec / current) * remaining;
+    return formatEtaLabel(etaSec);
+  })();
   const ingestProgressLabel = (() => {
     if (!ingestStatus) return "";
     if (ingestStatus.status === "running") {
@@ -83,10 +109,15 @@ export default function VaultPage() {
       const title = (ingestStatus.current_title || "").trim();
       const truncated = title.length > 48 ? `${title.slice(0, 48)}…` : title;
       const totalLabel = total > 0 ? String(total) : "?";
-      return `Source ${current}/${totalLabel} ingesting${truncated ? ` ${truncated}` : "..."}`;
+      const base = `Source ${current}/${totalLabel} ingesting${truncated ? ` ${truncated}` : "..."}`;
+      if (cancelRequested) return `${base} · stopping after current source...`;
+      return ingestEtaLabel ? `${base} · ~${ingestEtaLabel} remaining` : base;
     }
     if (ingestStatus.status === "success" && ingestStatus.processed > 0) {
       return `Last ingest: updated ${ingestStatus.updated} / ${ingestStatus.processed}`;
+    }
+    if (ingestStatus.status === "cancelled") {
+      return `Ingest stopped at ${ingestStatus.current_index}/${ingestStatus.total}`;
     }
     if (ingestStatus.status === "failed" && ingestStatus.last_error) {
       return `Ingest failed: ${ingestStatus.last_error}`;
@@ -223,6 +254,29 @@ export default function VaultPage() {
                     )}
                     {ingestRunning ? "Ingesting..." : "Run Ingest"}
                   </Button>
+                  {ingestRunning ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        cancelIngest.mutate(undefined, {
+                          onSuccess: (payload) => {
+                            if (payload.accepted === false) {
+                              toast.message(payload.message ?? "No vault ingest job is running.");
+                            } else {
+                              toast.success(payload.message ?? "Stopping vault ingest after current source.");
+                            }
+                          },
+                          onError: (error) => toast.error(error.message),
+                        });
+                      }}
+                      disabled={cancelRequested}
+                      title="Stop after current source"
+                    >
+                      <SquareIcon className="mr-2 size-4 fill-current" />
+                      {cancelRequested ? "Stopping..." : "Stop"}
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="outline"

@@ -298,7 +298,9 @@ export function InputBox({
   const repoOverviewPollRef = useRef<number | null>(null);
   const repoOverviewPollJobRef = useRef<string | null>(null);
   const saveMountedFolder = useSaveMountedFolder(threadId);
-  const { data: mountedFolder } = useMountedFolder(threadId);
+  const { data: mountedFolder } = useMountedFolder(threadId, {
+    enabled: !isNewThread,
+  });
   const renameThread = useRenameThread();
   const { pickFolder, isPicking } = useFolderPicker();
   const launchPayloadAppliedRef = useRef<string | null>(null);

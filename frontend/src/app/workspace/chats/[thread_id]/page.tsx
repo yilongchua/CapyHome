@@ -159,6 +159,13 @@ function getExecutePlanFailureMessage(result: ExecutePlanResponse): string | nul
 export default function ChatPage() {
   const { threadId, isNewThread, setIsNewThread, isMock } = useThreadChat();
 
+  // useThreadChat returns null on the first render of /workspace/chats/new
+  // while it generates the UUID. Skip rendering the heavy chat content until
+  // we have a stable id so its hooks don't mount twice.
+  if (!threadId) {
+    return null;
+  }
+
   return (
     <ChatPageContent
       key={threadId}
@@ -194,11 +201,11 @@ function ChatPageContent({
     models,
   });
   const { notices: generationNotices, artifactPaths: generationArtifacts } =
-    useGenerationCompletions(threadId);
-  const { data: mountedFolder } = useMountedFolder(threadId);
+    useGenerationCompletions(threadId, { enabled: !isNewThread });
+  const { data: mountedFolder } = useMountedFolder(threadId, { enabled: !isNewThread });
   const { data: mountedFolderFiles } = useMountedFolderFiles(
     threadId,
-    Boolean(mountedFolder),
+    Boolean(mountedFolder) && !isNewThread,
   );
   const mountedArtifacts = (mountedFolderFiles?.files ?? []).map(
     (file) => file.virtual_path,

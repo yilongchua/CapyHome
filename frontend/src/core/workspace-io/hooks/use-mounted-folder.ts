@@ -44,11 +44,15 @@ async function clearMountedFolder(threadId: string): Promise<null> {
   return null;
 }
 
-export function useMountedFolder(threadId: string) {
+export function useMountedFolder(
+  threadId: string,
+  options?: { enabled?: boolean },
+) {
+  const callerEnabled = options?.enabled ?? true;
   return useQuery<string | null>({
     queryKey: ["dreamy-mounted-folder", threadId],
     queryFn: () => fetchMountedFolder(threadId),
-    enabled: Boolean(threadId && threadId !== "new"),
+    enabled: callerEnabled && Boolean(threadId && threadId !== "new"),
     staleTime: MOUNTED_FOLDER_STALE_TIME,
     refetchInterval: (query) => (query.state.data ? MOUNTED_FOLDER_REFRESH_HAS_DATA : MOUNTED_FOLDER_REFRESH_EMPTY),
     refetchIntervalInBackground: false,

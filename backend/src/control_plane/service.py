@@ -75,6 +75,12 @@ _CONVERTIBLE_EXTENSIONS = {
     ".doc",
     ".docx",
 }
+
+
+class _VaultIngestCancelled(BaseException):
+    """Raised from progress callbacks to abort an in-flight vault ingest job."""
+
+
 class ControlPlaneService:
     def __init__(self, store: ControlPlaneStore | None = None) -> None:
         self._store = store or ControlPlaneStore()
@@ -1475,6 +1481,7 @@ class ControlPlaneService:
             "finished_at": None,
             "updated_at": None,
             "log_path": "",
+            "cancel_requested": False,
         }
 
     def _vault_ingest_log_path(self) -> Path:
@@ -1621,6 +1628,7 @@ class ControlPlaneService:
                         error: str | None,
                     ) -> None:
                         with self._vault_ingest_lock:
+                            cancel = bool(self._vault_ingest_job.get("cancel_requested"))
                             self._vault_ingest_job.update(
                                 {
                                     "total": total,
@@ -1632,6 +1640,8 @@ class ControlPlaneService:
                                     "updated_at": self._utcnow_iso(),
                                 }
                             )
+                        if cancel:
+                            raise _VaultIngestCancelled()
                         if status == "fetch_failed":
                             logger_obj.warning(
                                 "vault_ingest_queue_item index=%d/%d url=%r status=%s error=%s",
@@ -1658,6 +1668,14 @@ class ControlPlaneService:
                             queue_items=claimed_items,
                             progress_callback=_queue_progress,
                         )
+                    except _VaultIngestCancelled:
+                        queue_ids = [
+                            str(item.get("queue_id") or "")
+                            for item in claimed_items
+                            if str(item.get("queue_id") or "").strip()
+                        ]
+                        manager.requeue_claimed_items(queue_ids, reason="ingest_cancelled_by_user")
+                        raise
                     except Exception:
                         queue_ids = [
                             str(item.get("queue_id") or "")
@@ -1714,6 +1732,7 @@ class ControlPlaneService:
                     offset_total = queue_total + total
                     offset_index = queue_total + index
                     with self._vault_ingest_lock:
+                        cancel = bool(self._vault_ingest_job.get("cancel_requested"))
                         self._vault_ingest_job.update(
                             {
                                 "total": offset_total,
@@ -1732,6 +1751,8 @@ class ControlPlaneService:
                             self._vault_ingest_job["skipped_no_raw"] = int(self._vault_ingest_job.get("skipped_no_raw", 0)) + 1
                         elif status == "failed":
                             self._vault_ingest_job["failed"] = int(self._vault_ingest_job.get("failed", 0)) + 1
+                    if cancel:
+                        raise _VaultIngestCancelled()
                     if status == "failed":
                         logger_obj.warning(
                             "vault_ingest_item index=%d/%d source_id=%s title=%r status=%s error=%s",
@@ -1798,6 +1819,20 @@ class ControlPlaneService:
                 )
                 with self._vault_explorer_cache_lock:
                     self._vault_explorer_cache = {}
+            except _VaultIngestCancelled:
+                logger_obj.info("vault_ingest_cancelled job_id=%s", job_id)
+                with self._vault_ingest_lock:
+                    self._vault_ingest_job.update(
+                        {
+                            "status": "cancelled",
+                            "last_error": None,
+                            "finished_at": self._utcnow_iso(),
+                            "updated_at": self._utcnow_iso(),
+                            "cancel_requested": False,
+                        }
+                    )
+                with self._vault_explorer_cache_lock:
+                    self._vault_explorer_cache = {}
             except Exception as exc:
                 logger_obj.exception("vault_ingest_failed job_id=%s error=%s", job_id, exc)
                 with self._vault_ingest_lock:
@@ -1829,6 +1864,21 @@ class ControlPlaneService:
     def get_vault_ingest_status(self) -> dict[str, Any]:
         with self._vault_ingest_lock:
             return dict(self._vault_ingest_job)
+
+    def cancel_vault_ingest_job(self) -> dict[str, Any]:
+        with self._vault_ingest_lock:
+            status = str(self._vault_ingest_job.get("status") or "idle")
+            if status != "running":
+                snapshot = dict(self._vault_ingest_job)
+                snapshot["accepted"] = False
+                snapshot["message"] = "No vault ingest job is running."
+                return snapshot
+            self._vault_ingest_job["cancel_requested"] = True
+            self._vault_ingest_job["updated_at"] = self._utcnow_iso()
+            snapshot = dict(self._vault_ingest_job)
+        snapshot["accepted"] = True
+        snapshot["message"] = "Vault ingest cancellation requested. Current source will finish before stopping."
+        return snapshot
 
     def list_vault_action_items(self, *, limit: int = 100) -> dict[str, Any]:
         manager = self._default_vault_manager()
