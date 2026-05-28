@@ -4,28 +4,24 @@
 
 Plan Mode is implemented as a thin wrapper around the work-agent factory, with five plan-mode-specific middlewares (planner, plan_evaluator, plan_execution_gate, plan_file_sync, todo_dag) that are conditionally activated when `is_plan_mode=True`. The architecture is largely sound — clean separation of concerns, sensible structured-output contracts, and a deterministic pre-check before the LLM evaluator. However, the review found one major correctness regression (PlanExecutionGateMiddleware is no longer registered yet the plan-mode prompt still relies on it), a handful of latent concurrency/race issues around the shared `_HANDOFF_GUARD` and `_classifier_cache`, several unbounded LLM calls without timeouts, and a meaningful amount of stale code and docstrings left over from the removed auto-escalation feature. The clarification flow has two overlapping subsystems (planner inline clarifications vs. `ClarificationMiddleware`) whose interaction is fragile.
 
+> **Status update (2026-05-28 recheck):** Findings #1, #2, #7, and #20 are now cleared. The plan-mode prompt/runtime contract is consistent (prompt explicitly documents the catalog-driven split, no `[plan_gate]` or `scope_search` references remain). The planner LLM call has an inter-token idle timeout. The evaluator's `max_attempts_reached` predicate is tightened. Other findings remain open.
+
 ## Critical Findings
 
-### 1. PlanExecutionGateMiddleware is dead code but its security guarantee is still advertised
+### ~~1. PlanExecutionGateMiddleware is dead code but its security guarantee is still advertised~~ ✅ CLEARED
 - **File:** [backend/src/agents/work_agent/agent.py:505-510](../../backend/src/agents/work_agent/agent.py#L505), [backend/src/agents/middlewares/plan_execution_gate_middleware.py](../../backend/src/agents/middlewares/plan_execution_gate_middleware.py), [backend/src/agents/plan_agent/prompt.py:82-83](../../backend/src/agents/plan_agent/prompt.py#L82)
-- **Severity:** Critical
-- **Issue:** `PlanExecutionGateMiddleware` is the runtime backstop that blocks `web_search`, `bash` mutations, `write_file`, `task`, etc. while a plan is in draft or while clarifications are pending. It is currently commented out in the middleware registry (lines 505-510 in `work_agent/agent.py`), as is `PhaseToolFilterMiddleware`. The deprecation note says "web_search is now exposed in Plan Mode directly", but the plan-mode system prompt (`PLAN_MODE_SECTION`) still tells the model: "If tools return `[plan_gate]`, stop and refine the plan" and explicitly lists `web_search` and `task` as not allowed before approval. The runtime no longer enforces any of this.
-- **Impact:** A Plan Mode run with a still-draft plan can call `web_search`, `bash` with mutations (`rm`, `>`, `tee`, etc.), `write_file`, `task`, etc., contradicting the documented contract. In auto-mode the planner pre-approves the plan so the issue is masked, but in foreground mode the draft state is supposed to be a hard gate. This also weakens the clarification flow: a plan with `clarification_pending=True` no longer blocks tool calls, so the model can ignore the pending question and start executing.
-- **Recommendation:** Either re-register `PlanExecutionGateMiddleware` (the simplest fix; the file is intact and well-tested), or delete the prompt sections that reference `[plan_gate]` and `scope_search` and update the documented contract to "no runtime gating; relies on the catalog-driven tool-mode split". Today's state is the worst of both worlds — prompt says one thing, runtime does another.
-- **Snippet:**
-```python
-# work_agent/agent.py L505-510
-# DEPRECATED: plan_execution_gate is no longer registered. web_search and
-# other execution tools are allowed in Plan Mode directly.
-# MiddlewareSpec("plan_execution_gate", lambda: PlanExecutionGateMiddleware(...), after={"planner"}, before={"permissions"}),
-```
+- **Severity:** ~~Critical~~ — Resolved via the second recommendation path: the plan-mode prompt no longer references `[plan_gate]` or `scope_search`, and now states explicitly "This is a behavioral norm, not a runtime gate — the catalog-driven tool-mode split is what defines what's available" ([prompt.py:67-69](../../backend/src/agents/plan_agent/prompt.py#L67)). The runtime/prompt inconsistency is gone. (`PlanExecutionGateMiddleware` remains deregistered intentionally; see findings #4 dependency note.)
+- ~~**Issue:** `PlanExecutionGateMiddleware` is the runtime backstop that blocks `web_search`, `bash` mutations, `write_file`, `task`, etc. while a plan is in draft or while clarifications are pending. It is currently commented out in the middleware registry (lines 505-510 in `work_agent/agent.py`), as is `PhaseToolFilterMiddleware`. The deprecation note says "web_search is now exposed in Plan Mode directly", but the plan-mode system prompt (`PLAN_MODE_SECTION`) still tells the model: "If tools return `[plan_gate]`, stop and refine the plan" and explicitly lists `web_search` and `task` as not allowed before approval. The runtime no longer enforces any of this.~~
+- ~~**Impact:** A Plan Mode run with a still-draft plan can call `web_search`, `bash` with mutations (`rm`, `>`, `tee`, etc.), `write_file`, `task`, etc., contradicting the documented contract. In auto-mode the planner pre-approves the plan so the issue is masked, but in foreground mode the draft state is supposed to be a hard gate. This also weakens the clarification flow: a plan with `clarification_pending=True` no longer blocks tool calls, so the model can ignore the pending question and start executing.~~
+- ~~**Recommendation:** Either re-register `PlanExecutionGateMiddleware` (the simplest fix; the file is intact and well-tested), or delete the prompt sections that reference `[plan_gate]` and `scope_search` and update the documented contract to "no runtime gating; relies on the catalog-driven tool-mode split". Today's state is the worst of both worlds — prompt says one thing, runtime does another.~~
 
-### 2. `scope_search` is referenced everywhere but is deprecated and unregistered
-- **File:** [backend/src/agents/plan_agent/prompt.py:32,65,75](../../backend/src/agents/plan_agent/prompt.py#L32), [backend/src/agents/middlewares/plan_execution_gate_middleware.py:33-41,254,290](../../backend/src/agents/middlewares/plan_execution_gate_middleware.py#L33), [backend/src/tools/tools.py:8-71](../../backend/src/tools/tools.py#L8)
-- **Severity:** High
-- **Issue:** `scope_search` is mentioned in three places in `PLAN_MODE_SECTION` ("Use scope_search, memory, and read-only tools…", "`scope_search` is for when you genuinely don't know WHAT to search for", "Not allowed: Using `web_search`, `recall`, `scope_search` for content gathering"). But `src/tools/tools.py` shows the wrapper is deprecated and the registration is commented out, and the module-level comment says "web_search is now available in plan mode as well (scope_search deprecated)".
-- **Impact:** The model is told to call a tool that doesn't exist. In best case the LLM gets a "tool not found" error and falls back to `web_search`. In worst case it never resolves what to do and either stalls or fabricates. The "Not allowed" list also contradicts itself with "Allowed: Use read-only tools for scope understanding".
-- **Recommendation:** Strip all `scope_search` references from `PLAN_MODE_SECTION` and `plan_execution_gate_middleware.py`. Delete or move `src/community/scope_search/` if confirmed dead.
+### ~~2. `scope_search` is referenced everywhere but is deprecated and unregistered~~ ✅ CLEARED
+- **Verified:** `grep -rn "scope_search" backend/src/agents/` returns no matches. The plan prompt now uses `web_search` only and explicitly states the catalog-driven mode split is the source of truth.
+- ~~**File:** [backend/src/agents/plan_agent/prompt.py:32,65,75](../../backend/src/agents/plan_agent/prompt.py#L32), [backend/src/agents/middlewares/plan_execution_gate_middleware.py:33-41,254,290](../../backend/src/agents/middlewares/plan_execution_gate_middleware.py#L33), [backend/src/tools/tools.py:8-71](../../backend/src/tools/tools.py#L8)~~
+- ~~**Severity:** High~~
+- ~~**Issue:** `scope_search` is mentioned in three places in `PLAN_MODE_SECTION` ("Use scope_search, memory, and read-only tools…", "`scope_search` is for when you genuinely don't know WHAT to search for", "Not allowed: Using `web_search`, `recall`, `scope_search` for content gathering"). But `src/tools/tools.py` shows the wrapper is deprecated and the registration is commented out, and the module-level comment says "web_search is now available in plan mode as well (scope_search deprecated)".~~
+- ~~**Impact:** The model is told to call a tool that doesn't exist. In best case the LLM gets a "tool not found" error and falls back to `web_search`. In worst case it never resolves what to do and either stalls or fabricates. The "Not allowed" list also contradicts itself with "Allowed: Use read-only tools for scope understanding".~~
+- ~~**Recommendation:** Strip all `scope_search` references from `PLAN_MODE_SECTION` and `plan_execution_gate_middleware.py`. Delete or move `src/community/scope_search/` if confirmed dead.~~
 
 ### 3. Auto-mode handoff bypass: the second `if isinstance(thread_id, str)` block leaves `payload["plan"]` stale
 - **File:** [backend/src/agents/middlewares/planner_middleware.py:824-846](../../backend/src/agents/middlewares/planner_middleware.py#L824)
@@ -59,12 +55,13 @@ Plan Mode is implemented as a thin wrapper around the work-agent factory, with f
 
 ## High Severity Findings
 
-### 7. PlannerMiddleware has no timeout on the LLM call at all
-- **File:** [backend/src/agents/middlewares/planner_middleware.py:784-797](../../backend/src/agents/middlewares/planner_middleware.py#L784)
-- **Severity:** High
-- **Issue:** `_invoke_planner` calls `model.invoke([SystemMessage, HumanMessage])` with no timeout, no retry. A hung model call blocks the planner indefinitely. Plan Evaluator wraps its call in `_run_with_timeout` (sync) or `asyncio.wait_for` (async); planner has neither.
-- **Impact:** A wedged LLM endpoint (network stall, OOM at provider) hangs the planning turn forever. The user sees a frozen "planning started" SSE with no recovery.
-- **Recommendation:** Add `_run_with_timeout` (or extract the helper from `plan_evaluator_middleware`) and reuse a `planner.timeout_seconds` config.
+### ~~7. PlannerMiddleware has no timeout on the LLM call at all~~ ✅ CLEARED
+- **Verified:** `_invoke_planner` ([planner_middleware.py:798-848](../../backend/src/agents/middlewares/planner_middleware.py#L798)) now streams tokens and watches the inter-token idle gap; if no token arrives within `_timeout_seconds`, it raises `TimeoutError`. Long local generations still succeed; only a wedged provider trips the guard.
+- ~~**File:** [backend/src/agents/middlewares/planner_middleware.py:784-797](../../backend/src/agents/middlewares/planner_middleware.py#L784)~~
+- ~~**Severity:** High~~
+- ~~**Issue:** `_invoke_planner` calls `model.invoke([SystemMessage, HumanMessage])` with no timeout, no retry. A hung model call blocks the planner indefinitely. Plan Evaluator wraps its call in `_run_with_timeout` (sync) or `asyncio.wait_for` (async); planner has neither.~~
+- ~~**Impact:** A wedged LLM endpoint (network stall, OOM at provider) hangs the planning turn forever. The user sees a frozen "planning started" SSE with no recovery.~~
+- ~~**Recommendation:** Add `_run_with_timeout` (or extract the helper from `plan_evaluator_middleware`) and reuse a `planner.timeout_seconds` config.~~
 
 ### 8. `_handle_plan_adapted` SSE fires every single cycle while stuck
 - **File:** [backend/src/agents/middlewares/work_mode_middleware.py:265-275,463-503](../../backend/src/agents/middlewares/work_mode_middleware.py#L265)
@@ -156,12 +153,13 @@ Plan Mode is implemented as a thin wrapper around the work-agent factory, with f
 - **Impact:** Frontend state confusion: a plan_created with `status=approved` is followed by no further plan-mode events; SSE consumer must guess the plan is now executing.
 - **Recommendation:** Emit a `plan_handoff_started` SSE before jumping to end, so the frontend has a clean transition signal.
 
-### 20. PlanEvaluator: max_attempts loop may emit `max_attempts_reached` for already-okay plans
-- **File:** [backend/src/agents/middlewares/plan_evaluator_middleware.py:698-704](../../backend/src/agents/middlewares/plan_evaluator_middleware.py#L698)
-- **Severity:** Medium
-- **Issue:** `_build_terminal_payload` emits `max_attempts_reached` only when `last_decision not in {"ok", "timeout_skipped", "non_json_skipped", "llm_error_skipped"}`. But the loop can break on `revision_invalid` or `issues_no_revision`, both of which also won't fix the plan. The current check would emit `max_attempts_reached` in those cases even when only 1 attempt ran (because the loop broke early without incrementing past max).
-- **Impact:** Misleading observability — `max_attempts_reached` decision is logged when attempts < max.
-- **Recommendation:** Tighten the predicate: only emit `max_attempts_reached` when `attempts >= max_attempts` AND a "revised" attempt was made.
+### ~~20. PlanEvaluator: max_attempts loop may emit `max_attempts_reached` for already-okay plans~~ ✅ CLEARED
+- **Verified:** [plan_evaluator_middleware.py:698](../../backend/src/agents/middlewares/plan_evaluator_middleware.py#L698) now gates on `attempts >= self._max_attempts AND last_decision not in {ok, timeout_skipped, non_json_skipped, llm_error_skipped}`, so an early break on `revision_invalid` / `issues_no_revision` with `attempts < max_attempts` no longer triggers the misleading decision.
+- ~~**File:** [backend/src/agents/middlewares/plan_evaluator_middleware.py:698-704](../../backend/src/agents/middlewares/plan_evaluator_middleware.py#L698)~~
+- ~~**Severity:** Medium~~
+- ~~**Issue:** `_build_terminal_payload` emits `max_attempts_reached` only when `last_decision not in {"ok", "timeout_skipped", "non_json_skipped", "llm_error_skipped"}`. But the loop can break on `revision_invalid` or `issues_no_revision`, both of which also won't fix the plan. The current check would emit `max_attempts_reached` in those cases even when only 1 attempt ran (because the loop broke early without incrementing past max).~~
+- ~~**Impact:** Misleading observability — `max_attempts_reached` decision is logged when attempts < max.~~
+- ~~**Recommendation:** Tighten the predicate: only emit `max_attempts_reached` when `attempts >= max_attempts` AND a "revised" attempt was made.~~
 
 ### 21. Inline clarification panel and `ClarificationMiddleware` step on each other
 - **File:** [backend/src/agents/middlewares/planner_middleware.py:1102-1125](../../backend/src/agents/middlewares/planner_middleware.py#L1102), [backend/src/agents/middlewares/clarification_middleware.py:198-277](../../backend/src/agents/middlewares/clarification_middleware.py#L198)
@@ -269,7 +267,7 @@ Plan Mode is implemented as a thin wrapper around the work-agent factory, with f
 
 - **`PlanExecutionGateMiddleware`** ([plan_execution_gate_middleware.py](../../backend/src/agents/middlewares/plan_execution_gate_middleware.py)) — entire file is unused per the deprecation in `work_agent/agent.py` L505-510. Either re-register or delete.
 - **`PhaseToolFilterMiddleware`** import is commented in `work_agent/agent.py` L26-31, L517-519; the source file likely still exists. Confirm and prune.
-- **`scope_search`** community module is referenced in 3 places in plan prompts and 4 places in `plan_execution_gate_middleware.py` but the tool is deprecated/unregistered in `src/tools/tools.py` L8-71.
+- ~~**`scope_search`** community module is referenced in 3 places in plan prompts and 4 places in `plan_execution_gate_middleware.py` but the tool is deprecated/unregistered in `src/tools/tools.py` L8-71.~~ ✅ CLEARED — all `scope_search` references removed from `backend/src/agents/`.
 - **`auto-escalation paths`** wording in `plan_agent/agent.py:7` — stale per project memory (only one trigger now).
 - **`docs/plan-mode/04_handoff_contract.md:112`** still uses "auto-approval / auto-escalation" header; should be "auto-approval (daemon-driven)".
 - **`router=ctx.router` parameter** in `PlannerMiddleware.__init__` and `PlanEvaluatorMiddleware.__init__` is kept "for backwards compatibility" then immediately `del`'d. Once all call sites are scrubbed, remove the parameter entirely.

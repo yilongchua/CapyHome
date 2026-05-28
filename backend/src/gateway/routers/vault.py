@@ -130,6 +130,31 @@ class VaultIngestStatusResponse(BaseModel):
     message: str | None = None
 
 
+class VaultLintRequest(BaseModel):
+    dry_run: bool = True
+
+
+class VaultLintFinding(BaseModel):
+    slug: str
+    label: str
+    reasons: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    live_source_refs: list[str] = Field(default_factory=list)
+
+
+class VaultLintCategoryReport(BaseModel):
+    total_before: int = 0
+    flagged: list[VaultLintFinding] = Field(default_factory=list)
+    removed: int = 0
+
+
+class VaultLintResponse(BaseModel):
+    generated_at: str = ""
+    dry_run: bool = True
+    entities: VaultLintCategoryReport = Field(default_factory=VaultLintCategoryReport)
+    concepts: VaultLintCategoryReport = Field(default_factory=VaultLintCategoryReport)
+
+
 class VaultFileNode(BaseModel):
     name: str
     path: str
@@ -359,6 +384,17 @@ async def cancel_vault_ingest() -> VaultIngestStatusResponse:
     service = get_control_plane_service()
     payload = service.cancel_vault_ingest_job()
     return VaultIngestStatusResponse.model_validate(payload)
+
+
+@router.post("/lint", response_model=VaultLintResponse)
+async def lint_vault(request: VaultLintRequest | None = None) -> VaultLintResponse:
+    service = get_control_plane_service()
+    dry_run = bool(request.dry_run) if request is not None else True
+    try:
+        payload = service.lint_vault_pages(dry_run=dry_run)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return VaultLintResponse.model_validate(payload)
 
 
 @router.get("/file", response_model=VaultFileResponse)

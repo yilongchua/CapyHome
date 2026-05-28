@@ -1227,13 +1227,24 @@ class VaultLearningManager:
                 item.pop("claim_lease_until", None)
                 item.pop("claimed_at", None)
 
-    def requeue_all_claimed_items(self, *, reason: str = "orphaned_from_prior_run") -> int:
+    def requeue_all_claimed_items(
+        self,
+        *,
+        reason: str = "orphaned_from_prior_run",
+        force: bool = False,
+    ) -> int:
         """Return every `claimed` item with an expired (or missing) lease back to `queued`.
 
         Live claims with an unexpired lease are left alone — a parallel
         runner may still be working on them. The "rescue all" semantics from
         before parallel ingest landed are no longer correct because a fresh
         job no longer implies no other job exists.
+
+        Pass `force=True` to ignore the lease check entirely. This is only
+        safe when the caller knows no live worker is holding the claim — for
+        example, at gateway startup when the in-process runner registry is
+        empty so any "claimed" item must be from a previous process that
+        died before its lease expired.
         """
         now = _utcnow()
         now_iso = now.isoformat()
@@ -1242,14 +1253,15 @@ class VaultLearningManager:
             for item in queue:
                 if str(item.get("status") or "") != "claimed":
                     continue
-                lease_value = item.get("claim_lease_until")
-                if lease_value:
-                    try:
-                        lease_dt = datetime.fromisoformat(str(lease_value)).replace(tzinfo=UTC)
-                    except Exception:
-                        lease_dt = now
-                    if lease_dt > now:
-                        continue
+                if not force:
+                    lease_value = item.get("claim_lease_until")
+                    if lease_value:
+                        try:
+                            lease_dt = datetime.fromisoformat(str(lease_value)).replace(tzinfo=UTC)
+                        except Exception:
+                            lease_dt = now
+                        if lease_dt > now:
+                            continue
                 item["status"] = "queued"
                 item["updated_at"] = now_iso
                 if reason:
@@ -2564,6 +2576,199 @@ class VaultLearningManager:
             "affected_sources": affected_sources,
             "compiled_deleted": deleted,
         }
+
+    # ------------------------------------------------------------------
+    # Lint-and-prune: removes low-quality entity/concept pages.
+    #
+    # Removal criteria (per page):
+    #   - orphan         — source_refs empty OR none of the referenced
+    #                      source_ids still exist in the manifest.
+    #   - dismissed      — entities only: slug is in entity_dismissals
+    #                      but the compiled file still exists on disk.
+    #   - singleton_stub — exactly one source_ref AND body is the auto-
+    #                      generated placeholder (one-off extraction with
+    #                      no follow-up content; a strong "noise" signal).
+    #
+    # We intentionally do NOT prune multi-source pages whose body is still
+    # the stub — they have real backing and may get enriched by a later
+    # synthesis pass.
+    #
+    # Side effects when dry_run=False:
+    #   - entity files: routed through dismiss_entity() so future ingests
+    #     won't re-create the same junk.
+    #   - concept files: file deleted + slug stripped from each source's
+    #     concept_refs in the manifest.
+    #   - manifest["last_lint_at"] updated; report written to
+    #     03_ops/reports/.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _is_stub_page_body(body: str, kind: str) -> bool:
+        boilerplate_phrase = f"Maintained {kind} page derived from ingested sources"
+        evidence_bullet_re = re.compile(r"^\s*-\s*Supports source\s+`?[^`]+`?\s*$")
+        for raw_line in body.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("#"):
+                continue
+            if boilerplate_phrase in line:
+                continue
+            if evidence_bullet_re.match(line):
+                continue
+            return False
+        return True
+
+    def lint_and_prune_pages(self, *, dry_run: bool = True) -> dict[str, Any]:
+        sources = self._manifest.get("sources", {}) or {}
+        live_source_ids = {str(sid) for sid in sources.keys() if str(sid).strip()}
+        dismissed_entity_slugs = set((self._manifest.get("entity_dismissals", {}) or {}).keys())
+
+        # Map slug -> human label by walking source.*_refs once.
+        entity_labels: dict[str, str] = {}
+        concept_labels: dict[str, str] = {}
+        for record in sources.values():
+            if not isinstance(record, dict):
+                continue
+            for raw in record.get("entity_refs") or []:
+                label = str(raw).strip()
+                if not label:
+                    continue
+                slug = _slugify(label)
+                if slug and len(label) > len(entity_labels.get(slug, "")):
+                    entity_labels[slug] = label
+            for raw in record.get("concept_refs") or []:
+                label = str(raw).strip()
+                if not label:
+                    continue
+                slug = _slugify(label)
+                if slug and len(label) > len(concept_labels.get(slug, "")):
+                    concept_labels[slug] = label
+
+        def _evaluate(directory: Path, kind: str, label_map: dict[str, str]) -> list[dict[str, Any]]:
+            findings: list[dict[str, Any]] = []
+            if not directory.exists():
+                return findings
+            for path in sorted(directory.glob("*.md")):
+                if path.name == "index.md":
+                    continue
+                slug = path.stem
+                try:
+                    frontmatter, body = _parse_frontmatter(path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                source_refs_raw = frontmatter.get("source_refs") or []
+                source_refs = [str(ref) for ref in source_refs_raw if str(ref).strip()]
+                live_refs = [ref for ref in source_refs if ref in live_source_ids]
+                is_stub = self._is_stub_page_body(body, kind)
+
+                # Standalone "stub" is intentionally NOT a removal trigger:
+                # multi-source pages can be legit but not yet enriched by the
+                # synthesis pass. Only flag stubs when they're also singletons
+                # (one-off extractions, very likely noise).
+                reasons: list[str] = []
+                if kind == "entity" and slug in dismissed_entity_slugs:
+                    reasons.append("dismissed")
+                if not live_refs:
+                    reasons.append("orphan")
+                elif len(live_refs) == 1 and is_stub:
+                    reasons.append("singleton_stub")
+
+                if not reasons:
+                    continue
+                findings.append(
+                    {
+                        "slug": slug,
+                        "label": label_map.get(slug, slug),
+                        "reasons": reasons,
+                        "source_refs": source_refs,
+                        "live_source_refs": live_refs,
+                    }
+                )
+            return findings
+
+        entity_findings = _evaluate(self.compiled_entities_dir, "entity", entity_labels)
+        concept_findings = _evaluate(self.compiled_concepts_dir, "concept", concept_labels)
+
+        removed_entities = 0
+        removed_concepts = 0
+        if not dry_run:
+            # Entities: route through dismiss_entity so future ingests skip them.
+            for finding in entity_findings:
+                slug = finding["slug"]
+                primary_reason = finding["reasons"][0]
+                try:
+                    self.dismiss_entity(slug=slug, reason=f"linted_{primary_reason}")
+                    removed_entities += 1
+                except Exception:
+                    logger.exception("vault_lint_dismiss_entity_failed slug=%s", slug)
+
+            # Concepts: delete file + strip slug from sources' concept_refs.
+            concept_slugs_to_remove = {finding["slug"] for finding in concept_findings}
+            if concept_slugs_to_remove:
+                for source_record in sources.values():
+                    if not isinstance(source_record, dict):
+                        continue
+                    refs = source_record.get("concept_refs") or []
+                    if not isinstance(refs, list):
+                        continue
+                    filtered = [
+                        ref for ref in refs
+                        if str(ref).strip() and _slugify(str(ref)) not in concept_slugs_to_remove
+                    ]
+                    if len(filtered) != len(refs):
+                        source_record["concept_refs"] = filtered
+
+                for slug in concept_slugs_to_remove:
+                    compiled_path = self.compiled_concepts_dir / f"{slug}.md"
+                    if compiled_path.exists():
+                        try:
+                            compiled_path.unlink()
+                            removed_concepts += 1
+                        except OSError:
+                            logger.exception("vault_lint_unlink_concept_failed slug=%s", slug)
+
+            # Rewrite concept index so it reflects the post-prune state.
+            if removed_concepts:
+                index_path = self.compiled_concepts_dir / "index.md"
+                index_path.write_text(
+                    self._render_index_for_dir("Concepts", self.compiled_concepts_dir),
+                    encoding="utf-8",
+                )
+
+            self._manifest["last_lint_at"] = _utcnow_iso()
+            self._save_manifest()
+
+        entities_total = sum(
+            1 for path in self.compiled_entities_dir.glob("*.md") if path.name != "index.md"
+        ) if self.compiled_entities_dir.exists() else 0
+        concepts_total = sum(
+            1 for path in self.compiled_concepts_dir.glob("*.md") if path.name != "index.md"
+        ) if self.compiled_concepts_dir.exists() else 0
+
+        report = {
+            "generated_at": _utcnow_iso(),
+            "dry_run": bool(dry_run),
+            "entities": {
+                "total_before": entities_total,
+                "flagged": entity_findings,
+                "removed": removed_entities,
+            },
+            "concepts": {
+                "total_before": concepts_total,
+                "flagged": concept_findings,
+                "removed": removed_concepts,
+            },
+        }
+        if not dry_run:
+            report_path = (
+                self.lint_reports_dir / f"{_utcnow().strftime('%Y%m%dT%H%M%SZ')}-prune.json"
+            )
+            try:
+                self.lint_reports_dir.mkdir(parents=True, exist_ok=True)
+                report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            except OSError:
+                logger.exception("vault_lint_report_write_failed")
+        return report
 
     def restore_entity_dismissal(self, *, slug: str) -> dict[str, Any]:
         normalized = _slugify(str(slug or ""))

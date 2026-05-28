@@ -515,6 +515,27 @@ export interface VaultIngestStatusResponse {
   message?: string | null;
 }
 
+export interface VaultLintFinding {
+  slug: string;
+  label: string;
+  reasons: string[];
+  source_refs: string[];
+  live_source_refs: string[];
+}
+
+export interface VaultLintCategoryReport {
+  total_before: number;
+  flagged: VaultLintFinding[];
+  removed: number;
+}
+
+export interface VaultLintResponse {
+  generated_at: string;
+  dry_run: boolean;
+  entities: VaultLintCategoryReport;
+  concepts: VaultLintCategoryReport;
+}
+
 export interface VaultActionItem {
   kind: string;
   priority: string;

@@ -33,6 +33,7 @@ import type {
   VaultFileResponse,
   VaultFileWriteRequest,
   VaultIngestStatusResponse,
+  VaultLintResponse,
   VaultEntityBrowserResponse,
   VaultEntityDismissalsResponse,
   VaultEntityDismissRequest,
@@ -325,6 +326,18 @@ export async function cancelVaultIngest(): Promise<VaultIngestStatusResponse> {
     await parseError(response, `Failed to cancel vault ingest: ${response.statusText}`);
   }
   return response.json() as Promise<VaultIngestStatusResponse>;
+}
+
+export async function lintVault(options?: { dryRun?: boolean }): Promise<VaultLintResponse> {
+  const response = await fetch(`${getBackendBaseURL()}/api/vault/lint`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dry_run: options?.dryRun ?? true }),
+  });
+  if (!response.ok) {
+    await parseError(response, `Failed to lint vault: ${response.statusText}`);
+  }
+  return response.json() as Promise<VaultLintResponse>;
 }
 
 export async function getVaultFile(path: string): Promise<VaultFileResponse> {

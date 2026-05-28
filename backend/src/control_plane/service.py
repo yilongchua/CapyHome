@@ -1709,16 +1709,24 @@ class ControlPlaneService:
 
             try:
                 # Phase 0 — rescue stale claims (idempotent across workers).
+                # When this runner is the first in-process runner
+                # (`runner_count_at_start == 1`), any "claimed" items must be
+                # left over from a previous process that died, so we force
+                # the requeue regardless of lease. Otherwise we honour the
+                # lease so a concurrent job's claims aren't stolen.
                 try:
+                    force_rescue = runner_count_at_start == 1
                     orphaned = manager.requeue_all_claimed_items(
                         reason="orphaned_from_prior_run",
+                        force=force_rescue,
                     )
                     if orphaned:
                         logger_obj.info(
-                            "vault_ingest_orphan_requeue job_id=%s worker=%d requeued=%d",
+                            "vault_ingest_orphan_requeue job_id=%s worker=%d requeued=%d force=%s",
                             job_id,
                             worker_index,
                             orphaned,
+                            force_rescue,
                         )
                 except Exception:
                     logger_obj.exception(
@@ -1963,6 +1971,29 @@ class ControlPlaneService:
     def get_vault_ingest_status(self) -> dict[str, Any]:
         with self._vault_ingest_lock:
             return dict(self._vault_ingest_job)
+
+    def lint_vault_pages(self, *, dry_run: bool = True) -> dict[str, Any]:
+        """Find and (optionally) remove low-quality entity/concept pages.
+
+        Refuses to mutate state while any ingest runner is active so we don't
+        race with peers that are mid-write. A dry-run preview is always safe.
+        """
+        manager = self._default_vault_manager()
+        if not dry_run:
+            with manager._coord.counter_lock:
+                if manager._coord.active_runners > 0:
+                    raise ValueError(
+                        "Cannot lint while a vault ingest is running. "
+                        "Wait for the active run to finish and try again.",
+                    )
+        report = manager.lint_and_prune_pages(dry_run=dry_run)
+        if not dry_run and (
+            report.get("entities", {}).get("removed", 0)
+            or report.get("concepts", {}).get("removed", 0)
+        ):
+            with self._vault_explorer_cache_lock:
+                self._vault_explorer_cache = {}
+        return report
 
     def cancel_vault_ingest_job(self) -> dict[str, Any]:
         with self._vault_ingest_lock:

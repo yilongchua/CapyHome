@@ -1,0 +1,87 @@
+flowchart TD
+    %% ============= Frontend =============
+    subgraph FE["Frontend (Next.js)"]
+        UI["User toggles Auto Mode switch<br/>PrivacyAndAutoMenu"]
+        IB["InputBox.handleToggleAutoMode<br/>context.auto_mode = !context.auto_mode"]
+        HK["hooks.ts<br/>runConfigurable.auto_mode = context.auto_mode ?? false"]
+        UI --> IB --> HK
+    end
+
+    %% ============= API =============
+    subgraph API["Gateway / LangGraph API"]
+        RUN["POST /threads/{id}/runs<br/>context.auto_mode forwarded"]
+        EXE["POST /threads/{id}/execute_plan<br/>ExecutePlanRequest.auto_mode override"]
+        EXEC["_create_work_mode_run<br/>context.auto_mode injected"]
+        EMB["CapyHomeClient.chat/stream<br/>overrides.auto_mode"]
+    end
+
+    HK --> RUN
+    HK --> EXE
+    EXE --> EXEC
+    EMB --> RUN
+
+    %% ============= Planner =============
+    subgraph PLAN["plan_agent runtime"]
+        AME["_auto_mode_enabled(runtime, state)<br/>ctx.auto_mode OR state.auto_mode"]
+        PLANNED{"Plan generated<br/>any clarifications?"}
+        DRAFT["status = 'draft'"]
+        APPROVED["status = 'approved'<br/>approved_at = now<br/>SSE decision = plan_auto_approved"]
+
+        AME --> PLANNED
+        PLANNED -- "no" --> AUTO_NEW{"auto_mode?"}
+        AUTO_NEW -- "yes" --> APPROVED
+        AUTO_NEW -- "no" --> DRAFT
+        PLANNED -- "yes" --> DRAFT
+    end
+
+    RUN --> AME
+
+    %% ============= Clarification loop =============
+    subgraph CL["ClarificationMiddleware"]
+        CACHE["before_model:<br/>cache auto_mode in runtime.context"]
+        ASK["Tool call: ask_user_for_clarification"]
+        REC{"auto_mode AND<br/>recommended option<br/>present?"}
+        AUTOPICK["Auto-select recommended<br/>ToolMessage:<br/>'[Auto Mode] Selected: &lt;label&gt;'<br/>No interrupt"]
+        INTERRUPT["Interrupt run<br/>Command(goto=END)<br/>User answers via popup"]
+
+        CACHE --> ASK --> REC
+        REC -- "yes" --> AUTOPICK
+        REC -- "no (no rec OR auto off)" --> INTERRUPT
+    end
+
+    DRAFT --> CACHE
+
+    %% ============= Post-clarification approval =============
+    AFTER["planner.before_model on next turn<br/>apply_clarification_progress"]
+    LASTQ{"All clarifications<br/>resolved?"}
+    APP_FN["approve_plan_if_auto_mode<br/>(only if draft AND auto_mode)"]
+    SPAWN["spawn_work_mode_handoff<br/>(daemon thread)"]
+
+    AUTOPICK --> AFTER
+    INTERRUPT -- "resume" --> AFTER
+    AFTER --> LASTQ
+    LASTQ -- "no" --> CACHE
+    LASTQ -- "yes" --> APP_FN
+    APP_FN --> SPAWN
+
+    %% ============= Work Mode =============
+    subgraph WM["work_agent runtime"]
+        HANDOFF["execute_plan trigger<br/>context.auto_mode forwarded"]
+        WORK["Work Mode execution<br/>(auto_mode has NO effect here)"]
+        HANDOFF --> WORK
+    end
+
+    APPROVED --> HANDOFF
+    SPAWN --> HANDOFF
+    EXEC --> HANDOFF
+
+    %% ============= Styles =============
+    classDef autoOn fill:#d4edda,stroke:#28a745,color:#155724
+    classDef autoOff fill:#f8d7da,stroke:#dc3545,color:#721c24
+    classDef neutral fill:#e9ecef,stroke:#6c757d,color:#212529
+    classDef gate fill:#fff3cd,stroke:#856404,color:#856404
+
+    class APPROVED,AUTOPICK,APP_FN,SPAWN autoOn
+    class DRAFT,INTERRUPT autoOff
+    class AME,CACHE,AFTER,HANDOFF,WORK,RUN,EXE,EXEC,EMB,UI,IB,HK,ASK neutral
+    class PLANNED,AUTO_NEW,REC,LASTQ gate

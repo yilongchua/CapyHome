@@ -48,6 +48,7 @@ import {
   startPipelineRun,
   startVaultIngest,
   cancelVaultIngest,
+  lintVault,
   getVaultIngestStatus,
   refreshVaultExplorer,
   resumeAutoresearchObjective,
@@ -333,6 +334,23 @@ export function useCancelVaultIngest() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-ingest-status"] });
       publishControlPlaneRefresh(["vault"]);
+    },
+  });
+}
+
+export function useLintVault() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (options?: { dryRun?: boolean }) => lintVault(options),
+    onSuccess: (_data, variables) => {
+      // Only invalidate vault views after a real prune so a dry-run preview
+      // doesn't churn the explorer / entity-browser unnecessarily.
+      if (variables?.dryRun === false) {
+        void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-explorer"] });
+        void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-status"] });
+        void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-entity-browser"] });
+        publishControlPlaneRefresh(["vault"]);
+      }
     },
   });
 }
