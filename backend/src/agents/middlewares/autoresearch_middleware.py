@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable
+from threading import Lock
 from typing import override
+from weakref import WeakKeyDictionary
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
@@ -19,6 +21,9 @@ _AUTORESEARCH_WITH_TOPIC_RE = re.compile(
     re.IGNORECASE,
 )
 _AUTORESEARCH_TRIGGER_RE = re.compile(r"^\s*autoresearch\s*$", re.IGNORECASE)
+_AUTORESEARCH_TRIGGERED_KEY = "_autoresearch_triggered"
+_AUTORESEARCH_TRIGGERED_BY_RUNTIME: WeakKeyDictionary[Runtime, bool] = WeakKeyDictionary()
+_AUTORESEARCH_TRIGGERED_LOCK = Lock()
 
 
 def _extract_last_human_text(messages: list) -> str:
@@ -92,14 +97,35 @@ def _derive_endpoint_goal(topic: str, context_lines: list[str]) -> str:
     return base
 
 
+def _set_autoresearch_triggered(runtime: Runtime | None, value: bool) -> None:
+    if runtime is None:
+        return
+    context = getattr(runtime, "context", None)
+    if isinstance(context, dict):
+        context[_AUTORESEARCH_TRIGGERED_KEY] = value
+        return
+    with _AUTORESEARCH_TRIGGERED_LOCK:
+        try:
+            _AUTORESEARCH_TRIGGERED_BY_RUNTIME[runtime] = value
+        except TypeError:
+            return
+
+
+def _get_autoresearch_triggered(runtime: Runtime | None) -> bool:
+    if runtime is None:
+        return False
+    context = getattr(runtime, "context", None)
+    if isinstance(context, dict):
+        return bool(context.get(_AUTORESEARCH_TRIGGERED_KEY))
+    with _AUTORESEARCH_TRIGGERED_LOCK:
+        try:
+            return bool(_AUTORESEARCH_TRIGGERED_BY_RUNTIME.get(runtime, False))
+        except TypeError:
+            return False
+
+
 class AutoresearchMiddleware(AgentMiddleware[AgentState]):
     """Intercepts autoresearch commands and creates scheduled vault autoresearch jobs."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        # Set to True when wrap_model_call handles an autoresearch command so
-        # after_agent skips the redundant record_workspace_activity call.
-        self._autoresearch_triggered: bool = False
 
     def _handle_autoresearch(
         self,
@@ -165,7 +191,7 @@ class AutoresearchMiddleware(AgentMiddleware[AgentState]):
         # command — _handle_autoresearch calls record_workspace_activity itself to
         # prevent the inactivity guard from pausing the newly created job before it
         # even runs. Recording it again here would be a duplicate write.
-        if self._autoresearch_triggered:
+        if _get_autoresearch_triggered(runtime):
             return None
 
         thread_id = (getattr(runtime, "context", None) or {}).get("thread_id")
@@ -183,7 +209,7 @@ class AutoresearchMiddleware(AgentMiddleware[AgentState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelCallResult:
-        self._autoresearch_triggered = False
+        _set_autoresearch_triggered(getattr(request, "runtime", None), False)
         text = _extract_last_human_text(request.messages)
         if not text:
             return handler(request)
@@ -192,7 +218,7 @@ class AutoresearchMiddleware(AgentMiddleware[AgentState]):
         if not match and not trigger_only:
             return handler(request)
         topic = match.group("topic").strip() if match else None
-        self._autoresearch_triggered = True
+        _set_autoresearch_triggered(getattr(request, "runtime", None), True)
         return self._handle_autoresearch(request=request, explicit_topic=topic)
 
     @override
@@ -201,7 +227,7 @@ class AutoresearchMiddleware(AgentMiddleware[AgentState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelCallResult:
-        self._autoresearch_triggered = False
+        _set_autoresearch_triggered(getattr(request, "runtime", None), False)
         text = _extract_last_human_text(request.messages)
         if not text:
             return await handler(request)
@@ -210,5 +236,5 @@ class AutoresearchMiddleware(AgentMiddleware[AgentState]):
         if not match and not trigger_only:
             return await handler(request)
         topic = match.group("topic").strip() if match else None
-        self._autoresearch_triggered = True
+        _set_autoresearch_triggered(getattr(request, "runtime", None), True)
         return self._handle_autoresearch(request=request, explicit_topic=topic)

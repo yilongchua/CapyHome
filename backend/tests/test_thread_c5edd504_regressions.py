@@ -60,6 +60,45 @@ def test_write_file_artifact_middleware_promotes_outputs_path_on_ok():
     assert result.update["artifacts"] == ["/mnt/user-data/workspace/report.md"]
 
 
+def test_write_file_artifact_middleware_sync_promotes_outputs_path_on_ok():
+    middleware = WriteFileArtifactMiddleware()
+    request = _tool_call_request("/mnt/user-data/workspace/report.md")
+
+    def handler(_request):
+        return ToolMessage(content="OK", tool_call_id="tc-1", name="write_file")
+
+    result = middleware.wrap_tool_call(request, handler)
+    assert isinstance(result, Command)
+    assert result.update["artifacts"] == ["/mnt/user-data/workspace/report.md"]
+
+
+def test_write_file_artifact_middleware_sync_blocks_quality_gate_failure(monkeypatch):
+    monkeypatch.setattr(
+        "src.agents.middlewares.write_file_artifact_middleware.get_quality_gate_config",
+        lambda: QualityGateConfig(enabled=True, block_on_failure=True, max_repair_passes=3),
+    )
+    monkeypatch.setattr(
+        "src.agents.middlewares.write_file_artifact_middleware.check_report_quality",
+        lambda _path, _content: QualityCheckResult(ok=False, reasons=["duplicate rows"]),
+    )
+    middleware = WriteFileArtifactMiddleware()
+    request = _tool_call_request(
+        "/mnt/user-data/workspace/report.md",
+        args={"content": "bad report"},
+    )
+    called = False
+
+    def handler(_request):
+        nonlocal called
+        called = True
+        return ToolMessage(content="OK", tool_call_id="tc-1", name="write_file")
+
+    result = middleware.wrap_tool_call(request, handler)
+    assert isinstance(result, Command)
+    assert called is False
+    assert result.update["quality_gate"]["status"] == "failed"
+
+
 def test_write_file_artifact_middleware_skips_non_ok_or_non_outputs_path():
     middleware = WriteFileArtifactMiddleware()
     bad_request = _tool_call_request("/mnt/user-data/workspace/report.md")

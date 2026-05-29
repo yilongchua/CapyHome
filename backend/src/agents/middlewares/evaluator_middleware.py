@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NotRequired, override
@@ -332,4 +333,4 @@ class EvaluatorMiddleware(AgentMiddleware[EvaluatorState]):
 
     @override
     async def aafter_model(self, state: EvaluatorState, runtime: Runtime) -> dict | None:
-        return self.after_model(state, runtime)
+        return await asyncio.to_thread(self.after_model, state, runtime)

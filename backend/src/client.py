@@ -28,7 +28,7 @@ import zipfile
 from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -37,9 +37,9 @@ from langgraph.types import Command
 
 from src.agents.common.mode import resolve_current_mode
 from src.agents.plan_agent.prompt import apply_prompt_template as plan_apply_prompt_template
+from src.agents.thread_state import ThreadState
 from src.agents.work_agent.agent import _build_middlewares
 from src.agents.work_agent.prompt import apply_prompt_template
-from src.agents.thread_state import ThreadState
 from src.config.app_config import get_app_config, reload_app_config
 from src.config.extensions_config import ExtensionsConfig, SkillStateConfig, get_extensions_config, reload_extensions_config
 from src.config.paths import get_paths
@@ -151,6 +151,22 @@ class CapyHomeClient:
         """
         self._agent = None
         self._agent_config_key = None
+
+    def close(self) -> None:
+        """Release per-client runtime references held by this embedded client.
+
+        Shared providers such as the process-level checkpointer are owned by
+        their provider modules, not by individual clients.  Clearing the cached
+        agent here still matters for daemon-created clients because it drops
+        model/tool/middleware references promptly once the worker is done.
+        """
+        self.reset_agent()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
     # ------------------------------------------------------------------
     # Internal helpers

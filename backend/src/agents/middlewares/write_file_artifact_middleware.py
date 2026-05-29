@@ -14,7 +14,7 @@ from __future__ import annotations
 from fnmatch import fnmatch
 from pathlib import Path
 from types import SimpleNamespace
-from typing import override
+from typing import Any, override
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
@@ -181,16 +181,12 @@ class WriteFileArtifactMiddleware(AgentMiddleware[AgentState]):
             }
         ), False
 
-    @override
-    async def awrap_tool_call(self, request: ToolCallRequest, handler) -> ToolMessage | Command:
-        precheck, is_blocking = self._quality_gate_precheck(request)
-        if isinstance(precheck, Command):
-            # Short-circuit only for blocking quality-gate failures.
-            if is_blocking and precheck.update and precheck.update.get("messages"):
-                return precheck
-
-        result = await handler(request)
-
+    def _promote_result(
+        self,
+        request: ToolCallRequest,
+        result: Any,
+        precheck: Command | None,
+    ) -> ToolMessage | Command | Any:
         tool_name = str(request.tool_call.get("name") or "")
         if tool_name not in _WATCHED_TOOLS:
             return result
@@ -247,5 +243,23 @@ class WriteFileArtifactMiddleware(AgentMiddleware[AgentState]):
         )
 
     @override
+    async def awrap_tool_call(self, request: ToolCallRequest, handler) -> ToolMessage | Command:
+        precheck, is_blocking = self._quality_gate_precheck(request)
+        if isinstance(precheck, Command):
+            # Short-circuit only for blocking quality-gate failures.
+            if is_blocking and precheck.update and precheck.update.get("messages"):
+                return precheck
+
+        result = await handler(request)
+        return self._promote_result(request, result, precheck if isinstance(precheck, Command) else None)
+
+    @override
     def wrap_tool_call(self, request: ToolCallRequest, handler) -> ToolMessage | Command:
-        return handler(request)
+        precheck, is_blocking = self._quality_gate_precheck(request)
+        if isinstance(precheck, Command):
+            # Short-circuit only for blocking quality-gate failures.
+            if is_blocking and precheck.update and precheck.update.get("messages"):
+                return precheck
+
+        result = handler(request)
+        return self._promote_result(request, result, precheck if isinstance(precheck, Command) else None)

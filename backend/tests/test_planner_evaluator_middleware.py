@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -411,6 +413,29 @@ def test_evaluator_marks_plan_passed_on_llm_pass(monkeypatch, tmp_path: Path):
     assert update is not None
     assert update["plan"]["evaluation_status"] == "passed"
     assert (workspace / ".handoffs" / "report.md").exists()
+
+
+def test_evaluator_async_after_model_runs_sync_path_off_event_loop(monkeypatch):
+    middleware = EvaluatorMiddleware(
+        router=_router(),
+        requested_model="primary",
+        max_attempts=EvaluatorConfig().max_attempts,
+        handoffs_config=HandoffsConfig(enabled=False),
+    )
+    event_loop_thread = threading.get_ident()
+    observed_thread = None
+
+    def fake_after_model(_state, _runtime):
+        nonlocal observed_thread
+        observed_thread = threading.get_ident()
+        return {"eval_attempts": 1}
+
+    monkeypatch.setattr(middleware, "after_model", fake_after_model)
+    update = asyncio.run(middleware.aafter_model({"plan": {"title": "Plan"}}, _runtime()))
+
+    assert update == {"eval_attempts": 1}
+    assert observed_thread is not None
+    assert observed_thread != event_loop_thread
 
 
 def test_evaluator_resolves_virtual_plan_path(monkeypatch, tmp_path: Path):
