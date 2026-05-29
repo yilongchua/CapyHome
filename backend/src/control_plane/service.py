@@ -1837,6 +1837,17 @@ class ControlPlaneService:
                             status,
                         )
 
+                def _prefetch_progress(phase: str, label: str) -> None:
+                    # Update the displayed `current_title` / `last_status`
+                    # while PHASE A (URL fetch + LLM analysis + generation)
+                    # is in flight. PHASE B will overwrite these as items
+                    # finalise; the UI polls every 2 s so the user sees the
+                    # progression in near-real time.
+                    with self._vault_ingest_lock:
+                        self._vault_ingest_job["current_title"] = label
+                        self._vault_ingest_job["last_status"] = f"prefetch_{phase}"
+                        self._vault_ingest_job["updated_at"] = self._utcnow_iso()
+
                 try:
                     queue_report = manager.ingest(
                         urls=[],
@@ -1844,6 +1855,7 @@ class ControlPlaneService:
                         topic="",
                         queue_items=claimed,
                         progress_callback=_queue_progress,
+                        prefetch_progress=_prefetch_progress,
                     )
                 except _VaultIngestCancelled:
                     queue_ids = [
