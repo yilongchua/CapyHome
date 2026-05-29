@@ -11,20 +11,34 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from typing import Literal, TypedDict
+from typing import Literal
+
+from pydantic import ConfigDict, Field
 
 from src.config.paths import get_paths
+from src.schema import CapyBaseModel, CapyEvent
+
+SteeringQueuedIntentPayload = dict[str, object]
+SteeringEnqueueResultPayload = dict[str, object]
 
 
-class SteeringQueuedIntent(TypedDict):
-    intent_id: str
-    message: str
-    created_at: str
+class SteeringQueuedIntent(CapyEvent):
+    intent_id: str = Field(..., description="Idempotency key for the queued steering intent")
+    message: str = Field(..., description="User steering message")
+    created_at: str = Field(..., description="ISO timestamp when the intent was created")
+
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
 
 
-class SteeringEnqueueResult(TypedDict):
-    status: Literal["accepted", "duplicate", "conflict"]
-    intent: SteeringQueuedIntent
+class SteeringEnqueueResult(CapyBaseModel):
+    status: Literal["accepted", "duplicate", "conflict"] = Field(..., description="Enqueue outcome")
+    intent: SteeringQueuedIntent = Field(..., description="Accepted or existing queued intent")
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+def _dump_model(model: CapyBaseModel) -> dict[str, object]:
+    return model.model_dump(mode="json", exclude_none=True)
 
 
 _INIT_LOCK = Lock()
@@ -80,7 +94,7 @@ def _ensure_db() -> None:
         _INITIALIZED = True
 
 
-def enqueue_steering_intent(*, thread_id: str, intent_id: str, message: str, created_at: str | None = None) -> SteeringEnqueueResult:
+def enqueue_steering_intent(*, thread_id: str, intent_id: str, message: str, created_at: str | None = None) -> SteeringEnqueueResultPayload:
     """Enqueue a steering intent with thread+intent idempotency."""
     _ensure_db()
     normalized_thread_id = str(thread_id or "").strip()
@@ -91,11 +105,11 @@ def enqueue_steering_intent(*, thread_id: str, intent_id: str, message: str, cre
 
     created = created_at.strip() if isinstance(created_at, str) and created_at.strip() else _utc_now_iso()
     queued = _utc_now_iso()
-    payload: SteeringQueuedIntent = {
-        "intent_id": normalized_intent_id,
-        "message": normalized_message,
-        "created_at": created,
-    }
+    payload = SteeringQueuedIntent(
+        intent_id=normalized_intent_id,
+        message=normalized_message,
+        created_at=created,
+    )
 
     with _connect() as conn:
         try:
@@ -106,10 +120,7 @@ def enqueue_steering_intent(*, thread_id: str, intent_id: str, message: str, cre
                 """,
                 (normalized_thread_id, normalized_intent_id, normalized_message, created, queued),
             )
-            return {
-                "status": "accepted",
-                "intent": payload,
-            }
+            return _dump_model(SteeringEnqueueResult(status="accepted", intent=payload))
         except sqlite3.IntegrityError:
             row = conn.execute(
                 """
@@ -125,17 +136,19 @@ def enqueue_steering_intent(*, thread_id: str, intent_id: str, message: str, cre
             existing_message = str(row["message"] or "").strip()
             existing_created_at = str(row["created_at"] or created)
             status: Literal["duplicate", "conflict"] = "duplicate" if existing_message == normalized_message else "conflict"
-            return {
-                "status": status,
-                "intent": {
-                    "intent_id": normalized_intent_id,
-                    "message": existing_message,
-                    "created_at": existing_created_at,
-                },
-            }
+            return _dump_model(
+                SteeringEnqueueResult(
+                    status=status,
+                    intent=SteeringQueuedIntent(
+                        intent_id=normalized_intent_id,
+                        message=existing_message,
+                        created_at=existing_created_at,
+                    ),
+                )
+            )
 
 
-def claim_next_steering_intent(thread_id: str) -> SteeringQueuedIntent | None:
+def claim_next_steering_intent(thread_id: str) -> SteeringQueuedIntentPayload | None:
     """Atomically claim the next unconsumed intent for this thread.
 
     Returns exactly one intent and marks it consumed in the same transaction.
@@ -175,14 +188,16 @@ def claim_next_steering_intent(thread_id: str) -> SteeringQueuedIntent | None:
             return None
 
         conn.execute("COMMIT")
-        return {
-            "intent_id": str(row["intent_id"]),
-            "message": str(row["message"]),
-            "created_at": str(row["created_at"]),
-        }
+        return _dump_model(
+            SteeringQueuedIntent(
+                intent_id=str(row["intent_id"]),
+                message=str(row["message"]),
+                created_at=str(row["created_at"]),
+            )
+        )
 
 
-def list_pending_steering_intents(thread_id: str) -> list[SteeringQueuedIntent]:
+def list_pending_steering_intents(thread_id: str) -> list[SteeringQueuedIntentPayload]:
     """Return pending (unconsumed) intents for diagnostics/tests."""
     _ensure_db()
     normalized_thread_id = str(thread_id or "").strip()
@@ -199,11 +214,13 @@ def list_pending_steering_intents(thread_id: str) -> list[SteeringQueuedIntent]:
             (normalized_thread_id,),
         ).fetchall()
     return [
-        {
-            "intent_id": str(row["intent_id"]),
-            "message": str(row["message"]),
-            "created_at": str(row["created_at"]),
-        }
+        _dump_model(
+            SteeringQueuedIntent(
+                intent_id=str(row["intent_id"]),
+                message=str(row["message"]),
+                created_at=str(row["created_at"]),
+            )
+        )
         for row in rows
     ]
 

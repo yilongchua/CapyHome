@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
 
 from langgraph.config import get_stream_writer
+from pydantic import ConfigDict, Field
+
+from src.schema import CapyBaseModel, CapyEvent
 
 ACTIVITY_SCHEMA_VERSION = "v1"
 ACTIVITY_STREAM_EVENT_TYPE = "activity_event.v1"
@@ -20,44 +23,69 @@ ACTIVITY_RUN_ID_KEY = "_activity_timeline_run_id"
 ACTIVITY_SEQ_KEY = "_activity_timeline_seq"
 ACTIVITY_MAX_EVENTS_RETAINED = 1200
 
-
-class ActivityEvent(TypedDict, total=False):
-    id: str
-    schema: str
-    run_id: str
-    seq: int
-    timestamp: float
-    actor: Literal["capyhome", "baby_capy", "system"]
-    kind: str
-    line: str
-    task_id: str | None
-    group_id: str | None
-    group_kind: str | None
-    group_title: str | None
-    group_role: str | None
-    subagent_type: str | None
-    description: str | None
-    tool_summary: str | None
-    assistant_message_id: str | None
-    payload: dict[str, Any]
+ActivityActor = Literal["capyhome", "baby_capy", "system"]
+ActivityEventPayload = dict[str, Any]
+ActivityTimelineStatePayload = dict[str, Any]
+ContextMetricsStatePayload = dict[str, Any]
 
 
-class ActivityTimelineState(TypedDict, total=False):
-    version: str
-    events: list[ActivityEvent]
+class ActivityEvent(CapyEvent):
+    id: str | None = Field(default=None, description="Stable event id, usually run_id:seq")
+    schema_: str = Field(default=ACTIVITY_SCHEMA_VERSION, alias="schema", description="Activity event schema version")
+    run_id: str = Field(..., description="Run identifier shared by events from one agent run")
+    seq: int | None = Field(default=None, ge=1, description="Monotonic sequence number within the run")
+    timestamp: float = Field(..., description="Unix timestamp in seconds")
+    actor: ActivityActor = Field(..., description="Actor shown in the activity timeline")
+    kind: str = Field(..., description="Machine-readable activity kind")
+    line: str = Field(..., description="User-facing activity line")
+    task_id: str | None = Field(default=None, description="Optional task/tool call id")
+    group_id: str | None = Field(default=None, description="Optional progress group id")
+    group_kind: str | None = Field(default=None, description="Optional progress group kind")
+    group_title: str | None = Field(default=None, description="Optional progress group title")
+    group_role: str | None = Field(default=None, description="Optional role within a progress group")
+    subagent_type: str | None = Field(default=None, description="Optional subagent type")
+    description: str | None = Field(default=None, description="Optional short task description")
+    tool_summary: str | None = Field(default=None, description="Optional compact tool activity summary")
+    assistant_message_id: str | None = Field(default=None, description="Optional related assistant message id")
+    payload: dict[str, Any] = Field(default_factory=dict, description="Additional structured payload")
+
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
 
 
-class ContextMetricsState(TypedDict, total=False):
-    token_count: int
-    message_count: int
-    context_updated_at: float
-    compaction_count: int
-    last_compaction_at: float
-    messages_compressed: int
-    messages_kept: int
+class ActivityTimelineState(CapyBaseModel):
+    version: str = Field(default=ACTIVITY_SCHEMA_VERSION, description="Activity timeline schema version")
+    events: list[ActivityEvent] = Field(default_factory=list, description="Persisted activity events")
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class ContextMetricsState(CapyBaseModel):
+    token_count: int | None = Field(default=None, ge=0, description="Current context token count")
+    message_count: int | None = Field(default=None, ge=0, description="Current context message count")
+    context_updated_at: float | None = Field(default=None, description="Unix timestamp for the latest context metrics")
+    compaction_count: int | None = Field(default=None, ge=0, description="Number of context compactions")
+    last_compaction_at: float | None = Field(default=None, description="Unix timestamp for latest compaction")
+    messages_compressed: int | None = Field(default=None, ge=0, description="Number of compressed messages")
+    messages_kept: int | None = Field(default=None, ge=0, description="Number of retained messages")
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+def _dump_model(model: CapyBaseModel, *, exclude_none: bool = True) -> dict[str, Any]:
+    return model.model_dump(mode="json", exclude_none=exclude_none, by_alias=True)
+
+
+def _activity_event_payload(value: ActivityEvent | dict[str, Any]) -> ActivityEventPayload:
+    if isinstance(value, ActivityEvent):
+        return _dump_model(value, exclude_none=False)
+    if isinstance(value, dict):
+        return _dump_model(ActivityEvent.model_validate(value), exclude_none=False)
+    return {}
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, CapyBaseModel):
+        return _dump_model(value)
     if isinstance(value, dict):
         return value
     return {}
@@ -97,7 +125,7 @@ def _next_seq(runtime: Any) -> int:
 def create_activity_event(
     runtime: Any,
     *,
-    actor: Literal["capyhome", "baby_capy", "system"],
+    actor: ActivityActor,
     kind: str,
     line: str,
     task_id: str | None = None,
@@ -110,50 +138,51 @@ def create_activity_event(
     tool_summary: str | None = None,
     assistant_message_id: str | None = None,
     payload: dict[str, Any] | None = None,
-) -> ActivityEvent:
+) -> ActivityEventPayload:
     run_id = _resolve_run_id(runtime)
     seq = _next_seq(runtime)
     timestamp = time.time()
-    event: ActivityEvent = {
-        "id": f"{run_id}:{seq}",
-        "schema": ACTIVITY_SCHEMA_VERSION,
-        "run_id": run_id,
-        "seq": seq,
-        "timestamp": timestamp,
-        "actor": actor,
-        "kind": kind,
-        "line": line,
-        "task_id": task_id,
-        "group_id": group_id,
-        "group_kind": group_kind,
-        "group_title": group_title,
-        "group_role": group_role,
-        "subagent_type": subagent_type,
-        "description": description,
-        "tool_summary": tool_summary,
-        "assistant_message_id": assistant_message_id,
-        "payload": payload or {},
-    }
-    return event
+    event = ActivityEvent(
+        id=f"{run_id}:{seq}",
+        schema=ACTIVITY_SCHEMA_VERSION,
+        run_id=run_id,
+        seq=seq,
+        timestamp=timestamp,
+        actor=actor,
+        kind=kind,
+        line=line,
+        task_id=task_id,
+        group_id=group_id,
+        group_kind=group_kind,
+        group_title=group_title,
+        group_role=group_role,
+        subagent_type=subagent_type,
+        description=description,
+        tool_summary=tool_summary,
+        assistant_message_id=assistant_message_id,
+        payload=payload or {},
+    )
+    return _dump_model(event, exclude_none=False)
 
 
-def stream_activity_event(event: ActivityEvent) -> None:
+def stream_activity_event(event: ActivityEvent | dict[str, Any]) -> None:
     try:
+        payload = _activity_event_payload(event)
         writer = get_stream_writer()
         writer(
             {
                 "type": ACTIVITY_STREAM_EVENT_TYPE,
                 "schema": ACTIVITY_SCHEMA_VERSION,
-                **event,
+                **payload,
             }
         )
     except Exception:
         return
 
 
-def _dedupe_sort_events(events: list[ActivityEvent]) -> list[ActivityEvent]:
-    by_id: dict[str, ActivityEvent] = {}
-    without_id: list[ActivityEvent] = []
+def _dedupe_sort_events(events: list[ActivityEventPayload]) -> list[ActivityEventPayload]:
+    by_id: dict[str, ActivityEventPayload] = {}
+    without_id: list[ActivityEventPayload] = []
     for event in events:
         event_id = event.get("id")
         if isinstance(event_id, str) and event_id:
@@ -173,14 +202,16 @@ def _dedupe_sort_events(events: list[ActivityEvent]) -> list[ActivityEvent]:
     return deduped
 
 
-def merge_activity_timeline(existing: ActivityTimelineState | None, new: ActivityTimelineState | None) -> ActivityTimelineState:
+def merge_activity_timeline(existing: ActivityTimelineStatePayload | None, new: ActivityTimelineStatePayload | None) -> ActivityTimelineStatePayload:
     if existing is None:
-        return new or {"version": ACTIVITY_SCHEMA_VERSION, "events": []}
+        return _as_dict(new) or {"version": ACTIVITY_SCHEMA_VERSION, "events": []}
     if new is None:
-        return existing
+        return _as_dict(existing)
 
-    old_events = existing.get("events") if isinstance(existing.get("events"), list) else []
-    new_events = new.get("events") if isinstance(new.get("events"), list) else []
+    existing_payload = _as_dict(existing)
+    new_payload = _as_dict(new)
+    old_events = existing_payload.get("events") if isinstance(existing_payload.get("events"), list) else []
+    new_events = new_payload.get("events") if isinstance(new_payload.get("events"), list) else []
     merged_events = _dedupe_sort_events(
         [event for event in [*old_events, *new_events] if isinstance(event, dict)]
     )
@@ -190,21 +221,22 @@ def merge_activity_timeline(existing: ActivityTimelineState | None, new: Activit
     }
 
 
-def activity_timeline_update(events: list[ActivityEvent]) -> ActivityTimelineState:
+def activity_timeline_update(events: list[ActivityEventPayload]) -> ActivityTimelineStatePayload:
+    state = ActivityTimelineState(events=[ActivityEvent.model_validate(event) for event in events])
     return {
-        "version": ACTIVITY_SCHEMA_VERSION,
-        "events": events,
+        "version": state.version,
+        "events": [_dump_model(event, exclude_none=False) for event in state.events],
     }
 
 
-def merge_context_metrics(existing: ContextMetricsState | None, new: ContextMetricsState | None) -> ContextMetricsState:
+def merge_context_metrics(existing: ContextMetricsStatePayload | None, new: ContextMetricsStatePayload | None) -> ContextMetricsStatePayload:
     if existing is None:
-        return new or {}
+        return _as_dict(new)
     if new is None:
-        return existing
+        return _as_dict(existing)
 
-    current = dict(existing)
-    incoming = dict(new)
+    current = _as_dict(existing)
+    incoming = _as_dict(new)
 
     current_ts = float(current.get("context_updated_at") or 0.0)
     incoming_ts = float(incoming.get("context_updated_at") or current_ts)
@@ -233,5 +265,5 @@ def merge_context_metrics(existing: ContextMetricsState | None, new: ContextMetr
     return current
 
 
-def context_metrics_update(payload: dict[str, Any]) -> ContextMetricsState:
-    return _as_dict(payload)
+def context_metrics_update(payload: dict[str, Any]) -> ContextMetricsStatePayload:
+    return _dump_model(ContextMetricsState.model_validate(_as_dict(payload)))

@@ -2,20 +2,23 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from dataclasses import dataclass
 from urllib.parse import urlparse
 
+from pydantic import ConfigDict, Field
+
 from src.config import get_app_config
+from src.schema import CapyBaseModel
 
 
-@dataclass(frozen=True)
-class CIDGuardrailConfig:
-    enabled: bool = True
-    block_on_detection: bool = True
-    max_query_chars: int = 512
-    allow_personal_data_queries: bool = False
-    block_private_network_urls: bool = True
-    allowed_fetch_domains: tuple[str, ...] = ()
+class CIDGuardrailConfig(CapyBaseModel):
+    enabled: bool = Field(default=True, description="Whether CID guardrails are active")
+    block_on_detection: bool = Field(default=True, description="Whether sensitive query signals should raise an error")
+    max_query_chars: int = Field(default=512, ge=1, description="Maximum allowed query length")
+    allow_personal_data_queries: bool = Field(default=False, description="Whether personal-data-oriented queries are allowed")
+    block_private_network_urls: bool = Field(default=True, description="Whether localhost/private-network fetch URLs are blocked")
+    allowed_fetch_domains: tuple[str, ...] = Field(default_factory=tuple, description="Optional allowed fetch domain suffixes")
+
+    model_config = ConfigDict(extra="allow", frozen=True, populate_by_name=True)
 
 
 _SENSITIVE_INTENT_PATTERNS = [

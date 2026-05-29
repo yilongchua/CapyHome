@@ -1,7 +1,6 @@
 """Subagent registry for managing available subagents."""
 
 import logging
-from dataclasses import replace
 
 from src.subagents.builtins import BUILTIN_SUBAGENTS
 from src.subagents.config import SubagentConfig
@@ -29,7 +28,7 @@ def get_subagent_config(name: str) -> SubagentConfig | None:
     effective_timeout = app_config.get_timeout_for(name)
     if effective_timeout != config.timeout_seconds:
         logger.debug(f"Subagent '{name}': timeout overridden by config.yaml ({config.timeout_seconds}s -> {effective_timeout}s)")
-        config = replace(config, timeout_seconds=effective_timeout)
+        config = config.model_copy(update={"timeout_seconds": effective_timeout})
 
     return config
 

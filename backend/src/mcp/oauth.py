@@ -4,22 +4,28 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from pydantic import ConfigDict, Field, SecretStr
+
 from src.config.extensions_config import ExtensionsConfig, McpOAuthConfig
+from src.schema import CapyBaseModel
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class _OAuthToken:
+class _OAuthToken(CapyBaseModel):
     """Cached OAuth token."""
 
-    access_token: str
-    token_type: str
-    expires_at: datetime
+    access_token: SecretStr = Field(..., description="Bearer access token")
+    token_type: str = Field(..., description="Authorization token type, usually Bearer")
+    expires_at: datetime = Field(..., description="UTC timestamp when this token expires")
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    def authorization_header(self) -> str:
+        return f"{self.token_type} {self.access_token.get_secret_value()}"
 
 
 class OAuthTokenManager:
@@ -51,18 +57,18 @@ class OAuthTokenManager:
 
         token = self._tokens.get(server_name)
         if token and not self._is_expiring(token, oauth):
-            return f"{token.token_type} {token.access_token}"
+            return token.authorization_header()
 
         lock = self._locks[server_name]
         async with lock:
             token = self._tokens.get(server_name)
             if token and not self._is_expiring(token, oauth):
-                return f"{token.token_type} {token.access_token}"
+                return token.authorization_header()
 
             fresh = await self._fetch_token(oauth)
             self._tokens[server_name] = fresh
             logger.info(f"Refreshed OAuth access token for MCP server: {server_name}")
-            return f"{fresh.token_type} {fresh.access_token}"
+            return fresh.authorization_header()
 
     @staticmethod
     def _is_expiring(token: _OAuthToken, oauth: McpOAuthConfig) -> bool:

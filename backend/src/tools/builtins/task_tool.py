@@ -4,7 +4,6 @@ import logging
 import re
 import time
 import uuid
-from dataclasses import replace
 from typing import Annotated
 
 from langchain.tools import InjectedToolCallId, ToolRuntime, tool
@@ -17,9 +16,9 @@ from src.agents.execution_trace import (
     make_summary_fallback,
     stream_trace_event,
 )
-from src.agents.work_agent.prompt import get_skills_prompt_section
 from src.agents.middlewares.runtime_events import append_runtime_event
 from src.agents.thread_state import ThreadState
+from src.agents.work_agent.prompt import get_skills_prompt_section
 from src.subagents import SubagentExecutor, get_subagent_config
 from src.subagents.executor import SubagentStatus, cleanup_background_task, get_background_task_result
 from src.subagents.registry import get_subagent_names
@@ -298,7 +297,7 @@ def task_tool(
         overrides["max_turns"] = max_turns
 
     if overrides:
-        config = replace(config, **overrides)
+        config = config.model_copy(update=overrides)
 
     normalized_description = _normalize_description(description)
     normalized_subagent_type = _normalize_subagent_label(subagent_type)

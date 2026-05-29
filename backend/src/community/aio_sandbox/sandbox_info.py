@@ -3,23 +3,27 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+
+from pydantic import AliasChoices, ConfigDict, Field
+
+from src.schema import CapyBaseModel
 
 
-@dataclass
-class SandboxInfo:
+class SandboxInfo(CapyBaseModel):
     """Persisted sandbox metadata that enables cross-process discovery.
 
-    This dataclass holds all the information needed to reconnect to an
+    This model holds all the information needed to reconnect to an
     existing sandbox from a different process (e.g., gateway vs langgraph,
     multiple workers, or across K8s pods with shared storage).
     """
 
-    sandbox_id: str
-    sandbox_url: str  # e.g. http://localhost:8080 or http://k3s:30001
-    container_name: str | None = None  # Only for local container backend
-    container_id: str | None = None  # Only for local container backend
-    created_at: float = field(default_factory=time.time)
+    sandbox_id: str = Field(..., description="Deterministic sandbox identifier")
+    sandbox_url: str = Field(..., validation_alias=AliasChoices("sandbox_url", "base_url"), description="Reachable sandbox base URL")
+    container_name: str | None = Field(default=None, description="Local container name, when using a local backend")
+    container_id: str | None = Field(default=None, description="Local container id, when using a local backend")
+    created_at: float = Field(default_factory=time.time, description="Unix timestamp when this sandbox metadata was created")
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     def to_dict(self) -> dict:
         return {
@@ -32,10 +36,7 @@ class SandboxInfo:
 
     @classmethod
     def from_dict(cls, data: dict) -> SandboxInfo:
-        return cls(
-            sandbox_id=data["sandbox_id"],
-            sandbox_url=data.get("sandbox_url", data.get("base_url", "")),
-            container_name=data.get("container_name"),
-            container_id=data.get("container_id"),
-            created_at=data.get("created_at", time.time()),
-        )
+        normalized = dict(data)
+        normalized.setdefault("sandbox_url", normalized.get("base_url", ""))
+        normalized.setdefault("created_at", time.time())
+        return cls.model_validate(normalized)

@@ -4,6 +4,7 @@ from src.agents.execution_trace import (
     TRACE_MAX_EVENTS_PER_RUN,
     TRACE_MAX_PAYLOAD_CHARS,
     TRACE_MAX_RUNS_RETAINED,
+    ExecutionTraceState,
     create_trace_event,
     execution_trace_update,
     extract_reasoning_from_message,
@@ -30,6 +31,37 @@ def test_create_trace_event_truncates_large_payload() -> None:
     assert event["payload_truncated"] is True
     assert event["payload_original_chars"] > TRACE_MAX_PAYLOAD_CHARS
     assert event["payload"].get("_truncated") is True
+
+
+def test_create_trace_event_preserves_original_null_wire_keys() -> None:
+    event = create_trace_event(
+        _runtime(),
+        stage="lead",
+        event_type="model_response",
+        status="completed",
+    )
+
+    assert event["turn_id"] is None
+    assert event["assistant_message_id"] is None
+    assert event["task_id"] is None
+    assert "thinking" not in event
+    assert "token_usage" not in event
+
+
+def test_merge_execution_trace_accepts_model_instances() -> None:
+    runtime = _runtime()
+    event = create_trace_event(
+        runtime,
+        stage="lead",
+        event_type="model_response",
+        status="completed",
+    )
+    state = ExecutionTraceState.model_validate(execution_trace_update([event]))
+
+    merged = merge_execution_trace(state, execution_trace_update([]))
+
+    assert event["run_id"] in merged["runs"]
+    assert merged["runs"][event["run_id"]]["events"][0]["id"] == event["id"]
 
 
 def test_merge_execution_trace_dedupes_by_event_id_and_sorts() -> None:

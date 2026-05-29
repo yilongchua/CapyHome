@@ -9,9 +9,12 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
 
 from langgraph.config import get_stream_writer
+from pydantic import ConfigDict, Field, model_validator
+
+from src.schema import CapyBaseModel, CapyEvent
 
 TRACE_SCHEMA_VERSION = "v1"
 TRACE_STREAM_EVENT_TYPE = "trace_event.v1"
@@ -22,50 +25,88 @@ TRACE_RUN_STARTED_KEY = "_execution_trace_run_started"
 TRACE_MAX_RUNS_RETAINED = 24
 TRACE_MAX_EVENTS_PER_RUN = 320
 
-
-class TraceThinking(TypedDict):
-    source: Literal["raw", "summary"]
-    content: str
-
-
-class TraceTokenUsage(TypedDict, total=False):
-    input_tokens: int
-    output_tokens: int
-    total_tokens: int
+TraceStage = Literal["lead", "planner", "evaluator", "subagent", "harness"]
+TraceThinkingSource = Literal["raw", "summary"]
+TraceThinkingPayload = dict[str, Any]
+TraceTokenUsagePayload = dict[str, Any]
+ExecutionTraceEventPayload = dict[str, Any]
+ExecutionTraceRunPayload = dict[str, Any]
+ExecutionTraceStatePayload = dict[str, Any]
 
 
-class ExecutionTraceEvent(TypedDict, total=False):
-    id: str
-    schema: str
-    run_id: str
-    turn_id: str | None
-    stage: Literal["lead", "planner", "evaluator", "subagent", "harness"]
-    event_type: str
-    timestamp: float
-    seq: int
-    status: str
-    payload: dict[str, Any]
-    token_usage: TraceTokenUsage
-    thinking: TraceThinking
-    assistant_message_id: str | None
-    task_id: str | None
-    payload_truncated: bool
-    payload_original_chars: int
+class TraceThinking(CapyBaseModel):
+    source: TraceThinkingSource = Field(..., description="Whether thinking is raw provider output or generated summary")
+    content: str = Field(..., description="Thinking text shown in the trace panel")
+
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
 
 
-class ExecutionTraceRun(TypedDict, total=False):
-    run_id: str
-    started_at: float
-    updated_at: float
-    events: list[ExecutionTraceEvent]
+class TraceTokenUsage(CapyBaseModel):
+    input_tokens: int | None = Field(default=None, ge=0, description="Input token count")
+    output_tokens: int | None = Field(default=None, ge=0, description="Output token count")
+    total_tokens: int | None = Field(default=None, ge=0, description="Total token count")
+
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
 
 
-class ExecutionTraceState(TypedDict, total=False):
-    version: str
-    runs: dict[str, ExecutionTraceRun]
+class ExecutionTraceEvent(CapyEvent):
+    id: str | None = Field(default=None, description="Stable event id, usually run_id:seq")
+    schema_: str = Field(default=TRACE_SCHEMA_VERSION, alias="schema", description="Execution trace schema version")
+    run_id: str = Field(..., description="Run identifier shared by events from one agent run")
+    turn_id: str | None = Field(default=None, description="Optional turn or tool-call id")
+    stage: TraceStage = Field(..., description="Trace stage that emitted the event")
+    event_type: str = Field(..., description="Machine-readable event type")
+    timestamp: float = Field(..., description="Unix timestamp in seconds")
+    seq: int | None = Field(default=None, ge=0, description="Monotonic sequence number within the run")
+    status: str = Field(..., description="Event status")
+    payload: dict[str, Any] = Field(default_factory=dict, description="Structured event payload")
+    token_usage: TraceTokenUsage | None = Field(default=None, description="Optional token usage")
+    thinking: TraceThinking | None = Field(default=None, description="Optional reasoning/thinking payload")
+    assistant_message_id: str | None = Field(default=None, description="Optional related assistant message id")
+    task_id: str | None = Field(default=None, description="Optional related subagent task id")
+    payload_truncated: bool | None = Field(default=None, description="Whether payload was truncated for storage/wire")
+    payload_original_chars: int | None = Field(default=None, ge=0, description="Original serialized payload length")
+
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+
+    @model_validator(mode="after")
+    def _validate_truncation_metadata(self) -> ExecutionTraceEvent:
+        if self.payload_truncated and not self.payload_original_chars:
+            raise ValueError("payload_original_chars must be positive when payload_truncated is true")
+        return self
+
+
+class ExecutionTraceRun(CapyBaseModel):
+    run_id: str = Field(..., description="Run identifier")
+    started_at: float | None = Field(default=None, description="Unix timestamp when this run started")
+    updated_at: float | None = Field(default=None, description="Unix timestamp when this run was last updated")
+    events: list[ExecutionTraceEvent] = Field(default_factory=list, description="Trace events for this run")
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class ExecutionTraceState(CapyBaseModel):
+    version: str = Field(default=TRACE_SCHEMA_VERSION, description="Execution trace schema version")
+    runs: dict[str, ExecutionTraceRun] = Field(default_factory=dict, description="Trace runs keyed by run id")
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+def _dump_model(model: CapyBaseModel, *, exclude_none: bool = True) -> dict[str, Any]:
+    return model.model_dump(mode="json", exclude_none=exclude_none, by_alias=True)
+
+
+def _trace_event_payload(value: ExecutionTraceEvent | dict[str, Any]) -> ExecutionTraceEventPayload:
+    if isinstance(value, ExecutionTraceEvent):
+        return _dump_model(value, exclude_none=True)
+    if isinstance(value, dict):
+        return _dump_model(ExecutionTraceEvent.model_validate(value), exclude_none=True)
+    return {}
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, CapyBaseModel):
+        return _dump_model(value)
     if isinstance(value, dict):
         return value
     return {}
@@ -139,44 +180,46 @@ def _serialize_payload(payload: Any) -> tuple[dict[str, Any], bool, int]:
 def create_trace_event(
     runtime: Any,
     *,
-    stage: Literal["lead", "planner", "evaluator", "subagent", "harness"],
+    stage: TraceStage,
     event_type: str,
     status: str,
     payload: dict[str, Any] | None = None,
-    token_usage: TraceTokenUsage | None = None,
-    thinking: TraceThinking | None = None,
+    token_usage: TraceTokenUsage | TraceTokenUsagePayload | None = None,
+    thinking: TraceThinking | TraceThinkingPayload | None = None,
     turn_id: str | None = None,
     assistant_message_id: str | None = None,
     task_id: str | None = None,
-) -> ExecutionTraceEvent:
+) -> ExecutionTraceEventPayload:
     run_id = resolve_trace_run_id(runtime)
     seq = next_trace_seq(runtime)
     safe_payload, payload_truncated, payload_original_chars = _serialize_payload(payload)
 
-    event: ExecutionTraceEvent = {
-        "id": f"{run_id}:{seq}",
-        "schema": TRACE_SCHEMA_VERSION,
-        "run_id": run_id,
-        "turn_id": turn_id,
-        "stage": stage,
-        "event_type": event_type,
-        "timestamp": time.time(),
-        "seq": seq,
-        "status": status,
-        "payload": safe_payload,
-        "assistant_message_id": assistant_message_id,
-        "task_id": task_id,
-        "payload_truncated": payload_truncated,
-        "payload_original_chars": payload_original_chars,
-    }
-    if token_usage:
-        event["token_usage"] = token_usage
-    if thinking:
-        event["thinking"] = thinking
-    return event
+    event = ExecutionTraceEvent(
+        id=f"{run_id}:{seq}",
+        schema=TRACE_SCHEMA_VERSION,
+        run_id=run_id,
+        turn_id=turn_id,
+        stage=stage,
+        event_type=event_type,
+        timestamp=time.time(),
+        seq=seq,
+        status=status,
+        payload=safe_payload,
+        assistant_message_id=assistant_message_id,
+        task_id=task_id,
+        payload_truncated=payload_truncated,
+        payload_original_chars=payload_original_chars,
+        token_usage=token_usage,
+        thinking=thinking,
+    )
+    event_payload = _dump_model(event)
+    event_payload.setdefault("turn_id", None)
+    event_payload.setdefault("assistant_message_id", None)
+    event_payload.setdefault("task_id", None)
+    return event_payload
 
 
-def stream_trace_event(event: ExecutionTraceEvent) -> None:
+def stream_trace_event(event: ExecutionTraceEvent | dict[str, Any]) -> None:
     """Best-effort real-time stream of trace events."""
     try:
         from src.config.execution_trace_config import get_execution_trace_config
@@ -188,12 +231,13 @@ def stream_trace_event(event: ExecutionTraceEvent) -> None:
         return
 
     try:
+        payload = _trace_event_payload(event)
         writer = get_stream_writer()
         writer(
             {
                 "type": TRACE_STREAM_EVENT_TYPE,
                 "schema": TRACE_SCHEMA_VERSION,
-                **event,
+                **payload,
             }
         )
     except Exception:
@@ -201,9 +245,9 @@ def stream_trace_event(event: ExecutionTraceEvent) -> None:
         return
 
 
-def _dedupe_sorted_events(events: list[ExecutionTraceEvent]) -> list[ExecutionTraceEvent]:
-    by_id: dict[str, ExecutionTraceEvent] = {}
-    without_id: list[ExecutionTraceEvent] = []
+def _dedupe_sorted_events(events: list[ExecutionTraceEventPayload]) -> list[ExecutionTraceEventPayload]:
+    by_id: dict[str, ExecutionTraceEventPayload] = {}
+    without_id: list[ExecutionTraceEventPayload] = []
     for event in events:
         event_id = event.get("id")
         if isinstance(event_id, str) and event_id:
@@ -221,37 +265,39 @@ def _dedupe_sorted_events(events: list[ExecutionTraceEvent]) -> list[ExecutionTr
     return deduped
 
 
-def _trim_events(events: list[ExecutionTraceEvent]) -> list[ExecutionTraceEvent]:
+def _trim_events(events: list[ExecutionTraceEventPayload]) -> list[ExecutionTraceEventPayload]:
     if len(events) <= TRACE_MAX_EVENTS_PER_RUN:
         return events
     return events[-TRACE_MAX_EVENTS_PER_RUN:]
 
 
-def merge_execution_trace(existing: ExecutionTraceState | None, new: ExecutionTraceState | None) -> ExecutionTraceState:
+def merge_execution_trace(existing: ExecutionTraceStatePayload | None, new: ExecutionTraceStatePayload | None) -> ExecutionTraceStatePayload:
     """Reducer for ThreadState.execution_trace."""
     if existing is None:
-        return new or {"version": TRACE_SCHEMA_VERSION, "runs": {}}
+        return _as_dict(new) or {"version": TRACE_SCHEMA_VERSION, "runs": {}}
     if new is None:
-        return existing
+        return _as_dict(existing)
 
-    merged: ExecutionTraceState = {
+    merged: ExecutionTraceStatePayload = {
         "version": TRACE_SCHEMA_VERSION,
         "runs": {},
     }
-    existing_runs = _as_dict(existing.get("runs"))
-    new_runs = _as_dict(new.get("runs"))
+    existing_payload = _as_dict(existing)
+    new_payload = _as_dict(new)
+    existing_runs = _as_dict(existing_payload.get("runs"))
+    new_runs = _as_dict(new_payload.get("runs"))
     run_ids = set(existing_runs.keys()) | set(new_runs.keys())
     for run_id in run_ids:
         old_run = _as_dict(existing_runs.get(run_id))
         new_run = _as_dict(new_runs.get(run_id))
         old_events = old_run.get("events")
         new_events = new_run.get("events")
-        combined_events: list[ExecutionTraceEvent] = []
+        combined_events: list[ExecutionTraceEventPayload] = []
         if isinstance(old_events, list):
             combined_events.extend([event for event in old_events if isinstance(event, dict)])
         if isinstance(new_events, list):
             combined_events.extend([event for event in new_events if isinstance(event, dict)])
-        merged_run: ExecutionTraceRun = {
+        merged_run: ExecutionTraceRunPayload = {
             "run_id": run_id,
             "started_at": float(new_run.get("started_at") or old_run.get("started_at") or time.time()),
             "updated_at": float(new_run.get("updated_at") or old_run.get("updated_at") or time.time()),
@@ -270,9 +316,9 @@ def merge_execution_trace(existing: ExecutionTraceState | None, new: ExecutionTr
     return merged
 
 
-def execution_trace_update(events: list[ExecutionTraceEvent]) -> ExecutionTraceState:
+def execution_trace_update(events: list[ExecutionTraceEventPayload]) -> ExecutionTraceStatePayload:
     """Build a minimal state update payload from events."""
-    update: ExecutionTraceState = {
+    update: ExecutionTraceStatePayload = {
         "version": TRACE_SCHEMA_VERSION,
         "runs": {},
     }
@@ -311,7 +357,7 @@ def extract_reasoning_from_message(message: Any) -> str | None:
     return None
 
 
-def extract_token_usage_from_message(message: Any) -> TraceTokenUsage | None:
+def extract_token_usage_from_message(message: Any) -> TraceTokenUsagePayload | None:
     response_metadata = getattr(message, "response_metadata", None) or {}
     usage = (
         response_metadata.get("token_usage")
@@ -323,7 +369,7 @@ def extract_token_usage_from_message(message: Any) -> TraceTokenUsage | None:
     if not isinstance(usage, dict):
         return None
 
-    usage_dict: TraceTokenUsage = {}
+    usage_dict: TraceTokenUsagePayload = {}
     input_tokens = usage.get("input_tokens") or usage.get("prompt_tokens")
     output_tokens = usage.get("output_tokens") or usage.get("completion_tokens")
     total_tokens = usage.get("total_tokens")
@@ -337,7 +383,7 @@ def extract_token_usage_from_message(message: Any) -> TraceTokenUsage | None:
         return None
     if "total_tokens" not in usage_dict and "input_tokens" in usage_dict and "output_tokens" in usage_dict:
         usage_dict["total_tokens"] = usage_dict["input_tokens"] + usage_dict["output_tokens"]
-    return usage_dict
+    return _dump_model(TraceTokenUsage.model_validate(usage_dict))
 
 
 def make_summary_fallback(*, event_type: str, payload: dict[str, Any] | None = None) -> str:

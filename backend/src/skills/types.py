@@ -1,21 +1,30 @@
-from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
+
+from pydantic import ConfigDict, Field, field_serializer
+
+from src.schema import CapyBaseModel
 
 
-@dataclass
-class Skill:
+class Skill(CapyBaseModel):
     """Represents a skill with its metadata and file path"""
 
-    name: str
-    description: str
-    license: str | None
-    skill_dir: Path
-    skill_file: Path
-    relative_path: Path  # Relative path from category root to skill directory
-    category: str  # 'public' or 'custom'
-    enabled: bool = False  # Whether this skill is enabled
-    paths: list[str] | None = None  # Optional matcher patterns for auto-activation
-    workflow: bool = False  # Whether this is an intentional batch-workflow skill (disables Layer 2 loop detection)
+    name: str = Field(..., description="Skill name from SKILL.md frontmatter")
+    description: str = Field(..., description="Short description from SKILL.md frontmatter")
+    license: str | None = Field(default=None, description="Optional license metadata from SKILL.md frontmatter")
+    skill_dir: Path = Field(..., description="Host path to the skill directory")
+    skill_file: Path = Field(..., description="Host path to the skill's SKILL.md file")
+    relative_path: Path = Field(..., description="Path from the category root to the skill directory")
+    category: Literal["public", "custom"] = Field(..., description="Skill source category")
+    enabled: bool = Field(default=False, description="Whether this skill is enabled")
+    paths: list[str] | None = Field(default=None, description="Optional matcher patterns for auto-activation")
+    workflow: bool = Field(default=False, description="Whether this skill is an intentional batch-workflow skill")
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    @field_serializer("skill_dir", "skill_file", "relative_path")
+    def _serialize_path(self, value: Path) -> str:
+        return value.as_posix()
 
     @property
     def skill_path(self) -> str:
