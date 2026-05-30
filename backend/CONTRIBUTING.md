@@ -68,8 +68,10 @@ make gateway
 ```
 backend/src/
 ├── agents/                  # Agent system
-│   ├── lead_agent/         # Main agent implementation
-│   │   └── agent.py        # Agent factory and creation
+│   ├── work_agent/         # Work-mode lead agent (factory + system prompt)
+│   │   └── agent.py        # make_work_agent factory and creation
+│   ├── plan_agent/         # Plan-mode lead agent (factory + plan-mode prompt overlay)
+│   │   └── agent.py        # make_plan_agent wrapper over _build_work_agent
 │   ├── middlewares/        # Agent middlewares
 │   │   ├── thread_data_middleware.py
 │   │   ├── sandbox_middleware.py
@@ -316,7 +318,7 @@ class MyMiddleware(BaseMiddleware):
         return state
 ```
 
-2. Register in `src/agents/lead_agent/agent.py`:
+2. Register in the shared middleware registry used by `src/agents/work_agent/agent.py` (both `make_work_agent` and `make_plan_agent` build from it):
 
 ```python
 middlewares = [

@@ -1,5 +1,11 @@
 # DeerFlow → CapyHome: Comparative Analysis & Implementation Plan
 
+> **Historical record.** File paths below referencing `src/agents/lead_agent/agent.py`
+> and `src/agents/lead_agent/prompt.py` predate the Work/Plan split. That module
+> is deprecated — read it as `src/agents/work_agent/agent.py` and
+> `src/agents/work_agent/prompt.py` (with a plan-mode overlay in
+> `src/agents/plan_agent/`). See [deprecated/lead_agent.md](deprecated/lead_agent.md).
+
 ## Core Objective
 
 **Everything must be local.** CapyHome-home runs fully locally with local LM providers (llama.cpp, vLLM, Ollama, or any OpenAI-compatible endpoint). External integrations (SearXNG, Docker-based tools) are user-controlled via the Integrations tab — not bundled as fallbacks. All recommendations are scoped to this local-first constraint.

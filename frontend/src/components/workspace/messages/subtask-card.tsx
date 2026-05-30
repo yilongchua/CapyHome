@@ -36,7 +36,6 @@ import {
 import { explainLastToolCall, explainToolCall } from "@/core/tools/utils";
 import { cn } from "@/lib/utils";
 
-import { CapyHomeRunner } from "../chat-ui/capyhome-runner";
 import { CitationLink } from "../citations/citation-link";
 import { FlipDisplay } from "../flip-display";
 
@@ -89,11 +88,16 @@ export function SubtaskCard({
     } else if (task.status === "failed") {
       return <XCircleIcon className="size-3 text-red-500" />;
     } else if (task.status === "in_progress") {
-      return isStaleRunning
-        ? <ClipboardListIcon className="size-3" />
-        : <CapyHomeRunner actor="baby_capy" size="sm" taskDescription={taskLabel} />;
+      const iconBySize3: Record<ToolIconKey, ReactElement> = {
+        web: <GlobeIcon className="size-3" />,
+        vault: <DatabaseIcon className="size-3" />,
+        assistant: <BotIcon className="size-3" />,
+        terminal: <TerminalIcon className="size-3" />,
+        tool: <HammerIcon className="size-3" />,
+      };
+      return iconBySize3[taskIcon] ?? <ClipboardListIcon className="size-3" />;
     }
-  }, [isStaleRunning, task.status, taskLabel]);
+  }, [taskIcon, task.status]);
   const liveToolCallLines = useMemo(() => {
     const messages = task.messages?.length ? task.messages : task.latestMessage ? [task.latestMessage] : [];
     return messages
@@ -123,20 +127,6 @@ export function SubtaskCard({
       className={cn("relative w-full gap-2 rounded-lg border py-0", className)}
       open={!collapsed}
     >
-      <div
-        className={cn(
-          "ambilight z-[-1]",
-          task.status === "in_progress" ? "enabled" : "",
-        )}
-      ></div>
-      {/* {task.status === "in_progress" && !isStaleRunning && (
-        <>
-          <ShineBorder
-            borderWidth={1.5}
-            shineColor={["#A07CFE", "#FE8FB5", "#FFBE7B"]}
-          />
-        </>
-      )} */}
       <div className="bg-background/95 flex w-full flex-col rounded-lg">
         <div className="flex w-full items-center justify-between p-0.5">
           <Button
@@ -215,7 +205,7 @@ export function SubtaskCard({
             !isStaleRunning && (
               <ChainOfThoughtStep
                 label={t.subtasks.in_progress}
-                icon={<CapyHomeRunner actor="baby_capy" size="sm" taskDescription={explainLastToolCall(task.latestMessage, t)} />}
+                icon={<HammerIcon className="size-4" />}
               >
                 {explainLastToolCall(task.latestMessage, t)}
               </ChainOfThoughtStep>

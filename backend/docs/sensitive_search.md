@@ -133,7 +133,7 @@ Out of scope on any future revival:
 
 ### 5.1 Middleware chain position
 
-Registered in `backend/src/agents/lead_agent/agent.py` as
+Registered in `backend/src/agents/work_agent/agent.py` as
 `MiddlewareSpec("search_privacy", lambda: SearchPrivacyMiddleware(), after={"dangling_tool_call"})`.
 
 Ordering constraints declared by neighbours:
@@ -346,7 +346,7 @@ from .search_masking import rewrite_search_query_for_privacy
 # and add "rewrite_search_query_for_privacy" to __all__
 ```
 
-### 6.4 `backend/src/agents/lead_agent/agent.py` (registration)
+### 6.4 `backend/src/agents/work_agent/agent.py` (registration)
 
 Restore the import:
 

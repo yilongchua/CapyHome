@@ -55,7 +55,7 @@ This document provides a comprehensive overview of the CapyHome backend architec
 
 The LangGraph server is the core agent runtime, built on LangGraph for robust multi-agent workflow orchestration.
 
-**Entry Point**: `src/agents/lead_agent/agent.py:make_lead_agent`
+**Entry Points**: `src/agents/work_agent/agent.py:make_work_agent` (work mode) and `src/agents/plan_agent/agent.py:make_plan_agent` (plan mode). Both build the same lead agent via the shared `_build_work_agent` factory. (The former single `make_lead_agent` is deprecated — see [deprecated/lead_agent.md](deprecated/lead_agent.md).)
 
 **Key Responsibilities**:
 - Agent creation and configuration
@@ -68,9 +68,9 @@ The LangGraph server is the core agent runtime, built on LangGraph for robust mu
 
 ```json
 {
-  "agent": {
-    "type": "agent",
-    "path": "src.agents:make_lead_agent"
+  "graphs": {
+    "work_agent": "src.agents:make_work_agent",
+    "plan_agent": "src.agents:make_plan_agent"
   }
 }
 ```
@@ -92,7 +92,7 @@ FastAPI application providing REST endpoints for non-agent operations.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           make_lead_agent(config)                        │
+│              make_work_agent(config) / make_plan_agent(config)            │
 └────────────────────────────────────┬────────────────────────────────────┘
                                      │
                                      ▼

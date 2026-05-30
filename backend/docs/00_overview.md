@@ -1,5 +1,10 @@
 # Implementation Tracker — Lead Agent Design Study Bug Fixes
 
+> **Historical record.** Paths below referencing `src/agents/lead_agent/` and
+> `docs/lead_agent/` predate the Work/Plan split. The `lead_agent` module is
+> deprecated — its role now lives in `src/agents/work_agent/` and
+> `src/agents/plan_agent/`. See [deprecated/lead_agent.md](deprecated/lead_agent.md).
+
 **Last updated:** 2026-05-10  
 **Scope:** Backend middleware fixes identified in `docs/lead_agent/LEAD_AGENT_DESIGN_STUDY.md` (P3, P4, P5, P7, P9)  
 **See also:** `docs/plan_work_mode/00_overview.md` for the Plan & Work Mode feature implementation tracker

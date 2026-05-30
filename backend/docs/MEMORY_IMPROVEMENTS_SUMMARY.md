@@ -1,5 +1,10 @@
 # Memory System Improvements - Summary
 
+> **Historical record.** Paths referencing `src/agents/lead_agent/` predate the
+> Work/Plan split; that module is deprecated. Read them as
+> `src/agents/work_agent/` (prompt + factory now live there). See
+> [deprecated/lead_agent.md](deprecated/lead_agent.md).
+
 ## 改进概述
 
 针对你提出的两个问题进行了优化：

@@ -570,7 +570,7 @@ thread = await client.threads.create()
 # Run agent
 async for event in client.runs.stream(
     thread["thread_id"],
-    "lead_agent",
+    "work_agent",  # or "plan_agent" for Plan Mode
     input={"messages": [{"role": "user", "content": "Hello"}]},
     config={"configurable": {"model_name": "gpt-4"}},
     stream_mode=["values", "messages-tuple", "custom"],

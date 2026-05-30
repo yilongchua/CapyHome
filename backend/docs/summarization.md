@@ -117,5 +117,5 @@ summarization:
 ## Implementation Details
 
 - Configuration: `src/config/summarization_config.py`
-- Factory normalization: `src/agents/lead_agent/agent.py`
+- Factory normalization: `src/agents/work_agent/agent.py`
 - Middleware extensions and default prompt: `src/agents/middlewares/summarization_middleware.py`

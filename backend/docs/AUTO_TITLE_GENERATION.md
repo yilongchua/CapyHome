@@ -50,7 +50,8 @@ checkpointer = PostgresSaver.from_conn_string(
 ```json
 {
   "graphs": {
-    "lead_agent": "src.agents:lead_agent"
+    "work_agent": "src.agents:make_work_agent",
+    "plan_agent": "src.agents:make_plan_agent"
   },
   "checkpointer": "checkpointer:checkpointer"
 }
@@ -247,7 +248,7 @@ def after_agent(self, state: TitleMiddlewareState, runtime: Runtime) -> dict | N
 - [`src/agents/title_middleware.py`](../src/agents/title_middleware.py) - TitleMiddleware 实现
 - [`src/config/title_config.py`](../src/config/title_config.py) - 配置管理
 - [`config.yaml`](../config.yaml) - 配置文件
-- [`src/agents/lead_agent/agent.py`](../src/agents/lead_agent/agent.py) - Middleware 注册
+- [`src/agents/work_agent/agent.py`](../src/agents/work_agent/agent.py) - Middleware 注册
 
 ## 参考资料
 
