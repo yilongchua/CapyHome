@@ -28,6 +28,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
+from src.agents.middlewares._timeout_utils import run_with_timeout
 from src.agents.middlewares.runtime_events import append_runtime_event
 from src.config.routing_config import RoutingTimeoutsConfig, get_routing_config
 
@@ -141,11 +142,24 @@ class ModelTimeoutMiddleware(AgentMiddleware[AgentState]):
 
     @override
     def wrap_model_call(self, request: ModelRequest, handler) -> ModelResponse:
-        # Sync path is not used by langgraph-server-async paths but is required
-        # by the middleware contract for embedded clients. Falls back to the
-        # raw handler — sync timeouts cannot be enforced cooperatively without
-        # threading, which is out of scope here.
-        return handler(request)
+        if not self._config.enabled:
+            return handler(request)
+
+        stage = _stage_for(request)
+        timeout_s = self._config.for_stage(stage)
+        try:
+            return run_with_timeout(lambda: handler(request), timeout_s, label=f"model call ({stage or 'default'})")
+        except TimeoutError:
+            append_runtime_event(
+                request.runtime,
+                {
+                    "source": "model_timeout_middleware",
+                    "stage": stage or "default",
+                    "timeout_s": timeout_s,
+                },
+            )
+            logger.warning("Sync model call timed out after %ss (stage=%s)", timeout_s, stage)
+            return ModelResponse(result=[_timeout_message(stage, timeout_s, request)])
 
     @override
     async def awrap_tool_call(self, request: ToolCallRequest, handler) -> ToolMessage | Command:
@@ -176,6 +190,27 @@ class ModelTimeoutMiddleware(AgentMiddleware[AgentState]):
 
     @override
     def wrap_tool_call(self, request: ToolCallRequest, handler) -> ToolMessage | Command:
-        # Sync path: pass-through. Tool timeouts are enforced on the async path
-        # which is what langgraph-server uses.
-        return handler(request)
+        if not self._config.enabled:
+            return handler(request)
+
+        tool_name = str(request.tool_call.get("name") or "unknown")
+        tool_call_id = str(request.tool_call.get("id") or "")
+        timeout_s = self._config.for_tool(tool_name)
+        try:
+            return run_with_timeout(lambda: handler(request), timeout_s, label=f"tool call ({tool_name})")
+        except TimeoutError:
+            append_runtime_event(
+                request.runtime,
+                {
+                    "source": "tool_timeout_middleware",
+                    "tool": tool_name,
+                    "tool_call_id": tool_call_id,
+                    "timeout_s": timeout_s,
+                },
+            )
+            logger.warning("Sync tool call %s timed out after %ss (id=%s)", tool_name, timeout_s, tool_call_id)
+            return ToolMessage(
+                content=(f"{TIMEOUT_MESSAGE_FINGERPRINT}\nTool `{tool_name}` exceeded the {timeout_s}s timeout and was cancelled. Try a different approach or skip this step."),
+                tool_call_id=tool_call_id,
+                name=tool_name,
+            )

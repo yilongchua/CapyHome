@@ -90,7 +90,7 @@ tool_backends:
     timeout_seconds: 25
 
 permissions:
-  default_mode: auto
+  default_mode: ask
   allow: []
   deny: []
   ask: []

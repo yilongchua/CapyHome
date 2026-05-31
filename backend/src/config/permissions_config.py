@@ -23,7 +23,7 @@ class PermissionsConfig(BaseModel):
         description="List of ask rules (tool names or tool(arg-pattern) rules).",
     )
     default_mode: PermissionDefaultMode = Field(
-        default="auto",
+        default="ask",
         description="Fallback mode when no rule matches: auto | ask | plan.",
     )
 

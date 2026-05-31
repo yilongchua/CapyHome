@@ -38,8 +38,6 @@ def _mw(*, config: RecursionPivotConfig, evaluator_response: str | Exception = "
 
 
 def _state(message_count: int) -> dict:
-    # Each step ≈ 2 messages (AI + tool/human). Generate that many AI messages
-    # so step_count = message_count // 2.
     return {"messages": [AIMessage(content=f"step {i}") for i in range(message_count)]}
 
 
@@ -50,7 +48,6 @@ def test_disabled_config_returns_none():
 
 def test_below_threshold_is_noop():
     mw = _mw(config=RecursionPivotConfig(enabled=True, thresholds=[0.8]))
-    # step = 10 messages // 2 = 5, recursion_limit=100, threshold @ 80 -> no fire
     assert mw.before_model(_state(10), _runtime(recursion_limit=100)) is None
 
 
@@ -65,8 +62,7 @@ def test_keep_decision_consumes_threshold_without_injecting():
         config=RecursionPivotConfig(enabled=True, thresholds=[0.8]),
         evaluator_response="DECISION: KEEP\nDIRECTIVE: keep going\nREASON: making progress",
     )
-    # step = 160 // 2 = 80, recursion_limit=100, threshold 0.8 -> crossover at 80, fires
-    result = mw.before_model(_state(160), _runtime(recursion_limit=100))
+    result = mw.before_model(_state(80), _runtime(recursion_limit=100))
     assert result is not None
     assert "messages" not in result  # no injection on KEEP
     assert result["recursion_pivot"]["fired_thresholds"] == [0]
@@ -78,7 +74,7 @@ def test_pivot_decision_injects_steering_message():
         config=RecursionPivotConfig(enabled=True, thresholds=[0.8]),
         evaluator_response="DECISION: PIVOT\nDIRECTIVE: switch to using the bash tool directly instead of subagents\nREASON: subagents are too slow",
     )
-    result = mw.before_model(_state(160), _runtime(recursion_limit=100))
+    result = mw.before_model(_state(80), _runtime(recursion_limit=100))
     assert result is not None
     messages = result.get("messages") or []
     assert len(messages) == 1
@@ -95,12 +91,12 @@ def test_threshold_fires_at_most_once():
         config=RecursionPivotConfig(enabled=True, thresholds=[0.8]),
         evaluator_response="DECISION: PIVOT\nDIRECTIVE: do X\nREASON: stuck",
     )
-    state = _state(160)
+    state = _state(80)
     runtime = _runtime(recursion_limit=100)
     first = mw.before_model(state, runtime)
     assert first is not None
     # Carry pivot state forward; advance step count further (still past threshold).
-    state = {**state, "recursion_pivot": first["recursion_pivot"], "messages": _state(180)["messages"]}
+    state = {**state, "recursion_pivot": first["recursion_pivot"], "messages": _state(90)["messages"]}
     second = mw.before_model(state, runtime)
     assert second is None  # already fired, no further action
 
@@ -113,18 +109,18 @@ def test_multiple_thresholds_fire_in_sequence():
     runtime = _runtime(recursion_limit=100)
 
     # First crossing at step 50.
-    state = _state(100)
+    state = _state(50)
     first = mw.before_model(state, runtime)
     assert first is not None
     assert first["recursion_pivot"]["fired_thresholds"] == [0]
 
     # Between thresholds: no-op.
-    state = {"messages": _state(120)["messages"], "recursion_pivot": first["recursion_pivot"]}
+    state = {"messages": _state(70)["messages"], "recursion_pivot": first["recursion_pivot"]}
     between = mw.before_model(state, runtime)
     assert between is None
 
     # Second crossing at step 80.
-    state = {"messages": _state(160)["messages"], "recursion_pivot": first["recursion_pivot"]}
+    state = {"messages": _state(80)["messages"], "recursion_pivot": first["recursion_pivot"]}
     second = mw.before_model(state, runtime)
     assert second is not None
     assert second["recursion_pivot"]["fired_thresholds"] == [0, 1]
@@ -135,10 +131,11 @@ def test_evaluator_timeout_with_skip_continues():
         config=RecursionPivotConfig(enabled=True, thresholds=[0.8], on_evaluator_failure="skip"),
         evaluator_response=concurrent.futures.TimeoutError("hung"),
     )
-    result = mw.before_model(_state(160), _runtime(recursion_limit=100))
+    result = mw.before_model(_state(80), _runtime(recursion_limit=100))
     assert result is not None
     assert "messages" not in result
     assert result["recursion_pivot"]["last_decision"] == "FAILED"
+    assert result["recursion_pivot"].get("fired_thresholds") in (None, [])
     assert "jump_to" not in result
 
 
@@ -147,7 +144,7 @@ def test_evaluator_timeout_with_terminate_ends_run():
         config=RecursionPivotConfig(enabled=True, thresholds=[0.8], on_evaluator_failure="terminate"),
         evaluator_response=concurrent.futures.TimeoutError("hung"),
     )
-    result = mw.before_model(_state(160), _runtime(recursion_limit=100))
+    result = mw.before_model(_state(80), _runtime(recursion_limit=100))
     assert result is not None
     assert result.get("jump_to") == "end"
     messages = result.get("messages") or []
@@ -160,10 +157,11 @@ def test_evaluator_generic_exception_with_skip():
         config=RecursionPivotConfig(enabled=True, thresholds=[0.8], on_evaluator_failure="skip"),
         evaluator_response=RuntimeError("model unreachable"),
     )
-    result = mw.before_model(_state(160), _runtime(recursion_limit=100))
+    result = mw.before_model(_state(80), _runtime(recursion_limit=100))
     assert result is not None
     assert "messages" not in result
     assert result["recursion_pivot"]["last_decision"] == "FAILED"
+    assert result["recursion_pivot"].get("fired_thresholds") in (None, [])
 
 
 def test_missing_recursion_limit_is_noop():
@@ -221,6 +219,6 @@ def test_pivot_with_empty_directive_does_not_inject():
         config=RecursionPivotConfig(enabled=True, thresholds=[0.8]),
         evaluator_response="DECISION: PIVOT\nDIRECTIVE:\nREASON: confused",
     )
-    result = mw.before_model(_state(160), _runtime(recursion_limit=100))
+    result = mw.before_model(_state(80), _runtime(recursion_limit=100))
     assert result is not None
     assert "messages" not in result

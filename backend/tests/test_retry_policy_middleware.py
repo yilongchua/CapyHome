@@ -47,7 +47,7 @@ def test_retries_retryable_error_and_succeeds():
     assert request.runtime.context[RETRY_ATTEMPTS_CONTEXT_KEY]["tc-1"] == 1
 
 
-def test_task_timeout_rule_retries_once_and_then_succeeds():
+def test_non_idempotent_rule_does_not_retry():
     middleware = RetryPolicyMiddleware(
         RetryConfig(
             enabled=True,
@@ -70,11 +70,14 @@ def test_task_timeout_rule_retries_once_and_then_succeeds():
 
     def handler(req):  # noqa: ARG001
         attempts["count"] += 1
-        if attempts["count"] == 1:
-            raise TimeoutError("task timeout while polling")
-        return ToolMessage(content="ok", tool_call_id="tc-task-timeout", name="task")
+        raise TimeoutError("task timeout while polling")
 
-    result = middleware.wrap_tool_call(request, handler)
-    assert isinstance(result, ToolMessage)
-    assert attempts["count"] == 2
-    assert request.runtime.context[RETRY_ATTEMPTS_CONTEXT_KEY]["tc-task-timeout"] == 1
+    try:
+        middleware.wrap_tool_call(request, handler)
+    except TimeoutError:
+        pass
+    else:
+        raise AssertionError("non-idempotent retryable failures must not be retried")
+
+    assert attempts["count"] == 1
+    assert RETRY_ATTEMPTS_CONTEXT_KEY not in request.runtime.context

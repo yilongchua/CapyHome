@@ -251,7 +251,13 @@ class LoopDetectionMiddleware(AgentMiddleware[AgentState]):
 
     def _get_thread_id(self, runtime: Runtime) -> str:
         ctx = getattr(runtime, "context", None) or {}
-        return ctx.get("thread_id") or "default"
+        thread_id = ctx.get("thread_id") if isinstance(ctx, dict) else None
+        if not thread_id:
+            raise RuntimeError(
+                "LoopDetectionMiddleware requires runtime.context['thread_id']; "
+                "refusing to share loop counters in a process-global default bucket."
+            )
+        return str(thread_id)
 
     def _evict_if_needed(self) -> None:
         while len(self._history) > self.max_tracked_threads:

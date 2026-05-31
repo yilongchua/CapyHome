@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from src.agents.middlewares.loop_detection_middleware import (
@@ -197,6 +198,13 @@ def test_separate_threads_tracked_independently():
     # Thread B hasn't crossed threshold yet
     result = mw.after_model({"messages": [_ai(tc)]}, _runtime("thread-B"))
     assert result is None
+
+
+def test_missing_thread_id_raises_instead_of_using_default_bucket():
+    mw = LoopDetectionMiddleware(warn_threshold=3, hard_limit=5)
+    state = {"messages": [_ai([_tc("search", query="same")])]}
+    with pytest.raises(RuntimeError, match="thread_id"):
+        mw.after_model(state, SimpleNamespace(context={}))
 
 
 def test_reset_clears_state():

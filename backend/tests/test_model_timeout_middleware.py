@@ -9,6 +9,7 @@ hanging.
 from __future__ import annotations
 
 import asyncio
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -66,6 +67,32 @@ def test_model_call_under_budget_passes_through():
 
     result = asyncio.run(middleware.awrap_model_call(_model_request("generator"), fast_handler))
     assert result.result[0].content == "hi"
+
+
+def test_sync_model_call_timeout_returns_warning():
+    cfg = RoutingTimeoutsConfig(default=10, stages={"generator": 1})
+    middleware = ModelTimeoutMiddleware(cfg)
+
+    def slow_handler(_req):
+        time.sleep(3)
+        return ModelResponse(result=[AIMessage(content="never reached")])
+
+    result = middleware.wrap_model_call(_model_request("generator"), slow_handler)
+    assert isinstance(result, ModelResponse)
+    assert TIMEOUT_MESSAGE_FINGERPRINT in result.result[0].content
+
+
+def test_sync_tool_call_timeout_returns_synthetic_tool_message():
+    cfg = RoutingTimeoutsConfig(tools={"write_todos": 1}, tools_default=10)
+    middleware = ModelTimeoutMiddleware(cfg)
+
+    def slow_handler(_req):
+        time.sleep(3)
+        return ToolMessage(content="never", tool_call_id="tc-1", name="write_todos")
+
+    result = middleware.wrap_tool_call(_tool_request("write_todos"), slow_handler)
+    assert isinstance(result, ToolMessage)
+    assert TIMEOUT_MESSAGE_FINGERPRINT in result.content
 
 
 def test_disabled_config_skips_timeout():

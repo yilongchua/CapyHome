@@ -47,11 +47,30 @@ def _parse_rule(raw_rule: str) -> ParsedRule | None:
 
 def _serialize_tool_args(args: Any) -> str:
     if isinstance(args, dict):
+        strings: list[str] = []
+
+        def collect(value: Any) -> None:
+            if isinstance(value, str):
+                text = value.strip()
+                if text:
+                    strings.append(text)
+                return
+            if isinstance(value, dict):
+                for nested in value.values():
+                    collect(nested)
+                return
+            if isinstance(value, list):
+                for nested in value:
+                    collect(nested)
+
         for key in ("command", "path", "file_path", "query", "prompt", "description"):
             value = args.get(key)
             if isinstance(value, str) and value.strip():
-                return value
-        return json.dumps(args, sort_keys=True, ensure_ascii=False)
+                strings.insert(0, value.strip())
+                break
+        collect(args)
+        rendered = json.dumps(args, sort_keys=True, ensure_ascii=False)
+        return "\n".join(dict.fromkeys([*strings, rendered]))
     if args is None:
         return ""
     return str(args)
@@ -62,7 +81,7 @@ def _matches(rule: ParsedRule, tool_name: str, args_text: str) -> bool:
         return False
     if rule.arg_pattern is None:
         return True
-    return fnmatch.fnmatchcase(args_text, rule.arg_pattern)
+    return any(fnmatch.fnmatchcase(candidate, rule.arg_pattern) for candidate in args_text.splitlines() if candidate)
 
 
 def _is_literal(pattern: str) -> bool:

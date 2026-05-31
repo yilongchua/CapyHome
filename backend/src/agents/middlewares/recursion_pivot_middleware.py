@@ -11,7 +11,6 @@ Scope: lead agent only. Subagents keep their existing ``max_turns``-derived limi
 
 from __future__ import annotations
 
-import concurrent.futures
 import logging
 from typing import Any, NotRequired, override
 
@@ -20,6 +19,7 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
+from src.agents.middlewares._timeout_utils import run_with_timeout
 from src.agents.middlewares.runtime_events import append_runtime_event
 from src.config.recursion_pivot_config import RecursionPivotConfig, get_recursion_pivot_config
 from src.models import ModelRouter, create_chat_model
@@ -137,9 +137,10 @@ class RecursionBudgetPivotMiddleware(AgentMiddleware[RecursionPivotState]):
 
     def _step_count(self, state: RecursionPivotState) -> int:
         messages = state.get("messages", []) or []
-        # One "step" = one model invocation. Each step typically produces 1 AI
-        # message + 1 tool/human follow-up, so messages // 2 is a faithful proxy.
-        return max(0, len(messages) // 2)
+        # One "step" = one model invocation. Persisted history represents that
+        # with AIMessage count; this stays accurate when a single model turn
+        # emits many tool calls and therefore many ToolMessages.
+        return sum(1 for message in messages if getattr(message, "type", None) == "ai")
 
     def _recursion_limit(self, runtime: Runtime) -> int | None:
         config = getattr(runtime, "config", None)
@@ -169,12 +170,11 @@ class RecursionBudgetPivotMiddleware(AgentMiddleware[RecursionPivotState]):
             "evaluator", requested_model=self._requested_model
         )
         model = create_chat_model(name=model_name, thinking_enabled=False)
-        # Thread-pool timeout so a hung local model doesn't lock the whole run.
-        # The LLM call itself can't be cancelled mid-flight, but the run continues
-        # without the directive and the daemon thread is abandoned.
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(lambda: _extract_text(model.invoke(prompt).content))
-            return future.result(timeout=self._config.evaluator_timeout_seconds)
+        return run_with_timeout(
+            lambda: _extract_text(model.invoke(prompt).content),
+            self._config.evaluator_timeout_seconds,
+            label="recursion pivot evaluator",
+        )
 
     def _build_prompt(self, state: RecursionPivotState, runtime: Runtime, *, step: int, recursion_limit: int, pivot_number: int) -> str:
         runtime_context = getattr(runtime, "context", None) or {}
@@ -225,8 +225,6 @@ class RecursionBudgetPivotMiddleware(AgentMiddleware[RecursionPivotState]):
 
         fraction = cfg.thresholds[threshold_idx]
         pivot_number = threshold_idx + 1
-        fired_indices.add(threshold_idx)
-        pivot_state["fired_thresholds"] = sorted(fired_indices)
         pivot_state["last_pivot_step"] = step
         pivot_state["last_pivot_fraction"] = fraction
 
@@ -237,7 +235,7 @@ class RecursionBudgetPivotMiddleware(AgentMiddleware[RecursionPivotState]):
 
         try:
             raw_response = self._invoke_evaluator(prompt)
-        except concurrent.futures.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "recursion_pivot evaluator timed out after %ss at step %s/%s (pivot %s)",
                 cfg.evaluator_timeout_seconds, step, recursion_limit, pivot_number,
@@ -256,6 +254,8 @@ class RecursionBudgetPivotMiddleware(AgentMiddleware[RecursionPivotState]):
             return self._handle_evaluator_failure(pivot_state, step, pivot_number, recursion_limit)
 
         pivot, directive, reason = _parse_evaluator_response(raw_response)
+        fired_indices.add(threshold_idx)
+        pivot_state["fired_thresholds"] = sorted(fired_indices)
         pivot_state["last_decision"] = "PIVOT" if pivot else "KEEP"
         pivot_state["last_reason"] = reason
 

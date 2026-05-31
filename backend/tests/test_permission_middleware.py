@@ -11,6 +11,10 @@ from src.agents.middlewares.permission_middleware import PermissionMiddleware
 from src.config.permissions_config import PermissionsConfig
 
 
+def test_permissions_default_mode_is_ask():
+    assert PermissionsConfig().default_mode == "ask"
+
+
 def _request(tool_name: str, args: dict | None = None):
     return SimpleNamespace(
         tool_call={"name": tool_name, "id": "tc-1", "args": args or {}},
@@ -78,3 +82,20 @@ def test_default_ask_mode_applies_when_no_match():
     )
     result = middleware.wrap_tool_call(_request("write_file", {"path": "/tmp/a.txt"}), _handler)
     assert isinstance(result, Command)
+
+
+def test_arg_rule_matches_non_priority_nested_string_key():
+    middleware = PermissionMiddleware(
+        PermissionsConfig(
+            allow=[],
+            deny=["web_browse(*evil.com*)"],
+            ask=[],
+            default_mode="auto",
+        )
+    )
+    result = middleware.wrap_tool_call(
+        _request("web_browse", {"target_url": "https://evil.com/secrets", "headers": {"accept": "text/html"}}),
+        _handler,
+    )
+    assert isinstance(result, ToolMessage)
+    assert "[permission_denied]" in str(result.content)

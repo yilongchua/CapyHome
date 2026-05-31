@@ -52,16 +52,16 @@ def _request(
 # --- auto-mode bypass -------------------------------------------------------
 
 
-def test_before_model_caches_auto_mode_from_runtime_context():
+def test_before_model_does_not_mutate_runtime_context():
     middleware = ClarificationMiddleware()
     runtime = _runtime(auto_mode_in_context=True, auto_mode_in_config=None)
     middleware.before_model({"auto_mode": False}, runtime)
-    assert runtime.context["_clarification_auto_mode"] is True
+    assert "_clarification_auto_mode" not in runtime.context
 
 
 def test_auto_mode_pre_answers_clarification_without_interrupting():
     middleware = ClarificationMiddleware()
-    request = _request(context={"_clarification_auto_mode": True})
+    request = _request(context={"auto_mode": True})
     result = middleware.wrap_tool_call(
         request,
         lambda _req: ToolMessage(content="unused", tool_call_id="tc-1", name="ask_user_for_clarification"),
@@ -72,6 +72,30 @@ def test_auto_mode_pre_answers_clarification_without_interrupting():
     appended = result.update["clarifications"][0]
     assert appended["status"] == "answered"
     assert appended["answer"] == "Recommended"
+    assert result.update["messages"][0].content == "[Auto Mode] Selected: Recommended"
+
+
+def test_auto_mode_pre_answers_duplicate_planner_inline_clarification():
+    middleware = ClarificationMiddleware()
+    request = _request(
+        state={
+            "plan": {
+                "clarifications": [
+                    {
+                        "question": "Which option?",
+                        "options": [{"label": "Recommended", "recommended": True}],
+                    }
+                ]
+            }
+        },
+        context={"auto_mode": True},
+    )
+    result = middleware.wrap_tool_call(
+        request,
+        lambda _req: ToolMessage(content="unused", tool_call_id="tc-1", name="ask_user_for_clarification"),
+    )
+    assert isinstance(result, Command)
+    assert result.update["clarifications"][0]["status"] == "answered"
     assert result.update["messages"][0].content == "[Auto Mode] Selected: Recommended"
 
 

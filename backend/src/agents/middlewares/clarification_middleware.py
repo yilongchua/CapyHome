@@ -242,26 +242,6 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
         auto_mode = _resolve_auto_mode(request.runtime, state)
 
         question_text = str(args.get("question") or "").strip()
-        if _planner_clarification_duplicate(question_text, state.get("plan")):
-            logger.info(
-                "Skipping duplicate clarification '%s' — already surfaced inline by planner",
-                question_text,
-            )
-            return Command(
-                update={
-                    "messages": [
-                        ToolMessage(
-                            content=(
-                                "Clarification already pending in the inline panel — "
-                                "the user will answer there. Continue with other ready work."
-                            ),
-                            tool_call_id=tool_call_id,
-                            name="ask_user_for_clarification",
-                        )
-                    ],
-                }
-            )
-
         entry = self._build_entry(args, tool_call_id)
 
         # Auto-mode bypass: if a recommended option exists, pre-answer the
@@ -287,6 +267,26 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
                     }
                 )
             logger.info("Auto mode: no recommended option for clarification '%s'; falling through to normal queue", entry.get("question"))
+
+        if _planner_clarification_duplicate(question_text, state.get("plan")):
+            logger.info(
+                "Skipping duplicate clarification '%s' — already surfaced inline by planner",
+                question_text,
+            )
+            return Command(
+                update={
+                    "messages": [
+                        ToolMessage(
+                            content=(
+                                "Clarification already pending in the inline panel — "
+                                "the user will answer there. Continue with other ready work."
+                            ),
+                            tool_call_id=tool_call_id,
+                            name="ask_user_for_clarification",
+                        )
+                    ],
+                }
+            )
 
         # Decide whether to interrupt.
         urgency = entry.get("urgency", "deferrable")

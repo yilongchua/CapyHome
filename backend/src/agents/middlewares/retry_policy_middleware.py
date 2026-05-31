@@ -77,7 +77,7 @@ class RetryPolicyMiddleware(AgentMiddleware[AgentState]):
                 return handler(request)
             except Exception as exc:
                 attempt += 1
-                if attempt >= rule.max_attempts or not _is_retryable(exc, rule):
+                if attempt >= rule.max_attempts or not _is_retryable(exc, rule) or not rule.idempotent:
                     raise
                 self._mark_retry(request, attempt, rule, exc)
                 time.sleep(rule.backoff_ms / 1000)
@@ -97,7 +97,7 @@ class RetryPolicyMiddleware(AgentMiddleware[AgentState]):
                 return await handler(request)
             except Exception as exc:
                 attempt += 1
-                if attempt >= rule.max_attempts or not _is_retryable(exc, rule):
+                if attempt >= rule.max_attempts or not _is_retryable(exc, rule) or not rule.idempotent:
                     raise
                 self._mark_retry(request, attempt, rule, exc)
                 await asyncio.sleep(rule.backoff_ms / 1000)
