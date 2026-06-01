@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -102,6 +103,14 @@ class _VaultLearningBase:
 
         self.state_dir = self.vault_root / ".vault_state"
         self.manifest_path = self.state_dir / "manifest.json"
+        # The search index is write-only ballast (only its length is ever read).
+        # It used to live inside manifest.json, where it was ~84% of a 17 MB file
+        # and dominated every save (full JSON serialization holds the GIL and
+        # starved the gateway event loop during ingest/lint). It now lives in its
+        # own sidecar, persisted on a throttle so the hot manifest save stays cheap.
+        self.search_index_path = self.state_dir / "search_index.json"
+        self._search_index_dirty = False
+        self._search_index_last_flush = 0.0
 
         if search_results_queue_path:
             queue_path = Path(search_results_queue_path)
@@ -208,7 +217,9 @@ class _VaultLearningBase:
             "trust_decisions": data.get("trust_decisions", {}),
             "dirty_pages": data.get("dirty_pages", []),
             "source_dependencies": data.get("source_dependencies", {}),
-            "search_index": data.get("search_index", {}),
+            # search_index is reattached after validation (see below) so the
+            # multi-MB blob never rides through the hot validate/dump path.
+            "search_index": {},
             "topic_syntheses": data.get("topic_syntheses", {}),
             "last_run_summary": data.get("last_run_summary", {}),
             "objectives": data.get("objectives", {}),
@@ -224,15 +235,76 @@ class _VaultLearningBase:
             "entity_dismissals": data.get("entity_dismissals", {}),
             "schema_migrated_from": version,
         }
-        return VaultManifest.model_validate(payload).model_dump(mode="python")
+        manifest = VaultManifest.model_validate(payload).model_dump(mode="python")
+        manifest["search_index"] = self._resolve_search_index(embedded=data.get("search_index"))
+        return manifest
+
+    def _resolve_search_index(self, *, embedded: Any) -> dict[str, Any]:
+        """Return the search index without re-reading the multi-MB sidecar on
+        every manifest reload.
+
+        Precedence:
+        1. Legacy manifests still carry it inline — adopt it and mark dirty so the
+           next save migrates it to the sidecar (and strips it from manifest.json).
+        2. A within-process reload (``_manifest_txn`` reloads the manifest body to
+           see another process's writes) inherits our in-memory copy. The index is
+           per-process and read only for a count, so cross-process staleness is fine
+           and re-reading megabytes per transaction is not.
+        3. Cold start reads the sidecar once.
+        """
+        if isinstance(embedded, dict) and embedded:
+            self._search_index_dirty = True
+            return embedded
+        current = getattr(self, "_manifest", None)
+        if isinstance(current, dict):
+            existing = current.get("search_index")
+            if isinstance(existing, dict) and existing:
+                return existing
+        if self.search_index_path.exists():
+            try:
+                loaded = json.loads(self.search_index_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    return loaded
+            except Exception:
+                logger.exception("vault_search_index_load_failed path=%s", self.search_index_path)
+        return {}
 
     def _save_manifest(self) -> None:
         self._manifest["updated_at"] = _utcnow_iso()
-        validated = VaultManifest.model_validate(self._manifest).model_dump(mode="json")
+        # Serialize the manifest WITHOUT the write-only search index. Shallow-copy
+        # so the in-memory index is untouched (values are referenced, not copied).
+        lean = dict(self._manifest)
+        lean["search_index"] = {}
+        validated = VaultManifest.model_validate(lean).model_dump(mode="json")
         self.manifest_path.write_text(
             json.dumps(validated, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+        self._maybe_flush_search_index()
+
+    # Throttle sidecar writes during a long ingest: at most one flush per window.
+    _SEARCH_INDEX_FLUSH_INTERVAL_SECONDS = 30.0
+
+    def flush_search_index(self) -> None:
+        """Persist the search-index sidecar atomically. No-op when clean."""
+        if not self._search_index_dirty:
+            return
+        index = self._manifest.get("search_index") or {}
+        tmp_path = self.search_index_path.with_name(self.search_index_path.name + ".tmp")
+        try:
+            tmp_path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+            tmp_path.replace(self.search_index_path)
+            self._search_index_dirty = False
+            self._search_index_last_flush = time.monotonic()
+        except Exception:
+            logger.exception("vault_search_index_flush_failed path=%s", self.search_index_path)
+
+    def _maybe_flush_search_index(self) -> None:
+        if not self._search_index_dirty:
+            return
+        if time.monotonic() - self._search_index_last_flush < self._SEARCH_INDEX_FLUSH_INTERVAL_SECONDS:
+            return
+        self.flush_search_index()
 
     @contextmanager
     def _manifest_txn(self) -> Iterator[dict[str, Any]]:

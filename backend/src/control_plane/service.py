@@ -2239,6 +2239,12 @@ class ControlPlaneService:
                         )
             finally:
                 _mark_drain_done()
+                # Persist any search-index additions this worker made (per-save
+                # flushes are throttled, so force a final one on exit).
+                try:
+                    manager.flush_search_index()
+                except Exception:
+                    logger_obj.exception("vault_ingest_search_index_flush_failed job_id=%s worker=%d", job_id, worker_index)
                 with coord.counter_lock:
                     coord.active_runners = max(0, coord.active_runners - 1)
                 with self._vault_ingest_lock:

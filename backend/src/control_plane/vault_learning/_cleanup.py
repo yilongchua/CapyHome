@@ -396,6 +396,9 @@ class CleanupMixin:
             "failed": failed,
         }
         self._save_manifest()
+        # The per-save flush is throttled; force a final one so the sidecar
+        # count isn't left stale after the run.
+        self.flush_search_index()
 
         return {
             "total": total,

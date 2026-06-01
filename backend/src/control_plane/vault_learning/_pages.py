@@ -49,6 +49,8 @@ class PagesMixin:
             "tags": tags or [],
             "updated_at": _utcnow_iso(),
         }
+        # Index lives in a throttled sidecar, not the hot manifest save.
+        self._search_index_dirty = True
 
     def _update_reference_page(
         self,
