@@ -548,6 +548,7 @@ export interface VaultLintCategoryReport {
 export interface VaultLintResponse {
   generated_at: string;
   dry_run: boolean;
+  cancelled?: boolean;
   entities: VaultLintCategoryReport;
   concepts: VaultLintCategoryReport;
 }

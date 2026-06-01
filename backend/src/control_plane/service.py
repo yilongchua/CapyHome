@@ -122,6 +122,8 @@ class ControlPlaneService:
             "cancel_requested": False,
             "model": None,
             "workers": 0,
+            "processed": 0,
+            "total": 0,
         }
         # Process-cached read-only vault manager (see _cached_read_vault_manager).
         self._vault_read_manager: VaultLearningManager | None = None
@@ -1931,6 +1933,10 @@ class ControlPlaneService:
                         self._vault_ingest_job["last_status"] = f"prefetch_{phase}"
                         self._vault_ingest_job["updated_at"] = self._utcnow_iso()
 
+                def _should_cancel_ingest() -> bool:
+                    with self._vault_ingest_lock:
+                        return bool(self._vault_ingest_job.get("cancel_requested"))
+
                 try:
                     queue_report = manager.ingest(
                         urls=[],
@@ -1939,6 +1945,7 @@ class ControlPlaneService:
                         queue_items=claimed,
                         progress_callback=_queue_progress,
                         prefetch_progress=_prefetch_progress,
+                        should_cancel=_should_cancel_ingest,
                     )
                 except _VaultIngestCancelled:
                     queue_ids = [
@@ -2303,8 +2310,17 @@ class ControlPlaneService:
                         "cancel_requested": False,
                         "model": judge_model or "default",
                         "workers": int(judge_workers),
+                        "processed": 0,
+                        "total": 0,
                     }
                 )
+
+        def _on_lint_progress(done: int, total: int) -> None:
+            with self._vault_lint_lock:
+                self._vault_lint_job["processed"] = int(done)
+                self._vault_lint_job["total"] = int(total)
+                self._vault_lint_job["updated_at"] = self._utcnow_iso()
+
         try:
             report = manager.lint_and_prune_pages(
                 dry_run=dry_run,
@@ -2315,6 +2331,7 @@ class ControlPlaneService:
                 judge_workers=judge_workers,
                 judge_model=judge_model,
                 should_cancel=(self._vault_lint_cancel.is_set if track else None),
+                progress_callback=(_on_lint_progress if track else None),
             )
         finally:
             if track:

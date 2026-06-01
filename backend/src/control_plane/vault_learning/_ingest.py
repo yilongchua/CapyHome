@@ -581,6 +581,7 @@ class IngestMixin:
         queue_items: list[dict[str, Any]] | None = None,
         progress_callback: Callable[[int, int, str, str, str, str | None], None] | None = None,
         prefetch_progress: Callable[[str, str], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         # Processing is handled in batches inside _ingest_locked, each with
         # its own manifest transaction, so a crash mid-run only loses the
@@ -592,6 +593,7 @@ class IngestMixin:
             queue_items=queue_items,
             progress_callback=progress_callback,
             prefetch_progress=prefetch_progress,
+            should_cancel=should_cancel,
         )
 
     def _ingest_locked(
@@ -603,6 +605,7 @@ class IngestMixin:
         queue_items: list[dict[str, Any]] | None = None,
         progress_callback: Callable[[int, int, str, str, str, str | None], None] | None = None,
         prefetch_progress: Callable[[str, str], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         # Strict embedding gate: do not ingest any sources unless /embeddings is reachable.
         search_service = UnifiedVaultSearchService(self.vault_root)
@@ -653,7 +656,15 @@ class IngestMixin:
         # done *outside* the manifest lock via ``_prefetch_for_ingest`` so
         # concurrent workers can actually parallelise; the manifest mutations
         # (`reingest_if_changed`) still run serially under the lock.
+        # Track which claimed queue items we've fully handled so a cancel can
+        # requeue everything we didn't get to (nothing is lost).
+        cancelled = False
+        handled_queue_ids: set[str] = set()
         for batch_start in range(0, len(queue_items_list), BATCH_SIZE):
+            # Kill switch: don't start a new batch once cancellation is asked.
+            if should_cancel is not None and should_cancel():
+                cancelled = True
+                break
             batch = queue_items_list[batch_start:batch_start + BATCH_SIZE]
             batch_tentative_hashes: dict[str, str] = {}
             batch_queue_item_ids: list[str] = []
@@ -665,8 +676,15 @@ class IngestMixin:
 
             # PHASE A — prefetch each item OUTSIDE the manifest lock. The
             # tuple holds (idx, item, prefetched | None, fetch_exception | None).
+            # Kill switch: stop prefetching NEW items as soon as cancellation is
+            # requested. The one in-flight item finishes (a single LLM call
+            # can't be torn mid-request); already-prefetched items still commit
+            # below so their work isn't wasted ("save if possible").
             prefetched_batch: list[tuple[int, dict[str, Any], PrefetchedIngest | None, Exception | None]] = []
             for idx, item in enumerate(batch):
+                if should_cancel is not None and should_cancel():
+                    cancelled = True
+                    break
                 try:
                     pre = self._prefetch_for_ingest(
                         url=str(item.get("url") or ""),
@@ -785,10 +803,28 @@ class IngestMixin:
             skipped_unchanged.extend(batch_skipped_unchanged)
             rejected_for_trust.extend(batch_rejected_for_trust)
             fetch_failed.extend(batch_fetch_failed)
+            handled_queue_ids.update(qid for qid in batch_queue_item_ids if qid)
+
+            # Kill switch: a cancel during PHASE A committed what was already
+            # prefetched above; now stop before touching any further batches.
+            if cancelled:
+                break
+
+        # Kill switch: requeue every claimed item we never handled so nothing
+        # is dropped — they resume on the next run.
+        if cancelled:
+            remaining = [
+                str(item.get("queue_id") or "")
+                for item in queue_items_list
+                if str(item.get("queue_id") or "").strip()
+                and str(item.get("queue_id")) not in handled_queue_ids
+            ]
+            if remaining:
+                self.requeue_claimed_items(remaining, reason="ingest_cancelled_by_user")
 
         # Phase 1B — Process normalized URLs in a single transaction
         # (typically zero or few items).
-        if normalized:
+        if normalized and not cancelled:
             url_tentative_hashes: dict[str, str] = {}
             with self._manifest_txn():
                 for url in normalized:
@@ -839,7 +875,7 @@ class IngestMixin:
         report = {
             "source": source,
             "topic": topic,
-            "status": "completed",
+            "status": "cancelled" if cancelled else "completed",
             "processed_count": len(normalized) + len(queue_items or []),
             "ingested_count": len(ingested),
             "skipped_unchanged_count": len(skipped_unchanged),

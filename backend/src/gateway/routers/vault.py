@@ -177,6 +177,8 @@ class VaultLintJobStatusResponse(BaseModel):
     cancel_requested: bool = False
     model: str | None = None
     workers: int = 0
+    processed: int = 0
+    total: int = 0
     accepted: bool | None = None
     message: str | None = None
 

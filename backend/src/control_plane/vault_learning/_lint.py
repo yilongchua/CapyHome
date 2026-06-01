@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
@@ -239,11 +240,24 @@ class LintMixin:
         max_workers: int = 1,
         model_name: str | None = None,
         should_cancel: Callable[[], bool] | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> dict[str, dict[str, str]]:
         verdicts: dict[str, dict[str, str]] = {}
         if not pages:
             return verdicts
         cancelled = should_cancel or (lambda: False)
+        total = len(pages)
+        processed = 0
+        progress_lock = threading.Lock()
+
+        def _report(batch_len: int) -> None:
+            nonlocal processed
+            if progress_callback is None:
+                return
+            with progress_lock:
+                processed += batch_len
+                done = processed
+            progress_callback(done, total)
         try:
             # One model instance shared across workers. langchain chat models
             # are stateless per-invoke (each .invoke is an independent HTTP
@@ -258,6 +272,7 @@ class LintMixin:
             (start, pages[start:start + batch_size])
             for start in range(0, len(pages), batch_size)
         ]
+        batch_sizes = {start: len(batch) for start, batch in batches}
         workers = max(1, min(self._MAX_JUDGE_WORKERS, int(max_workers)))
 
         def _judge_one(start: int, batch: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
@@ -292,6 +307,7 @@ class LintMixin:
                     logger.info("vault_lint_llm_cancelled start=%d", start)
                     break
                 verdicts.update(_judge_one(start, batch))
+                _report(len(batch))
             return verdicts
 
         # Parallel path: ThreadPoolExecutor work-steals batches across workers.
@@ -302,7 +318,10 @@ class LintMixin:
             futures = {pool.submit(_judge_one, start, batch): start for start, batch in batches}
             for future in as_completed(futures):
                 try:
-                    verdicts.update(future.result())
+                    result = future.result()
+                    verdicts.update(result)
+                    if not future.cancelled():
+                        _report(batch_sizes[futures[future]])
                 except Exception:
                     logger.exception(
                         "vault_lint_llm_batch_failed start=%d", futures[future]
@@ -370,6 +389,7 @@ class LintMixin:
         judge_workers: int = 1,
         judge_model: str | None = None,
         should_cancel: Callable[[], bool] | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> dict[str, Any]:
         sources = self._manifest.get("sources", {}) or {}
         live_source_ids = {str(sid) for sid in sources.keys() if str(sid).strip()}
@@ -514,6 +534,7 @@ class LintMixin:
                     max_workers=judge_workers,
                     model_name=judge_model,
                     should_cancel=should_cancel,
+                    progress_callback=progress_callback,
                 )
                 for candidate in all_candidates:
                     verdict = verdicts.get(candidate["slug"])

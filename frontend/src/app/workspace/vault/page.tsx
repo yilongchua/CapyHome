@@ -61,6 +61,7 @@ import {
   useVaultExplorerChildren,
   useVaultFile,
   useVaultIngestStatus,
+  useVaultLintStatus,
   useVaultStatus,
 } from "@/core/control-plane";
 import type { VaultExplorerFileNode, VaultExplorerResponse, VaultLintResponse } from "@/core/control-plane";
@@ -280,13 +281,34 @@ export default function VaultPage() {
     availableModels.find((m) => m.name === lintVaultMutation.variables?.modelName)?.display_name ??
     lintVaultMutation.variables?.modelName ??
     "Default model";
+  // Poll lint progress while the judge runs so the label can show N/total + ETA.
+  const { lintStatus } = useVaultLintStatus({ enabled: lintJudgeRunning });
+  const lintProgressLabel = (() => {
+    if (!lintJudgeRunning) return "";
+    const processed = lintStatus?.processed ?? 0;
+    const total = lintStatus?.total ?? 0;
+    if (total <= 0) return ""; // before the first batch reports
+    const startedAt = lintStatus?.started_at ? Date.parse(lintStatus.started_at) : NaN;
+    let eta = "";
+    if (!Number.isNaN(startedAt) && processed > 0 && processed < total) {
+      const elapsedSec = Math.max(0, (Date.now() - startedAt) / 1000);
+      const etaSec = (elapsedSec / processed) * (total - processed);
+      eta = ` · ~${formatEtaLabel(etaSec)} remaining`;
+    }
+    return `${processed}/${total}${eta}`;
+  })();
   const ingestRunning = ingestStatus?.status === "running" || startIngest.isPending;
   const cancelRequested = Boolean(ingestStatus?.cancel_requested) || cancelIngest.isPending;
   const activeWorkers = ingestStatus?.workers_active ?? ingestStatus?.workers_requested ?? 0;
 
+  // The idle clock depends on client-only state (localStorage) and is a Radix
+  // dropdown (consumes useId). Render it only after mount so SSR and the first
+  // client render stay identical — otherwise its useId perturbs every dropdown
+  // below it and trips a hydration mismatch.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   // Passive idle auto-run (clock icon). 0 = off; persisted in localStorage.
-  // Auto-runs always pin 1 worker + default model, and auto-lint runs as a
-  // dry-run PREVIEW (never deletes unattended) that populates the panel.
+  // Auto-runs always pin 1 worker + default model; auto-lint prunes (2 passes).
   const [idleMinutes, setIdleMinutes] = useState<number>(0);
   useEffect(() => {
     const stored = Number(localStorage.getItem("vault-idle-autorun-min") ?? "0");
@@ -319,16 +341,43 @@ export default function VaultPage() {
     },
     onAutoLint: () => {
       if (lintVaultMutation.isPending || ingestRunning) return;
-      toast.message("Idle auto-run: lint preview started (default model).");
-      lintVaultMutation.mutate(
-        { dryRun: true, useLlm: true, workers: 1, modelName: null },
-        {
-          onSuccess: (preview) => {
-            setLintPreview(preview);
-            toast.success("Idle auto-run: lint preview ready — review and apply when you're back.");
-          },
-        },
-      );
+      // Up to 2 prune passes: pass 1 removes flagged pages; pass 2 catches any
+      // pages newly orphaned by pass 1's removals. Each pass is preview (LLM
+      // judge) -> commit (apply the flagged slugs). Default model, 1 worker.
+      // Fire-and-forget async IIFE so the callback stays () => void.
+      void (async () => {
+        try {
+          for (let pass = 1; pass <= 2; pass++) {
+          toast.message(`Idle auto-run: lint pass ${pass}/2 (judging, default model)…`);
+          const preview = await lintVaultMutation.mutateAsync({
+            dryRun: true,
+            useLlm: true,
+            workers: 1,
+            modelName: null,
+          });
+          setLintPreview(preview);
+          if (preview.cancelled) {
+            toast.message("Idle auto-run: lint cancelled.");
+            return;
+          }
+          const entitySlugs = preview.entities.flagged.map((f) => f.slug);
+          const conceptSlugs = preview.concepts.flagged.map((f) => f.slug);
+          if (entitySlugs.length === 0 && conceptSlugs.length === 0) {
+            if (pass === 1) toast.message("Idle auto-run: nothing to prune.");
+            break;
+          }
+          const result = await lintVaultMutation.mutateAsync({
+            dryRun: false,
+            entitySlugs,
+            conceptSlugs,
+          });
+          const removed = (result.entities.removed ?? 0) + (result.concepts.removed ?? 0);
+          toast.success(`Idle auto-run: lint pass ${pass}/2 pruned ${removed} page${removed === 1 ? "" : "s"}.`);
+          }
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "Idle auto-run lint failed.");
+        }
+      })();
     },
   });
   const ingestEtaLabel = (() => {
@@ -353,7 +402,7 @@ export default function VaultPage() {
       const totalLabel = total > 0 ? String(total) : "?";
       const workersLabel = activeWorkers > 1 ? ` · ${activeWorkers} workers` : "";
       const base = `Source ${current}/${totalLabel} ingesting${truncated ? ` ${truncated}` : "..."}${workersLabel}`;
-      if (cancelRequested) return `${base} · stopping after current source...`;
+      if (cancelRequested) return `${base} · stopping (finishing current item, requeuing the rest)…`;
       return ingestEtaLabel ? `${base} · ~${ingestEtaLabel} remaining` : base;
     }
     if (ingestStatus.status === "success" && ingestStatus.processed > 0) {
@@ -403,40 +452,42 @@ export default function VaultPage() {
     <WorkspaceContainer>
       <WorkspaceHeader
         rightSlot={
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="sm"
-                variant={idleMinutes > 0 ? "default" : "outline"}
-                className="px-2"
-                title={
-                  idleMinutes > 0
-                    ? `Auto Ingest & Lint: after ${idleMinutes} min idle`
-                    : "Auto Ingest & Lint: off"
-                }
-                aria-label="Auto Ingest & Lint settings"
-              >
-                <ClockIcon className="size-4" />
-                {idleMinutes > 0 ? <span className="ml-1 text-xs">{idleMinutes}m</span> : null}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuLabel>Auto Ingest &amp; Lint</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {[
-                { n: 0, label: "Off" },
-                { n: 15, label: "15 minutes" },
-                { n: 30, label: "30 minutes" },
-              ].map((opt) => (
-                <DropdownMenuItem key={opt.n} onClick={() => updateIdleMinutes(opt.n)}>
-                  <CheckIcon
-                    className={`mr-2 size-3.5 ${idleMinutes === opt.n ? "opacity-100" : "opacity-0"}`}
-                  />
-                  {opt.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          mounted ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant={idleMinutes > 0 ? "default" : "outline"}
+                  className="px-2"
+                  title={
+                    idleMinutes > 0
+                      ? `Auto Ingest & Lint: after ${idleMinutes} min idle → ingest, then prune (2 passes, applies removals)`
+                      : "Auto Ingest & Lint: off"
+                  }
+                  aria-label="Auto Ingest & Lint settings"
+                >
+                  <ClockIcon className="size-4" />
+                  {idleMinutes > 0 ? <span className="ml-1 text-xs">{idleMinutes}m</span> : null}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel>Auto Ingest &amp; Lint</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {[
+                  { n: 0, label: "Off" },
+                  { n: 15, label: "15 minutes" },
+                  { n: 30, label: "30 minutes" },
+                ].map((opt) => (
+                  <DropdownMenuItem key={opt.n} onClick={() => updateIdleMinutes(opt.n)}>
+                    <CheckIcon
+                      className={`mr-2 size-3.5 ${idleMinutes === opt.n ? "opacity-100" : "opacity-0"}`}
+                    />
+                    {opt.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null
         }
       />
       <WorkspaceBody>
@@ -463,14 +514,14 @@ export default function VaultPage() {
                   {lintJudgeRunning ? (
                     <span
                       className="flex items-center gap-1 truncate text-xs text-muted-foreground"
-                      title={`LLM judge running — ${lintRunWorkers} worker${
+                      title={`LLM judge — ${lintRunWorkers} worker${
                         lintRunWorkers === 1 ? "" : "s"
-                      } · ${lintRunModelLabel} (single request; progress isn't streamed)`}
+                      } · ${lintRunModelLabel}${lintProgressLabel ? ` · ${lintProgressLabel}` : ""}`}
                     >
                       <Loader2Icon className="size-3.5 animate-spin" />
                       <span className="truncate">
-                        · Linting… {lintRunWorkers} worker{lintRunWorkers === 1 ? "" : "s"} ·{" "}
-                        {lintRunModelLabel}
+                        · Linting…{lintProgressLabel ? ` ${lintProgressLabel}` : ""} ·{" "}
+                        {lintRunWorkers} worker{lintRunWorkers === 1 ? "" : "s"} · {lintRunModelLabel}
                       </span>
                     </span>
                   ) : null}

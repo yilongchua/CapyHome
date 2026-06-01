@@ -135,6 +135,21 @@ def test_judge_stops_on_cancel(vault: VaultLearningManager, monkeypatch) -> None
     assert 0 < len(out) < 50
 
 
+def test_judge_reports_progress(vault: VaultLearningManager, monkeypatch) -> None:
+    fake = _FakeModel()
+    monkeypatch.setattr(
+        "src.control_plane.vault_learning._lint.create_chat_model",
+        lambda **kwargs: fake,
+    )
+    seen: list[tuple[int, int]] = []
+    vault._judge_pages_with_llm(
+        _pages(50), user_context={}, vault_context={}, batch_size=10,
+        max_workers=1, progress_callback=lambda done, total: seen.append((done, total)),
+    )
+    assert seen[-1] == (50, 50)
+    assert [done for done, _ in seen] == [10, 20, 30, 40, 50]
+
+
 def test_judge_workers_are_capped(vault: VaultLearningManager, monkeypatch) -> None:
     fake = _FakeModel()
     monkeypatch.setattr(

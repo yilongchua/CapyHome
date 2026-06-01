@@ -408,6 +408,8 @@ export interface VaultLintJobStatus {
   cancel_requested?: boolean;
   model?: string | null;
   workers?: number;
+  processed?: number;
+  total?: number;
   accepted?: boolean | null;
   message?: string | null;
 }
@@ -418,6 +420,14 @@ export async function cancelVaultLint(): Promise<VaultLintJobStatus> {
   });
   if (!response.ok) {
     await parseError(response, `Failed to cancel vault lint: ${response.statusText}`);
+  }
+  return response.json() as Promise<VaultLintJobStatus>;
+}
+
+export async function getVaultLintStatus(): Promise<VaultLintJobStatus> {
+  const response = await fetch(`${getBackendBaseURL()}/api/vault/lint/status`);
+  if (!response.ok) {
+    await parseError(response, `Failed to load vault lint status: ${response.statusText}`);
   }
   return response.json() as Promise<VaultLintJobStatus>;
 }

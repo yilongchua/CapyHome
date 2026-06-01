@@ -50,6 +50,7 @@ import {
   startVaultIngest,
   cancelVaultIngest,
   cancelVaultLint,
+  getVaultLintStatus,
   lintVault,
   getVaultIngestStatus,
   refreshVaultExplorer,
@@ -57,6 +58,7 @@ import {
   runAutoresearchObjective,
   stopAutoresearchObjective,
 } from "./api";
+import type { VaultLintJobStatus } from "./api";
 import type {
   AutoresearchObjective,
   CleanupPipelineRunsRequest,
@@ -367,6 +369,19 @@ export function useCancelVaultLint() {
   return useMutation({
     mutationFn: () => cancelVaultLint(),
   });
+}
+
+export function useVaultLintStatus(options?: { enabled?: boolean }) {
+  const isVisible = useDocumentVisible();
+  const enabled = options?.enabled ?? false;
+  const { data } = useWorkspaceRefreshQuery<VaultLintJobStatus>({
+    queryKey: ["control-plane", "vault-lint-status"],
+    queryFn: () => getVaultLintStatus(),
+    enabled,
+    refetchInterval: () => (isVisible && enabled ? 3_000 : false),
+    refreshDomains: ["vault"],
+  });
+  return { lintStatus: data ?? null };
 }
 
 export function useLintVault() {
