@@ -335,16 +335,18 @@ export async function getVaultExplorerChildren(path: string): Promise<VaultExplo
 }
 
 export async function startVaultIngest(
-  options?: { forceReanalyze?: boolean; workers?: number },
+  options?: { forceReanalyze?: boolean; workers?: number; modelName?: string | null },
 ): Promise<VaultIngestStatusResponse> {
   const workers = Math.max(1, Math.min(3, Math.trunc(options?.workers ?? 1)));
+  const body: Record<string, unknown> = {
+    force_reanalyze: Boolean(options?.forceReanalyze),
+    workers,
+  };
+  if (options?.modelName) body.model_name = options.modelName;
   const response = await fetch(`${getBackendBaseURL()}/api/vault/ingest/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      force_reanalyze: Boolean(options?.forceReanalyze),
-      workers,
-    }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     await parseError(response, `Failed to start vault ingest: ${response.statusText}`);
@@ -375,6 +377,8 @@ export async function lintVault(options?: {
   useLlm?: boolean;
   entitySlugs?: string[];
   conceptSlugs?: string[];
+  workers?: number;
+  modelName?: string | null;
 }): Promise<VaultLintResponse> {
   const body: Record<string, unknown> = {
     dry_run: options?.dryRun ?? true,
@@ -382,6 +386,10 @@ export async function lintVault(options?: {
   };
   if (options?.entitySlugs !== undefined) body.entity_slugs = options.entitySlugs;
   if (options?.conceptSlugs !== undefined) body.concept_slugs = options.conceptSlugs;
+  if (options?.workers !== undefined) {
+    body.workers = Math.max(1, Math.min(8, Math.trunc(options.workers)));
+  }
+  if (options?.modelName) body.model_name = options.modelName;
   const response = await fetch(`${getBackendBaseURL()}/api/vault/lint`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -391,6 +399,27 @@ export async function lintVault(options?: {
     await parseError(response, `Failed to lint vault: ${response.statusText}`);
   }
   return response.json() as Promise<VaultLintResponse>;
+}
+
+export interface VaultLintJobStatus {
+  status: string;
+  started_at?: string | null;
+  updated_at?: string | null;
+  cancel_requested?: boolean;
+  model?: string | null;
+  workers?: number;
+  accepted?: boolean | null;
+  message?: string | null;
+}
+
+export async function cancelVaultLint(): Promise<VaultLintJobStatus> {
+  const response = await fetch(`${getBackendBaseURL()}/api/vault/lint/cancel`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    await parseError(response, `Failed to cancel vault lint: ${response.statusText}`);
+  }
+  return response.json() as Promise<VaultLintJobStatus>;
 }
 
 export async function getVaultFile(path: string): Promise<VaultFileResponse> {

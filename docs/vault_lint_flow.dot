@@ -1,0 +1,86 @@
+digraph VaultLintFlow {
+    rankdir=TB;
+    bgcolor="white";
+    fontname="Helvetica";
+    labelloc="t";
+    fontsize=20;
+    label="Knowledge Vault Linting — Actual Flow\n(backend/src/control_plane/vault_learning/_lint.py)";
+
+    node [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled", margin="0.18,0.10"];
+    edge [fontname="Helvetica", fontsize=9, color="#444444"];
+
+    /* ============ TRIGGERS ============ */
+    subgraph cluster_triggers {
+        label="Entry points (two distinct triggers)";
+        style="rounded,dashed"; color="#888888"; fontsize=12;
+
+        trig_agent [label="Pipeline 'lint' step\nknowledge_vault_agent._execute_lint()\n(runs inside langgraph dev)", fillcolor="#FDE2B3"];
+        trig_http  [label="HTTP  POST /api/vault/lint\ngateway/routers/vault.py\n-> service.lint_vault_pages()", fillcolor="#FDE2B3"];
+        ui_button  [label="Vault page button\n(useLintVault mutation,\nmanual click only)", fillcolor="#FFF3D6"];
+    }
+    ui_button -> trig_http [label="user clicks"];
+
+    /* ============ PATH A : lint_vault (health scan) ============ */
+    subgraph cluster_scan {
+        label="PATH A — lint_vault()  : read-only HEALTH SCAN  (what ran & hung on 2026-06-01)";
+        style="rounded,filled"; color="#9FB7D9"; fillcolor="#EEF3FB"; fontsize=13;
+
+        a0 [label="expire_queries()\n(age out stale queries)", fillcolor="#D6E4F5"];
+        a1 [label="Walk compiled_syntheses_dir/*.md\nparse frontmatter + body", fillcolor="#D6E4F5"];
+        a2 [label="Per synthesis: classify\n• stale (last_reviewed_at past window)\n• orphan (no source_refs)\n• missing_backlinks (no open_questions)\n• contradiction ('contradiction' in body)\n• collect open_questions", fillcolor="#D6E4F5"];
+        a3 [label="Walk concepts/*.md (1967)\n+ entities/*.md (2161)\nflag orphan (no source_refs)", fillcolor="#F6D6D6"];
+        a4 [label="Build report dict\n(counts + lists)", fillcolor="#D6E4F5"];
+        a5 [label="WRITE 03_ops/reports/lint/<ts>-lint.json\n+ optional task-review .md", fillcolor="#CDE8CD"];
+        a6 [label="manifest['last_lint_at'] = now\nsave_manifest()", fillcolor="#CDE8CD"];
+
+        a0 -> a1 -> a2 -> a3 -> a4 -> a5 -> a6;
+    }
+
+    a3_note [shape=note, fillcolor="#FBE3E3", style="filled",
+        label="~4,100+ SYNCHRONOUS file reads, no await.\nUnder langgraph --allow-blocking this ties up\nthe shared event loop -> /api/vault/* time out.\nReport + last_lint_at written only at the END,\nso an interrupted scan leaves last_lint_at=None."];
+    a3 -> a3_note [style=dotted, arrowhead=none, color="#C0392B"];
+
+    /* ============ PATH B : lint_and_prune_pages ============ */
+    subgraph cluster_prune {
+        label="PATH B — lint_and_prune_pages()  : FIND + (optionally) REMOVE low-quality pages";
+        style="rounded,filled"; color="#A9CBA9"; fillcolor="#EFF6EF"; fontsize=13;
+
+        b_guard [label="if not dry_run:\nrefuse while an ingest runner is active\n(active_runners > 0 -> ValueError)", fillcolor="#FCEFC7"];
+        b_idx   [label="Index manifest sources once:\nslug -> label, slug -> source titles\n(entity_refs / concept_refs)", fillcolor="#DDEFDD"];
+
+        b_commit [label="explicit_commit?\n(entity_slugs / concept_slugs supplied)", shape=diamond, fillcolor="#FCEFC7"];
+
+        b_eval [label="_evaluate() per dir (entities, concepts):\nfor each *.md -> parse frontmatter+body\n  • dismissed (entity in entity_dismissals) -> auto\n  • orphan (no live source_refs)          -> auto\n  • else -> candidate (is_stub, excerpt...)", fillcolor="#DDEFDD"];
+
+        b_mode [label="use_llm ?", shape=diamond, fillcolor="#FCEFC7"];
+        b_llm  [label="_judge_pages_with_llm()\nbatch of 20 -> LLM keep/remove\n(bias KEEP). verdict 'remove' -> finding", fillcolor="#E2D6F5"];
+        b_heur [label="Heuristic: flag candidate iff\nlive_source_count==1 AND is_stub\n(reason: singleton_stub)", fillcolor="#DDEFDD"];
+
+        b_commit_list [label="Build findings directly\nfrom supplied slugs\n(reason: committed)", fillcolor="#DDEFDD"];
+
+        b_dry [label="dry_run ?", shape=diamond, fillcolor="#FCEFC7"];
+        b_apply [label="APPLY removals:\n• entities -> dismiss_entity() (skip on re-ingest)\n• concepts -> unlink file + strip concept_refs\n• rewrite concept index.md\n• last_lint_at = now; save_manifest()\n• write <ts>-prune.json report", fillcolor="#CDE8CD"];
+        b_preview [label="Return preview report\n(flagged lists, removed=0)\nNO state mutation", fillcolor="#DDEFDD"];
+
+        b_guard -> b_idx -> b_commit;
+        b_commit -> b_commit_list [label="yes"];
+        b_commit -> b_eval [label="no"];
+        b_eval -> b_mode;
+        b_mode -> b_llm  [label="yes"];
+        b_mode -> b_heur [label="no"];
+        b_llm -> b_dry;
+        b_heur -> b_dry;
+        b_commit_list -> b_dry;
+        b_dry -> b_preview [label="yes (default)"];
+        b_dry -> b_apply   [label="no"];
+    }
+
+    /* trigger wiring */
+    trig_agent -> a0 [label="lint_vault(freshness_window_days)"];
+    trig_http  -> b_guard [label="lint_and_prune_pages(\ndry_run, use_llm, slugs)"];
+
+    /* outputs */
+    out [label="Reports under 03_ops/reports/lint/\n+ manifest.last_lint_at / last_run_summary", shape=cylinder, fillcolor="#E8E8E8"];
+    a6 -> out;
+    b_apply -> out;
+}

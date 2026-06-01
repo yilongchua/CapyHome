@@ -4,6 +4,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ClockIcon,
   CopyIcon,
   DownloadIcon,
   FileTextIcon,
@@ -35,6 +36,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -48,6 +51,7 @@ import {
 } from "@/components/workspace/workspace-container";
 import {
   useCancelVaultIngest,
+  useCancelVaultLint,
   useDeleteVaultFile,
   useLintVault,
   useRefreshVaultExplorer,
@@ -61,7 +65,10 @@ import {
 } from "@/core/control-plane";
 import type { VaultExplorerFileNode, VaultExplorerResponse, VaultLintResponse } from "@/core/control-plane";
 import { useI18n } from "@/core/i18n/hooks";
+import { useModels } from "@/core/models/hooks";
 import { streamdownPlugins } from "@/core/streamdown";
+
+import { useIdleAutoRun } from "./use-idle-auto-run";
 
 type TreeNode = {
   name: string;
@@ -249,13 +256,81 @@ export default function VaultPage() {
   const startIngest = useStartVaultIngest();
   const cancelIngest = useCancelVaultIngest();
   const lintVaultMutation = useLintVault();
+  const cancelLint = useCancelVaultLint();
   const [selectedWorkers, setSelectedWorkers] = useState<number>(1);
+  const [selectedIngestModel, setSelectedIngestModel] = useState<string | null>(null);
+  const [selectedLintWorkers, setSelectedLintWorkers] = useState<number>(3);
+  const [selectedLintModel, setSelectedLintModel] = useState<string | null>(null);
+  const { models: availableModels } = useModels();
+  const lintModelLabel =
+    availableModels.find((m) => m.name === selectedLintModel)?.display_name ??
+    selectedLintModel ??
+    "Default model";
   const [lintPreview, setLintPreview] = useState<VaultLintResponse | null>(null);
   const lintTotalToRemove =
     (lintPreview?.entities.flagged.length ?? 0) + (lintPreview?.concepts.flagged.length ?? 0);
+  // Live label for an in-flight LLM judge run. Lint is a single blocking
+  // request (no streamed progress), so we surface the active workers + model
+  // from the in-flight mutation's variables. Only shown for the use_llm preview
+  // pass — the slug-commit pass skips the judge entirely.
+  const lintJudgeRunning =
+    lintVaultMutation.isPending && Boolean(lintVaultMutation.variables?.useLlm);
+  const lintRunWorkers = lintVaultMutation.variables?.workers ?? selectedLintWorkers;
+  const lintRunModelLabel =
+    availableModels.find((m) => m.name === lintVaultMutation.variables?.modelName)?.display_name ??
+    lintVaultMutation.variables?.modelName ??
+    "Default model";
   const ingestRunning = ingestStatus?.status === "running" || startIngest.isPending;
   const cancelRequested = Boolean(ingestStatus?.cancel_requested) || cancelIngest.isPending;
   const activeWorkers = ingestStatus?.workers_active ?? ingestStatus?.workers_requested ?? 0;
+
+  // Passive idle auto-run (clock icon). 0 = off; persisted in localStorage.
+  // Auto-runs always pin 1 worker + default model, and auto-lint runs as a
+  // dry-run PREVIEW (never deletes unattended) that populates the panel.
+  const [idleMinutes, setIdleMinutes] = useState<number>(0);
+  useEffect(() => {
+    const stored = Number(localStorage.getItem("vault-idle-autorun-min") ?? "0");
+    if (!Number.isNaN(stored)) setIdleMinutes(stored);
+  }, []);
+  const updateIdleMinutes = (n: number) => {
+    setIdleMinutes(n);
+    try {
+      localStorage.setItem("vault-idle-autorun-min", String(n));
+    } catch {
+      /* ignore quota / unavailable storage */
+    }
+  };
+  useIdleAutoRun({
+    idleMinutes,
+    isBusy: ingestRunning || lintVaultMutation.isPending,
+    ingestActive: ingestRunning,
+    onAutoIngest: () => {
+      if (ingestRunning) return;
+      startIngest.mutate(
+        { workers: 1, modelName: null },
+        {
+          onSuccess: (payload) => {
+            if (payload.accepted !== false) {
+              toast.message("Idle auto-run: ingest started (1 worker, default model).");
+            }
+          },
+        },
+      );
+    },
+    onAutoLint: () => {
+      if (lintVaultMutation.isPending || ingestRunning) return;
+      toast.message("Idle auto-run: lint preview started (default model).");
+      lintVaultMutation.mutate(
+        { dryRun: true, useLlm: true, workers: 1, modelName: null },
+        {
+          onSuccess: (preview) => {
+            setLintPreview(preview);
+            toast.success("Idle auto-run: lint preview ready — review and apply when you're back.");
+          },
+        },
+      );
+    },
+  });
   const ingestEtaLabel = (() => {
     if (ingestStatus?.status !== "running") return "";
     const total = ingestStatus.total || 0;
@@ -326,7 +401,44 @@ export default function VaultPage() {
 
   return (
     <WorkspaceContainer>
-      <WorkspaceHeader />
+      <WorkspaceHeader
+        rightSlot={
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                variant={idleMinutes > 0 ? "default" : "outline"}
+                className="px-2"
+                title={
+                  idleMinutes > 0
+                    ? `Auto Ingest & Lint: after ${idleMinutes} min idle`
+                    : "Auto Ingest & Lint: off"
+                }
+                aria-label="Auto Ingest & Lint settings"
+              >
+                <ClockIcon className="size-4" />
+                {idleMinutes > 0 ? <span className="ml-1 text-xs">{idleMinutes}m</span> : null}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuLabel>Auto Ingest &amp; Lint</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {[
+                { n: 0, label: "Off" },
+                { n: 15, label: "15 minutes" },
+                { n: 30, label: "30 minutes" },
+              ].map((opt) => (
+                <DropdownMenuItem key={opt.n} onClick={() => updateIdleMinutes(opt.n)}>
+                  <CheckIcon
+                    className={`mr-2 size-3.5 ${idleMinutes === opt.n ? "opacity-100" : "opacity-0"}`}
+                  />
+                  {opt.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        }
+      />
       <WorkspaceBody>
         <div className="flex size-full flex-col overflow-hidden p-6">
           <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -348,6 +460,20 @@ export default function VaultPage() {
                       <span className="truncate">· {ingestProgressLabel}</span>
                     </span>
                   ) : null}
+                  {lintJudgeRunning ? (
+                    <span
+                      className="flex items-center gap-1 truncate text-xs text-muted-foreground"
+                      title={`LLM judge running — ${lintRunWorkers} worker${
+                        lintRunWorkers === 1 ? "" : "s"
+                      } · ${lintRunModelLabel} (single request; progress isn't streamed)`}
+                    >
+                      <Loader2Icon className="size-3.5 animate-spin" />
+                      <span className="truncate">
+                        · Linting… {lintRunWorkers} worker{lintRunWorkers === 1 ? "" : "s"} ·{" "}
+                        {lintRunModelLabel}
+                      </span>
+                    </span>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <div className="inline-flex items-stretch">
@@ -361,7 +487,7 @@ export default function VaultPage() {
                           return;
                         }
                         startIngest.mutate(
-                          { workers: selectedWorkers },
+                          { workers: selectedWorkers, modelName: selectedIngestModel },
                           {
                             onSuccess: (payload) => {
                               if (payload.accepted === false) {
@@ -397,13 +523,14 @@ export default function VaultPage() {
                           variant="outline"
                           className="rounded-l-none px-2"
                           disabled={ingestRunning}
-                          title="Choose number of parallel workers"
-                          aria-label="Choose number of parallel workers"
+                          title="Choose workers and analysis model"
+                          aria-label="Choose workers and analysis model"
                         >
                           <ChevronDownIcon className="size-4" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
+                      <DropdownMenuContent align="end" className="max-h-80 overflow-y-auto">
+                        <DropdownMenuLabel>Parallel workers</DropdownMenuLabel>
                         {[1, 2, 3].map((n) => (
                           <DropdownMenuItem
                             key={n}
@@ -416,6 +543,29 @@ export default function VaultPage() {
                             />
                             {n} worker{n === 1 ? "" : "s"}
                             {n === 1 ? " (sequential)" : ""}
+                          </DropdownMenuItem>
+                        ))}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuLabel>Analysis model</DropdownMenuLabel>
+                        <DropdownMenuItem onClick={() => setSelectedIngestModel(null)}>
+                          <CheckIcon
+                            className={`mr-2 size-3.5 ${
+                              selectedIngestModel === null ? "opacity-100" : "opacity-0"
+                            }`}
+                          />
+                          Default model
+                        </DropdownMenuItem>
+                        {availableModels.map((m) => (
+                          <DropdownMenuItem
+                            key={`ingest-m-${m.name}`}
+                            onClick={() => setSelectedIngestModel(m.name)}
+                          >
+                            <CheckIcon
+                              className={`mr-2 size-3.5 ${
+                                selectedIngestModel === m.name ? "opacity-100" : "opacity-0"
+                              }`}
+                            />
+                            <span className="truncate">{m.display_name ?? m.name}</span>
                           </DropdownMenuItem>
                         ))}
                       </DropdownMenuContent>
@@ -431,45 +581,132 @@ export default function VaultPage() {
                             if (payload.accepted === false) {
                               toast.message(payload.message ?? "No vault ingest job is running.");
                             } else {
-                              toast.success(payload.message ?? "Stopping vault ingest after current source.");
+                              toast.success(payload.message ?? "Stopping ingest now; in-flight items are requeued.");
                             }
                           },
                           onError: (error) => toast.error(error.message),
                         });
                       }}
                       disabled={cancelRequested}
-                      title="Stop after current source"
+                      title="Stop now — abandons the in-flight batch and requeues its items"
                     >
                       <SquareIcon className="mr-2 size-4 fill-current" />
                       {cancelRequested ? "Stopping..." : "Stop"}
                     </Button>
                   ) : null}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      lintVaultMutation.mutate(
-                        { dryRun: true, useLlm: true },
-                        {
-                          onSuccess: (preview) => setLintPreview(preview),
+                  <div className="inline-flex items-stretch">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-r-none border-r-0"
+                      onClick={() => {
+                        lintVaultMutation.mutate(
+                          {
+                            dryRun: true,
+                            useLlm: true,
+                            workers: selectedLintWorkers,
+                            modelName: selectedLintModel,
+                          },
+                          {
+                            onSuccess: (preview) => setLintPreview(preview),
+                            onError: (error) => toast.error(error.message),
+                          },
+                        );
+                      }}
+                      disabled={lintVaultMutation.isPending || ingestRunning}
+                      title={
+                        ingestRunning
+                          ? "Wait for ingest to finish before linting"
+                          : `LLM-judged scan for low-value entities/concepts (judge: ${lintModelLabel}, ${selectedLintWorkers} worker${
+                              selectedLintWorkers === 1 ? "" : "s"
+                            })`
+                      }
+                    >
+                      {lintVaultMutation.isPending && lintPreview === null ? (
+                        <Loader2Icon className="mr-2 size-4 animate-spin" />
+                      ) : (
+                        <SparklesIcon className="mr-2 size-4" />
+                      )}
+                      {`Lint${selectedLintWorkers > 1 ? ` (${selectedLintWorkers}×)` : ""}`}
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-l-none px-2"
+                          disabled={lintVaultMutation.isPending || ingestRunning}
+                          title="Choose judge workers and model"
+                          aria-label="Choose judge workers and model"
+                        >
+                          <ChevronDownIcon className="size-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="max-h-80 overflow-y-auto">
+                        <DropdownMenuLabel>Parallel workers</DropdownMenuLabel>
+                        {[1, 2, 3].map((n) => (
+                          <DropdownMenuItem
+                            key={`lint-w-${n}`}
+                            onClick={() => setSelectedLintWorkers(n)}
+                          >
+                            <CheckIcon
+                              className={`mr-2 size-3.5 ${
+                                selectedLintWorkers === n ? "opacity-100" : "opacity-0"
+                              }`}
+                            />
+                            {n} worker{n === 1 ? "" : "s"}
+                            {n === 1 ? " (sequential)" : ""}
+                          </DropdownMenuItem>
+                        ))}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuLabel>Judge model</DropdownMenuLabel>
+                        <DropdownMenuItem onClick={() => setSelectedLintModel(null)}>
+                          <CheckIcon
+                            className={`mr-2 size-3.5 ${
+                              selectedLintModel === null ? "opacity-100" : "opacity-0"
+                            }`}
+                          />
+                          Default model
+                        </DropdownMenuItem>
+                        {availableModels.map((m) => (
+                          <DropdownMenuItem
+                            key={`lint-m-${m.name}`}
+                            onClick={() => setSelectedLintModel(m.name)}
+                          >
+                            <CheckIcon
+                              className={`mr-2 size-3.5 ${
+                                selectedLintModel === m.name ? "opacity-100" : "opacity-0"
+                              }`}
+                            />
+                            <span className="truncate">{m.display_name ?? m.name}</span>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                  {lintJudgeRunning ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        cancelLint.mutate(undefined, {
+                          onSuccess: (payload) => {
+                            if (payload.accepted === false) {
+                              toast.message(payload.message ?? "No lint job is running.");
+                            } else {
+                              toast.success(payload.message ?? "Stopping lint at the next batch boundary.");
+                            }
+                          },
                           onError: (error) => toast.error(error.message),
-                        },
-                      );
-                    }}
-                    disabled={lintVaultMutation.isPending || ingestRunning}
-                    title={
-                      ingestRunning
-                        ? "Wait for ingest to finish before linting"
-                        : "LLM-judged scan for low-value entities/concepts (uses memory.json + vault context)"
-                    }
-                  >
-                    {lintVaultMutation.isPending && lintPreview === null ? (
-                      <Loader2Icon className="mr-2 size-4 animate-spin" />
-                    ) : (
-                      <SparklesIcon className="mr-2 size-4" />
-                    )}
-                    Lint
-                  </Button>
+                        });
+                      }}
+                      disabled={cancelLint.isPending}
+                      title="Stop the lint judge at the next batch boundary"
+                    >
+                      <SquareIcon className="mr-2 size-4 fill-current" />
+                      {cancelLint.isPending ? "Stopping..." : "Stop Lint"}
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="outline"

@@ -49,6 +49,7 @@ import {
   startPipelineRun,
   startVaultIngest,
   cancelVaultIngest,
+  cancelVaultLint,
   lintVault,
   getVaultIngestStatus,
   refreshVaultExplorer,
@@ -340,7 +341,7 @@ export function useVaultIngestStatus(options?: { refetchInterval?: number; enabl
 export function useStartVaultIngest() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (options?: { forceReanalyze?: boolean; workers?: number }) =>
+    mutationFn: (options?: { forceReanalyze?: boolean; workers?: number; modelName?: string | null }) =>
       startVaultIngest(options),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-ingest-status"] });
@@ -362,6 +363,12 @@ export function useCancelVaultIngest() {
   });
 }
 
+export function useCancelVaultLint() {
+  return useMutation({
+    mutationFn: () => cancelVaultLint(),
+  });
+}
+
 export function useLintVault() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -370,6 +377,8 @@ export function useLintVault() {
       useLlm?: boolean;
       entitySlugs?: string[];
       conceptSlugs?: string[];
+      workers?: number;
+      modelName?: string | null;
     }) => lintVault(options),
     onSuccess: (_data, variables) => {
       // Only invalidate vault views after a real prune so a dry-run preview

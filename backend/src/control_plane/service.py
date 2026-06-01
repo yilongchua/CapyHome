@@ -110,6 +110,24 @@ class ControlPlaneService:
         self._vault_ingest_job: dict[str, Any] = self._new_vault_ingest_job_state()
         self._vault_ingest_lock = threading.Lock()
         self._vault_ingest_logger: logging.Logger | None = None
+        # Lint (LLM-judge) run tracking + cooperative cancellation. Lint is a
+        # single blocking request, so the cancel endpoint sets this Event and
+        # the judge loop checks it between batches (stop at next safe boundary).
+        self._vault_lint_lock = threading.Lock()
+        self._vault_lint_cancel = threading.Event()
+        self._vault_lint_job: dict[str, Any] = {
+            "status": "idle",
+            "started_at": None,
+            "updated_at": None,
+            "cancel_requested": False,
+            "model": None,
+            "workers": 0,
+        }
+        # Process-cached read-only vault manager (see _cached_read_vault_manager).
+        self._vault_read_manager: VaultLearningManager | None = None
+        self._vault_read_manager_root: Path | None = None
+        self._vault_read_manifest_mtime: float = -1.0
+        self._vault_read_manager_lock = threading.Lock()
         self._seed_from_config()
 
     def _build_agent_registry(self) -> dict[str, Any]:
@@ -1353,6 +1371,46 @@ class ControlPlaneService:
             )
         )
 
+    def _cached_read_vault_manager(self) -> VaultLearningManager:
+        """Return a process-cached vault manager for read-only endpoints.
+
+        The vault read endpoints (entity browser, status, dismissals) are polled
+        while the vault tab is open. Building a fresh ``VaultLearningManager`` per
+        request re-ran ~30 ``mkdir``s, re-seeded schema docs, and re-parsed the
+        (multi-MB) manifest every time. Instead build the manager once, then
+        refresh only its in-memory manifest when the manifest file's mtime changes.
+
+        This manager is used **only** by pure-read methods and is never handed to
+        ingest/mutation paths (those keep using ``_default_vault_manager``). Its
+        ``_manifest`` is therefore only ever atomically rebound here — never mutated
+        in place — so concurrent readers observe a consistent dict without locking
+        the read itself. The short lock below only serializes the mtime check and
+        the reload, both of which run off the event loop (handlers are sync `def`).
+        """
+        config = get_app_config()
+        vault_cfg = config.knowledge_vault
+        default_root = VaultLearningManager.default_vault_root()
+        configured_root = Path(str(vault_cfg.path or default_root)).expanduser().resolve()
+        with self._vault_read_manager_lock:
+            manager = self._vault_read_manager
+            if manager is None or self._vault_read_manager_root != configured_root:
+                manager = self._default_vault_manager()
+                self._vault_read_manager = manager
+                self._vault_read_manager_root = configured_root
+                try:
+                    self._vault_read_manifest_mtime = manager.manifest_path.stat().st_mtime
+                except OSError:
+                    self._vault_read_manifest_mtime = -1.0
+                return manager
+            try:
+                mtime = manager.manifest_path.stat().st_mtime
+            except OSError:
+                mtime = -1.0
+            if mtime != self._vault_read_manifest_mtime:
+                manager._manifest = manager._load_manifest()
+                self._vault_read_manifest_mtime = mtime
+            return manager
+
     def ensure_vault_queue_ingest_approval(
         self,
         *,
@@ -1399,7 +1457,7 @@ class ControlPlaneService:
         return len(cleared_ids)
 
     def get_vault_status(self) -> dict[str, Any]:
-        manager = self._default_vault_manager()
+        manager = self._cached_read_vault_manager()
         return manager.get_run_summary()
 
     def search_vault(self, *, query: str, limit: int = 10) -> dict[str, Any]:
@@ -1450,7 +1508,7 @@ class ControlPlaneService:
         bottom_n: int = 10,
         critical_max_degree: int = 2,
     ) -> dict[str, Any]:
-        manager = self._default_vault_manager()
+        manager = self._cached_read_vault_manager()
         return manager.get_entity_browser(
             top_n=top_n,
             bottom_n=bottom_n,
@@ -1458,7 +1516,7 @@ class ControlPlaneService:
         )
 
     def list_vault_entity_dismissals(self) -> list[dict[str, Any]]:
-        manager = self._default_vault_manager()
+        manager = self._cached_read_vault_manager()
         return manager.list_entity_dismissals()
 
     def dismiss_vault_entity(
@@ -1735,6 +1793,7 @@ class ControlPlaneService:
         *,
         force_reanalyze: bool = False,
         workers: int = 1,
+        model_name: str | None = None,
     ) -> dict[str, Any]:
         # Parallel ingest runs are allowed. Each call spawns `workers` runner
         # threads that share the same `_vault_ingest_job` state. Cross-worker
@@ -1770,6 +1829,10 @@ class ControlPlaneService:
         )
 
         manager = self._default_vault_manager()
+        # Per-job override for the ingest analysis model. The manager is built
+        # fresh per call, so this never leaks across runs. None -> configured
+        # cot_model / default model.
+        manager.analysis_model_override = (str(model_name).strip() or None) if model_name else None
         coord = manager._coord
 
         queue_workers_remaining = [worker_count]
@@ -2204,6 +2267,9 @@ class ControlPlaneService:
         use_llm: bool = False,
         entity_slugs: list[str] | None = None,
         concept_slugs: list[str] | None = None,
+        judge_batch_size: int = 20,
+        judge_workers: int = 1,
+        judge_model: str | None = None,
     ) -> dict[str, Any]:
         """Find and (optionally) remove low-quality entity/concept pages.
 
@@ -2222,12 +2288,43 @@ class ControlPlaneService:
                         "Cannot lint while a vault ingest is running. "
                         "Wait for the active run to finish and try again.",
                     )
-        report = manager.lint_and_prune_pages(
-            dry_run=dry_run,
-            use_llm=use_llm,
-            entity_slugs_to_prune=entity_slugs,
-            concept_slugs_to_prune=concept_slugs,
-        )
+        # Only the LLM-judge path is long-running and cancellable; the explicit
+        # slug-commit path skips the judge entirely, so don't arm cancellation
+        # for it (it's near-instant).
+        track = use_llm and entity_slugs is None and concept_slugs is None
+        if track:
+            self._vault_lint_cancel.clear()
+            with self._vault_lint_lock:
+                self._vault_lint_job.update(
+                    {
+                        "status": "running",
+                        "started_at": self._utcnow_iso(),
+                        "updated_at": self._utcnow_iso(),
+                        "cancel_requested": False,
+                        "model": judge_model or "default",
+                        "workers": int(judge_workers),
+                    }
+                )
+        try:
+            report = manager.lint_and_prune_pages(
+                dry_run=dry_run,
+                use_llm=use_llm,
+                entity_slugs_to_prune=entity_slugs,
+                concept_slugs_to_prune=concept_slugs,
+                judge_batch_size=judge_batch_size,
+                judge_workers=judge_workers,
+                judge_model=judge_model,
+                should_cancel=(self._vault_lint_cancel.is_set if track else None),
+            )
+        finally:
+            if track:
+                with self._vault_lint_lock:
+                    self._vault_lint_job.update(
+                        {
+                            "status": "cancelled" if self._vault_lint_cancel.is_set() else "idle",
+                            "updated_at": self._utcnow_iso(),
+                        }
+                    )
         if not dry_run and (
             report.get("entities", {}).get("removed", 0)
             or report.get("concepts", {}).get("removed", 0)
@@ -2235,6 +2332,26 @@ class ControlPlaneService:
             with self._vault_explorer_cache_lock:
                 self._vault_explorer_cache = {}
         return report
+
+    def cancel_vault_lint_job(self) -> dict[str, Any]:
+        with self._vault_lint_lock:
+            running = str(self._vault_lint_job.get("status") or "idle") == "running"
+            if not running:
+                snapshot = dict(self._vault_lint_job)
+                snapshot["accepted"] = False
+                snapshot["message"] = "No vault lint job is running."
+                return snapshot
+            self._vault_lint_job["cancel_requested"] = True
+            self._vault_lint_job["updated_at"] = self._utcnow_iso()
+            snapshot = dict(self._vault_lint_job)
+        self._vault_lint_cancel.set()
+        snapshot["accepted"] = True
+        snapshot["message"] = "Stopping lint at the next batch boundary."
+        return snapshot
+
+    def get_vault_lint_status(self) -> dict[str, Any]:
+        with self._vault_lint_lock:
+            return dict(self._vault_lint_job)
 
     def cancel_vault_ingest_job(self) -> dict[str, Any]:
         with self._vault_ingest_lock:
@@ -2248,7 +2365,10 @@ class ControlPlaneService:
             self._vault_ingest_job["updated_at"] = self._utcnow_iso()
             snapshot = dict(self._vault_ingest_job)
         snapshot["accepted"] = True
-        snapshot["message"] = "Vault ingest cancellation requested. Current source will finish before stopping."
+        snapshot["message"] = (
+            "Stopping ingest now. The in-flight batch is abandoned and its "
+            "items are requeued, so nothing is lost — they resume next run."
+        )
         return snapshot
 
     def list_vault_action_items(self, *, limit: int = 100) -> dict[str, Any]:

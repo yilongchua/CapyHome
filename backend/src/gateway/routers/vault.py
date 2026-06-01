@@ -104,6 +104,9 @@ class VaultSufficiencyResponse(BaseModel):
 class VaultIngestStartRequest(BaseModel):
     force_reanalyze: bool = False
     workers: int = Field(default=1, ge=1, le=3)
+    # Which LLM runs the ingest analysis (entity/concept/summary extraction).
+    # None -> configured cot_model / default model.
+    model_name: str | None = None
 
 
 class VaultIngestStatusResponse(BaseModel):
@@ -135,6 +138,14 @@ class VaultLintRequest(BaseModel):
     use_llm: bool = False
     entity_slugs: list[str] | None = None
     concept_slugs: list[str] | None = None
+    # Parallel LLM-judge workers. All hit the same model endpoint, so keep this
+    # at/below the endpoint's configured parallel-request limit (LM Studio: 4).
+    # Capped server-side at _MAX_JUDGE_WORKERS (8). Only used when use_llm=True.
+    workers: int = Field(default=3, ge=1, le=8)
+    batch_size: int = Field(default=20, ge=1, le=100)
+    # Which LLM judges the candidate pages. None -> configured default model.
+    # Only used when use_llm=True.
+    model_name: str | None = None
 
 
 class VaultLintFinding(BaseModel):
@@ -154,8 +165,20 @@ class VaultLintCategoryReport(BaseModel):
 class VaultLintResponse(BaseModel):
     generated_at: str = ""
     dry_run: bool = True
+    cancelled: bool = False
     entities: VaultLintCategoryReport = Field(default_factory=VaultLintCategoryReport)
     concepts: VaultLintCategoryReport = Field(default_factory=VaultLintCategoryReport)
+
+
+class VaultLintJobStatusResponse(BaseModel):
+    status: str = "idle"
+    started_at: str | None = None
+    updated_at: str | None = None
+    cancel_requested: bool = False
+    model: str | None = None
+    workers: int = 0
+    accepted: bool | None = None
+    message: str | None = None
 
 
 class VaultFileNode(BaseModel):
@@ -292,14 +315,14 @@ class VaultEntityAutoresearchResponse(BaseModel):
 
 
 @router.get("/status", response_model=VaultStatusResponse)
-async def get_vault_status() -> VaultStatusResponse:
+def get_vault_status() -> VaultStatusResponse:
     service = get_control_plane_service()
     payload = service.get_vault_status()
     return VaultStatusResponse.model_validate(payload)
 
 
 @router.get("/search", response_model=VaultSearchResponse)
-async def search_vault(
+def search_vault(
     q: str = Query("", description="Search query"),
     limit: int = Query(10, ge=1, le=100),
 ) -> VaultSearchResponse:
@@ -309,7 +332,7 @@ async def search_vault(
 
 
 @router.post("/clip", response_model=VaultWriteResponse)
-async def clip_to_vault(request: VaultClipRequest) -> VaultWriteResponse:
+def clip_to_vault(request: VaultClipRequest) -> VaultWriteResponse:
     service = get_control_plane_service()
     payload = service.clip_to_vault(
         url=request.url,
@@ -328,7 +351,7 @@ async def clip_to_vault(request: VaultClipRequest) -> VaultWriteResponse:
 
 
 @router.post("/save", response_model=VaultWriteResponse)
-async def save_to_vault(request: VaultSaveRequest) -> VaultWriteResponse:
+def save_to_vault(request: VaultSaveRequest) -> VaultWriteResponse:
     service = get_control_plane_service()
     payload = service.save_to_vault(
         title=request.title,
@@ -342,7 +365,7 @@ async def save_to_vault(request: VaultSaveRequest) -> VaultWriteResponse:
 
 
 @router.get("/sources/{source_id}")
-async def get_vault_source(source_id: str) -> dict[str, Any]:
+def get_vault_source(source_id: str) -> dict[str, Any]:
     service = get_control_plane_service()
     try:
         return service.get_vault_source(source_id)
@@ -351,7 +374,7 @@ async def get_vault_source(source_id: str) -> dict[str, Any]:
 
 
 @router.get("/action-items", response_model=VaultActionItemsResponse)
-async def list_vault_action_items(
+def list_vault_action_items(
     limit: int = Query(100, ge=1, le=500),
 ) -> VaultActionItemsResponse:
     service = get_control_plane_service()
@@ -360,21 +383,21 @@ async def list_vault_action_items(
 
 
 @router.get("/explorer", response_model=VaultExplorerResponse)
-async def get_vault_explorer() -> VaultExplorerResponse:
+def get_vault_explorer() -> VaultExplorerResponse:
     service = get_control_plane_service()
     payload = service.get_vault_explorer(force_refresh=False)
     return VaultExplorerResponse.model_validate(payload)
 
 
 @router.post("/explorer/refresh", response_model=VaultExplorerResponse)
-async def refresh_vault_explorer() -> VaultExplorerResponse:
+def refresh_vault_explorer() -> VaultExplorerResponse:
     service = get_control_plane_service()
     payload = service.get_vault_explorer(force_refresh=True)
     return VaultExplorerResponse.model_validate(payload)
 
 
 @router.get("/explorer/children", response_model=VaultExplorerChildrenResponse)
-async def get_vault_explorer_children(
+def get_vault_explorer_children(
     path: str = Query(..., min_length=1, description="Directory path relative to the vault root."),
 ) -> VaultExplorerChildrenResponse:
     service = get_control_plane_service()
@@ -386,30 +409,33 @@ async def get_vault_explorer_children(
 
 
 @router.post("/ingest/start", response_model=VaultIngestStatusResponse)
-async def start_vault_ingest(request: VaultIngestStartRequest | None = None) -> VaultIngestStatusResponse:
+def start_vault_ingest(request: VaultIngestStartRequest | None = None) -> VaultIngestStatusResponse:
     service = get_control_plane_service()
     force = bool(request.force_reanalyze) if request is not None else False
     workers = int(request.workers) if request is not None else 1
-    payload = service.start_vault_ingest_job(force_reanalyze=force, workers=workers)
+    model_name = (request.model_name or None) if request is not None else None
+    payload = service.start_vault_ingest_job(
+        force_reanalyze=force, workers=workers, model_name=model_name,
+    )
     return VaultIngestStatusResponse.model_validate(payload)
 
 
 @router.get("/ingest/status", response_model=VaultIngestStatusResponse)
-async def get_vault_ingest_status() -> VaultIngestStatusResponse:
+def get_vault_ingest_status() -> VaultIngestStatusResponse:
     service = get_control_plane_service()
     payload = service.get_vault_ingest_status()
     return VaultIngestStatusResponse.model_validate(payload)
 
 
 @router.post("/ingest/cancel", response_model=VaultIngestStatusResponse)
-async def cancel_vault_ingest() -> VaultIngestStatusResponse:
+def cancel_vault_ingest() -> VaultIngestStatusResponse:
     service = get_control_plane_service()
     payload = service.cancel_vault_ingest_job()
     return VaultIngestStatusResponse.model_validate(payload)
 
 
 @router.post("/lint", response_model=VaultLintResponse)
-async def lint_vault(request: VaultLintRequest | None = None) -> VaultLintResponse:
+def lint_vault(request: VaultLintRequest | None = None) -> VaultLintResponse:
     service = get_control_plane_service()
     req = request or VaultLintRequest()
     try:
@@ -418,14 +444,31 @@ async def lint_vault(request: VaultLintRequest | None = None) -> VaultLintRespon
             use_llm=bool(req.use_llm),
             entity_slugs=req.entity_slugs,
             concept_slugs=req.concept_slugs,
+            judge_batch_size=int(req.batch_size),
+            judge_workers=int(req.workers),
+            judge_model=(req.model_name or None),
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return VaultLintResponse.model_validate(payload)
 
 
+@router.post("/lint/cancel", response_model=VaultLintJobStatusResponse)
+def cancel_vault_lint() -> VaultLintJobStatusResponse:
+    service = get_control_plane_service()
+    payload = service.cancel_vault_lint_job()
+    return VaultLintJobStatusResponse.model_validate(payload)
+
+
+@router.get("/lint/status", response_model=VaultLintJobStatusResponse)
+def get_vault_lint_status() -> VaultLintJobStatusResponse:
+    service = get_control_plane_service()
+    payload = service.get_vault_lint_status()
+    return VaultLintJobStatusResponse.model_validate(payload)
+
+
 @router.get("/file", response_model=VaultFileResponse)
-async def get_vault_file(path: str = Query(..., min_length=1)) -> VaultFileResponse:
+def get_vault_file(path: str = Query(..., min_length=1)) -> VaultFileResponse:
     service = get_control_plane_service()
     try:
         payload = service.get_vault_file(relative_path=path)
@@ -435,7 +478,7 @@ async def get_vault_file(path: str = Query(..., min_length=1)) -> VaultFileRespo
 
 
 @router.post("/file", response_model=VaultFileWriteResponse)
-async def write_vault_file(request: VaultFileWriteRequest) -> VaultFileWriteResponse:
+def write_vault_file(request: VaultFileWriteRequest) -> VaultFileWriteResponse:
     service = get_control_plane_service()
     try:
         payload = service.save_vault_file(relative_path=request.path, content=request.content)
@@ -444,7 +487,7 @@ async def write_vault_file(request: VaultFileWriteRequest) -> VaultFileWriteResp
     return VaultFileWriteResponse.model_validate(payload)
 
 @router.delete("/file", response_model=VaultFileDeleteResponse)
-async def delete_vault_file(path: str = Query(..., min_length=1)) -> VaultFileDeleteResponse:
+def delete_vault_file(path: str = Query(..., min_length=1)) -> VaultFileDeleteResponse:
     service = get_control_plane_service()
     try:
         payload = service.delete_vault_file(relative_path=path)
@@ -454,7 +497,7 @@ async def delete_vault_file(path: str = Query(..., min_length=1)) -> VaultFileDe
 
 
 @router.delete("/knowledge-graph", response_model=VaultKnowledgeGraphDeleteResponse)
-async def delete_vault_knowledge_graph() -> VaultKnowledgeGraphDeleteResponse:
+def delete_vault_knowledge_graph() -> VaultKnowledgeGraphDeleteResponse:
     service = get_control_plane_service()
     try:
         payload = service.delete_vault_knowledge_graph()
@@ -464,7 +507,7 @@ async def delete_vault_knowledge_graph() -> VaultKnowledgeGraphDeleteResponse:
 
 
 @router.post("/sufficiency/evaluate", response_model=VaultSufficiencyResponse)
-async def evaluate_vault_sufficiency(
+def evaluate_vault_sufficiency(
     request: VaultSufficiencyRequest,
 ) -> VaultSufficiencyResponse:
     service = get_control_plane_service()
@@ -477,7 +520,7 @@ async def evaluate_vault_sufficiency(
 
 
 @router.get("/entity-browser", response_model=VaultEntityBrowserResponse)
-async def get_vault_entity_browser(
+def get_vault_entity_browser(
     top: int = Query(15, ge=1, le=100),
     bottom: int = Query(10, ge=0, le=50),
     critical_max_degree: int = Query(2, ge=0, le=20),
@@ -492,14 +535,14 @@ async def get_vault_entity_browser(
 
 
 @router.get("/entity-dismissals", response_model=VaultEntityDismissalsResponse)
-async def list_vault_entity_dismissals() -> VaultEntityDismissalsResponse:
+def list_vault_entity_dismissals() -> VaultEntityDismissalsResponse:
     service = get_control_plane_service()
     items = service.list_vault_entity_dismissals()
     return VaultEntityDismissalsResponse.model_validate({"items": items})
 
 
 @router.post("/entities/{slug}/dismiss", response_model=VaultEntityDismissResponse)
-async def dismiss_vault_entity(
+def dismiss_vault_entity(
     slug: str,
     request: VaultEntityDismissRequest | None = None,
 ) -> VaultEntityDismissResponse:
@@ -517,7 +560,7 @@ async def dismiss_vault_entity(
 
 
 @router.post("/entity-dismissals/{slug}/restore", response_model=VaultEntityRestoreResponse)
-async def restore_vault_entity_dismissal(slug: str) -> VaultEntityRestoreResponse:
+def restore_vault_entity_dismissal(slug: str) -> VaultEntityRestoreResponse:
     service = get_control_plane_service()
     try:
         payload = service.restore_vault_entity_dismissal(slug=slug)
@@ -527,7 +570,7 @@ async def restore_vault_entity_dismissal(slug: str) -> VaultEntityRestoreRespons
 
 
 @router.post("/entities/{slug}/autoresearch", response_model=VaultEntityAutoresearchResponse)
-async def start_vault_entity_autoresearch(
+def start_vault_entity_autoresearch(
     slug: str,
     request: VaultEntityAutoresearchRequest | None = None,
 ) -> VaultEntityAutoresearchResponse:
@@ -556,7 +599,7 @@ async def start_vault_entity_autoresearch(
 
 
 @router.get("/objectives/{objective_id}/ledger.md", response_class=PlainTextResponse)
-async def get_autoresearch_ledger_markdown(objective_id: str) -> PlainTextResponse:
+def get_autoresearch_ledger_markdown(objective_id: str) -> PlainTextResponse:
     service = get_control_plane_service()
     try:
         name, content = service.get_autoresearch_ledger_markdown(objective_id)
@@ -570,7 +613,7 @@ async def get_autoresearch_ledger_markdown(objective_id: str) -> PlainTextRespon
 
 
 @router.get("/objectives/{objective_id}/ledger.json")
-async def get_autoresearch_ledger_json(objective_id: str) -> dict[str, Any]:
+def get_autoresearch_ledger_json(objective_id: str) -> dict[str, Any]:
     service = get_control_plane_service()
     try:
         return service.get_autoresearch_ledger_json(objective_id)

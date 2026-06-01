@@ -31,6 +31,10 @@ import type {
 
 const DEFAULT_GOAL_TEMPLATE = "Expand vault coverage of {entity} with diverse, high-quality sources.";
 
+// Critical gaps can run into the thousands; render in pages so the DOM (and the
+// initial paint) stays cheap. A "Show more" button reveals the next page.
+const CRITICAL_PAGE_SIZE = 100;
+
 function HubAndSpoke({ entity }: { entity: VaultEntityBrowserItem }) {
   const width = 576;
   const height = 368;
@@ -187,6 +191,7 @@ export function VaultEntityBrowser({
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [criticalCollapsed, setCriticalCollapsed] = useState(false);
   const [dismissedCollapsed, setDismissedCollapsed] = useState(true);
+  const [criticalVisible, setCriticalVisible] = useState(CRITICAL_PAGE_SIZE);
 
   const [dismissDialog, setDismissDialog] = useState<{
     entity: VaultEntityBrowserItem;
@@ -228,6 +233,10 @@ export function VaultEntityBrowser({
 
   const fallbackEntity = entityBrowser?.top[0] ?? entityBrowser?.critical_gaps[0] ?? null;
   const displayEntity = selectedEntity ?? fallbackEntity;
+
+  const criticalGaps = entityBrowser?.critical_gaps ?? [];
+  const visibleCriticalGaps = criticalGaps.slice(0, criticalVisible);
+  const criticalRemaining = criticalGaps.length - visibleCriticalGaps.length;
 
   const handleResearch = (entity: VaultEntityBrowserItem) => {
     setResearchDialog({
@@ -343,22 +352,33 @@ export function VaultEntityBrowser({
           </button>
           {!criticalCollapsed ? (
             <div className="space-y-0.5">
-              {(entityBrowser?.critical_gaps ?? []).length === 0 ? (
+              {criticalGaps.length === 0 ? (
                 <p className="px-2 py-1 text-muted-foreground">
                   All entities have ≥ {criticalMaxDegree + 1} sources — coverage looks solid.
                 </p>
               ) : (
-                entityBrowser?.critical_gaps.map((entry) => (
-                  <EntityListRow
-                    key={`crit-${entry.slug}`}
-                    entity={entry}
-                    selected={selectedSlug === entry.slug}
-                    onClick={() => setSelectedSlug(entry.slug)}
-                    showActions
-                    onResearch={() => handleResearch(entry)}
-                    onDismiss={() => setDismissDialog({ entity: entry, reason: "", aliasFor: "" })}
-                  />
-                ))
+                <>
+                  {visibleCriticalGaps.map((entry) => (
+                    <EntityListRow
+                      key={`crit-${entry.slug}`}
+                      entity={entry}
+                      selected={selectedSlug === entry.slug}
+                      onClick={() => setSelectedSlug(entry.slug)}
+                      showActions
+                      onResearch={() => handleResearch(entry)}
+                      onDismiss={() => setDismissDialog({ entity: entry, reason: "", aliasFor: "" })}
+                    />
+                  ))}
+                  {criticalRemaining > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setCriticalVisible((value) => value + CRITICAL_PAGE_SIZE)}
+                      className="mt-1 w-full rounded border border-dashed px-2 py-1 text-[11px] text-muted-foreground hover:bg-background"
+                    >
+                      Show {Math.min(CRITICAL_PAGE_SIZE, criticalRemaining)} more ({criticalRemaining} remaining)
+                    </button>
+                  ) : null}
+                </>
               )}
             </div>
           ) : null}

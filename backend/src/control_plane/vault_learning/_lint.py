@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -163,18 +165,47 @@ class LintMixin:
             )
         return "\n".join(lines)
 
+    @staticmethod
+    def _extract_json_array(text: str) -> list[Any] | None:
+        """Pull a top-level JSON array out of a model response.
+
+        The judge prompt asks for a bare ``[{...}, ...]`` array. Reasoning
+        models may wrap it in ``<think>`` blocks or markdown fences, so strip
+        those before slicing the outermost ``[ ... ]``.
+        """
+        raw = str(text or "").strip()
+        if not raw:
+            return None
+        # Drop reasoning traces emitted by thinking models.
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+        start = raw.find("[")
+        end = raw.rfind("]")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        try:
+            parsed = json.loads(raw[start : end + 1])
+        except Exception:
+            return None
+        return parsed if isinstance(parsed, list) else None
+
     def _parse_judge_response(self, raw: str) -> dict[str, dict[str, str]]:
         verdicts: dict[str, dict[str, str]] = {}
-        try:
-            data = self._extract_json_payload(raw)
-        except Exception:
-            return verdicts
-        items: Any = data
-        if isinstance(data, dict):
-            for key in ("items", "verdicts", "results"):
-                if isinstance(data.get(key), list):
-                    items = data[key]
-                    break
+        # Preferred shape: a bare JSON array (what the prompt requests).
+        items: Any = self._extract_json_array(raw)
+        if items is None:
+            # Fallback: an object wrapping the list under a known key.
+            try:
+                data = self._extract_json_payload(raw)
+            except Exception:
+                return verdicts
+            if isinstance(data, dict):
+                for key in ("items", "verdicts", "results"):
+                    if isinstance(data.get(key), list):
+                        items = data[key]
+                        break
         if not isinstance(items, list):
             return verdicts
         for entry in items:
@@ -190,6 +221,14 @@ class LintMixin:
             }
         return verdicts
 
+    # Hard ceiling on parallel judge workers. The judge phase is read-only
+    # (it only produces verdicts; no manifest/file writes happen until the
+    # caller applies them sequentially), so concurrency is write-safe. The
+    # real limit is the backing model server: all workers hit the SAME
+    # endpoint, so values above what the server can serve in parallel just
+    # queue. 1 = sequential (legacy behaviour).
+    _MAX_JUDGE_WORKERS = 8
+
     def _judge_pages_with_llm(
         self,
         pages: list[dict[str, Any]],
@@ -197,17 +236,32 @@ class LintMixin:
         user_context: dict[str, Any],
         vault_context: dict[str, Any],
         batch_size: int = 20,
+        max_workers: int = 1,
+        model_name: str | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> dict[str, dict[str, str]]:
         verdicts: dict[str, dict[str, str]] = {}
         if not pages:
             return verdicts
+        cancelled = should_cancel or (lambda: False)
         try:
-            model = create_chat_model(thinking_enabled=False)
+            # One model instance shared across workers. langchain chat models
+            # are stateless per-invoke (each .invoke is an independent HTTP
+            # call), so sharing is safe; the endpoint serialises as needed.
+            # model_name=None falls back to the configured default model.
+            model = create_chat_model(name=model_name, thinking_enabled=False)
         except Exception:
-            logger.exception("vault_lint_llm_init_failed")
+            logger.exception("vault_lint_llm_init_failed model=%s", model_name)
             return verdicts
-        for start in range(0, len(pages), batch_size):
-            batch = pages[start:start + batch_size]
+
+        batches = [
+            (start, pages[start:start + batch_size])
+            for start in range(0, len(pages), batch_size)
+        ]
+        workers = max(1, min(self._MAX_JUDGE_WORKERS, int(max_workers)))
+
+        def _judge_one(start: int, batch: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+            """Score one batch. Pure: returns its verdicts, mutates nothing shared."""
             prompt = self._build_judge_prompt(batch, user_context, vault_context)
             try:
                 response = model.invoke(prompt)
@@ -217,19 +271,47 @@ class LintMixin:
                     else str(response.content)
                 )
             except Exception:
-                logger.exception(
-                    "vault_lint_llm_invoke_failed batch_start=%d",
-                    start,
-                )
-                continue
+                logger.exception("vault_lint_llm_invoke_failed batch_start=%d", start)
+                return {}
             parsed = self._parse_judge_response(raw)
-            verdicts.update(parsed)
             logger.info(
-                "vault_lint_llm_batch start=%d size=%d parsed=%d",
+                "vault_lint_llm_batch start=%d size=%d parsed=%d workers=%d model=%s",
                 start,
                 len(batch),
                 len(parsed),
+                workers,
+                model_name or "default",
             )
+            return parsed
+
+        if workers == 1:
+            # Sequential path — identical to legacy behaviour, plus a cancel
+            # check between batches (stop at next safe boundary).
+            for start, batch in batches:
+                if cancelled():
+                    logger.info("vault_lint_llm_cancelled start=%d", start)
+                    break
+                verdicts.update(_judge_one(start, batch))
+            return verdicts
+
+        # Parallel path: ThreadPoolExecutor work-steals batches across workers.
+        # Per-batch results are merged on the main thread as futures complete,
+        # so the shared `verdicts` dict is never written concurrently. On cancel
+        # we stop scheduling and drop unstarted work; in-flight batches finish.
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="vault-judge") as pool:
+            futures = {pool.submit(_judge_one, start, batch): start for start, batch in batches}
+            for future in as_completed(futures):
+                try:
+                    verdicts.update(future.result())
+                except Exception:
+                    logger.exception(
+                        "vault_lint_llm_batch_failed start=%d", futures[future]
+                    )
+                if cancelled():
+                    logger.info("vault_lint_llm_cancelled (parallel) — dropping unstarted batches")
+                    for f in futures:
+                        f.cancel()
+                    break
         return verdicts
 
     # ------------------------------------------------------------------
@@ -284,6 +366,10 @@ class LintMixin:
         use_llm: bool = False,
         entity_slugs_to_prune: list[str] | None = None,
         concept_slugs_to_prune: list[str] | None = None,
+        judge_batch_size: int = 20,
+        judge_workers: int = 1,
+        judge_model: str | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         sources = self._manifest.get("sources", {}) or {}
         live_source_ids = {str(sid) for sid in sources.keys() if str(sid).strip()}
@@ -424,6 +510,10 @@ class LintMixin:
                     all_candidates,
                     user_context=user_context,
                     vault_context=vault_context,
+                    batch_size=judge_batch_size,
+                    max_workers=judge_workers,
+                    model_name=judge_model,
+                    should_cancel=should_cancel,
                 )
                 for candidate in all_candidates:
                     verdict = verdicts.get(candidate["slug"])
@@ -455,9 +545,12 @@ class LintMixin:
                         else:
                             concept_findings.append(finding)
 
+        # If the judge was cancelled mid-run the verdicts are partial, so never
+        # prune on them — downgrade to a preview-only result.
+        was_cancelled = bool(should_cancel and should_cancel())
         removed_entities = 0
         removed_concepts = 0
-        if not dry_run:
+        if not dry_run and not was_cancelled:
             # Entities: route through dismiss_entity so future ingests skip them.
             for finding in entity_findings:
                 slug = finding["slug"]
@@ -514,6 +607,7 @@ class LintMixin:
         report = {
             "generated_at": _utcnow_iso(),
             "dry_run": bool(dry_run),
+            "cancelled": was_cancelled,
             "entities": {
                 "total_before": entities_total,
                 "flagged": entity_findings,
@@ -525,7 +619,7 @@ class LintMixin:
                 "removed": removed_concepts,
             },
         }
-        if not dry_run:
+        if not dry_run and not was_cancelled:
             report_path = (
                 self.lint_reports_dir / f"{_utcnow().strftime('%Y%m%dT%H%M%SZ')}-prune.json"
             )

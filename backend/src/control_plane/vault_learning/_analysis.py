@@ -110,7 +110,9 @@ class AnalysisMixin:
         }
 
     def _call_vault_model_json(self, prompt: str) -> dict[str, Any]:
-        model_name = str(self.vault_config.cot_model or "").strip()
+        model_name = str(
+            getattr(self, "analysis_model_override", None) or self.vault_config.cot_model or ""
+        ).strip()
         try:
             app_config = get_app_config()
         except Exception:

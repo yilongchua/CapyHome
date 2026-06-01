@@ -64,6 +64,11 @@ class _VaultLearningBase:
         self.search_results_terminal_retention_hours = max(1, int(search_results_terminal_retention_hours))
         self.claim_lease_seconds = max(60, int(claim_lease_seconds))
         self.max_ingest_attempts = max(1, int(max_ingest_attempts))
+        # Optional per-run override for the ingest analysis ("CoT") model. When
+        # set, _call_vault_model_json prefers it over vault_config.cot_model so
+        # callers (e.g. a Run-Ingest request) can pick the model per job. None =
+        # fall back to the configured cot_model / default model.
+        self.analysis_model_override: str | None = None
 
         self.schema_dir = self.vault_root / "00_schema"
         self.raw_dir = self.vault_root / "01_raw"
