@@ -288,6 +288,9 @@ export default function VaultPage() {
     const processed = lintStatus?.processed ?? 0;
     const total = lintStatus?.total ?? 0;
     if (total <= 0) return ""; // before the first batch reports
+    const batchSize = lintStatus?.batch_size && lintStatus.batch_size > 0 ? lintStatus.batch_size : 20;
+    const totalBatches = Math.max(1, Math.ceil(total / batchSize));
+    const currentBatch = Math.min(totalBatches, Math.ceil(processed / batchSize));
     const startedAt = lintStatus?.started_at ? Date.parse(lintStatus.started_at) : NaN;
     let eta = "";
     if (!Number.isNaN(startedAt) && processed > 0 && processed < total) {
@@ -295,7 +298,7 @@ export default function VaultPage() {
       const etaSec = (elapsedSec / processed) * (total - processed);
       eta = ` · ~${formatEtaLabel(etaSec)} remaining`;
     }
-    return `${processed}/${total}${eta}`;
+    return `batch ${currentBatch}/${totalBatches} · ${processed}/${total} pages${eta}`;
   })();
   const ingestRunning = ingestStatus?.status === "running" || startIngest.isPending;
   const cancelRequested = Boolean(ingestStatus?.cancel_requested) || cancelIngest.isPending;
@@ -520,8 +523,7 @@ export default function VaultPage() {
                     >
                       <Loader2Icon className="size-3.5 animate-spin" />
                       <span className="truncate">
-                        · Linting…{lintProgressLabel ? ` ${lintProgressLabel}` : ""} ·{" "}
-                        {lintRunWorkers} worker{lintRunWorkers === 1 ? "" : "s"} · {lintRunModelLabel}
+                        · Linting…{lintProgressLabel ? ` ${lintProgressLabel}` : ""} · {lintRunModelLabel}
                       </span>
                     </span>
                   ) : null}

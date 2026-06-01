@@ -408,6 +408,7 @@ export interface VaultLintJobStatus {
   cancel_requested?: boolean;
   model?: string | null;
   workers?: number;
+  batch_size?: number;
   processed?: number;
   total?: number;
   accepted?: boolean | null;

@@ -122,6 +122,7 @@ class ControlPlaneService:
             "cancel_requested": False,
             "model": None,
             "workers": 0,
+            "batch_size": 0,
             "processed": 0,
             "total": 0,
         }
@@ -2310,6 +2311,7 @@ class ControlPlaneService:
                         "cancel_requested": False,
                         "model": judge_model or "default",
                         "workers": int(judge_workers),
+                        "batch_size": int(judge_batch_size),
                         "processed": 0,
                         "total": 0,
                     }
