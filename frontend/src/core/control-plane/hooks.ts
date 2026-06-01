@@ -371,14 +371,24 @@ export function useCancelVaultLint() {
   });
 }
 
-export function useVaultLintStatus(options?: { enabled?: boolean }) {
+export function useVaultLintStatus(options?: { refetchInterval?: number; enabled?: boolean }) {
   const isVisible = useDocumentVisible();
-  const enabled = options?.enabled ?? false;
   const { data } = useWorkspaceRefreshQuery<VaultLintJobStatus>({
     queryKey: ["control-plane", "vault-lint-status"],
     queryFn: () => getVaultLintStatus(),
-    enabled,
-    refetchInterval: () => (isVisible && enabled ? 3_000 : false),
+    enabled: options?.enabled ?? true,
+    // Derive the cadence from the authoritative server job, not the client
+    // mutation, so an in-flight lint started by another tab / before a reload
+    // is still surfaced. Paused while backgrounded; fast while running, slow
+    // baseline while idle. Mirrors useVaultIngestStatus.
+    refetchInterval: (query) => {
+      if (!isVisible) return false;
+      if (typeof options?.refetchInterval === "number") {
+        return options.refetchInterval;
+      }
+      const status = query.state.data?.status;
+      return status === "running" ? 3_000 : 15_000;
+    },
     refreshDomains: ["vault"],
   });
   return { lintStatus: data ?? null };

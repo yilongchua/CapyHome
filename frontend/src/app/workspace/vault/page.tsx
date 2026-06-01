@@ -270,19 +270,25 @@ export default function VaultPage() {
   const [lintPreview, setLintPreview] = useState<VaultLintResponse | null>(null);
   const lintTotalToRemove =
     (lintPreview?.entities.flagged.length ?? 0) + (lintPreview?.concepts.flagged.length ?? 0);
-  // Live label for an in-flight LLM judge run. Lint is a single blocking
-  // request (no streamed progress), so we surface the active workers + model
-  // from the in-flight mutation's variables. Only shown for the use_llm preview
-  // pass — the slug-commit pass skips the judge entirely.
+  // Poll lint progress unconditionally so a job started by another tab, the
+  // idle auto-run, or before a page reload is still surfaced — the server job
+  // status is authoritative, not this tab's mutation state.
+  const { lintStatus } = useVaultLintStatus();
+  // Live label for an in-flight LLM judge run. "Running" is true when the
+  // server reports a running job OR this tab's use_llm mutation is still
+  // pending (covers the brief window before the first status poll lands).
   const lintJudgeRunning =
-    lintVaultMutation.isPending && Boolean(lintVaultMutation.variables?.useLlm);
-  const lintRunWorkers = lintVaultMutation.variables?.workers ?? selectedLintWorkers;
+    lintStatus?.status === "running" ||
+    (lintVaultMutation.isPending && Boolean(lintVaultMutation.variables?.useLlm));
+  // Prefer this tab's mutation variables (most specific), then fall back to the
+  // server job's reported workers/model so the label is accurate after reload.
+  const lintRunWorkers =
+    lintVaultMutation.variables?.workers ?? lintStatus?.workers ?? selectedLintWorkers;
+  const lintRunModelName = lintVaultMutation.variables?.modelName ?? lintStatus?.model ?? null;
   const lintRunModelLabel =
-    availableModels.find((m) => m.name === lintVaultMutation.variables?.modelName)?.display_name ??
-    lintVaultMutation.variables?.modelName ??
+    availableModels.find((m) => m.name === lintRunModelName)?.display_name ??
+    lintRunModelName ??
     "Default model";
-  // Poll lint progress while the judge runs so the label can show N/total + ETA.
-  const { lintStatus } = useVaultLintStatus({ enabled: lintJudgeRunning });
   const lintProgressLabel = (() => {
     if (!lintJudgeRunning) return "";
     const processed = lintStatus?.processed ?? 0;
