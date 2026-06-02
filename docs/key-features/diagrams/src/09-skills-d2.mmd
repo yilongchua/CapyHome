@@ -1,0 +1,4 @@
+flowchart LR
+    Y[YAML frontmatter<br/>name · when-to-use · metadata] --> SK[(skill file)]
+    MD[Markdown body<br/>workflow · best practices · pitfalls] --> SK
+    SK -->|matched + loaded progressively| CTX[enters context<br/>only when relevant]

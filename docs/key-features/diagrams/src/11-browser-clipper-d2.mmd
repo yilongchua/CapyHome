@@ -1,0 +1,10 @@
+flowchart TD
+    OPEN[you open a page] --> DWELL{stayed > dwell time?<br/>default 10s}
+    DWELL -->|no, bounced| SKIP1[skip]
+    DWELL -->|yes| BLOCK{on blocklist?<br/>Gmail, Outlook, localhost…}
+    BLOCK -->|yes| SKIP2[skip]
+    BLOCK -->|no| DEDUP{clipped in last 24h?}
+    DEDUP -->|yes| SKIP3[skip]
+    DEDUP -->|no| MIN{≥ 200 chars of content?}
+    MIN -->|no| SKIP4[skip thin page]
+    MIN -->|yes| CLIP[clip → queue]

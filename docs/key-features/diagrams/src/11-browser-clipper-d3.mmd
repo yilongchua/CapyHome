@@ -1,0 +1,8 @@
+flowchart LR
+    BC[browser clipper] --> CLIP[POST /api/vault/clip<br/>url · title · markdown · tags]
+    WS[web search · article 06] --> Q[ingestion queue]
+    AR[autoresearch · article 07] --> Q
+    CLIP --> Q
+    Q --> ING[ingest: extract entities/concepts,<br/>compile pages]
+    ING --> V[(Knowledge Vault)]
+    V --> SR[hybrid search · article 02]

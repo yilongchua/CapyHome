@@ -1,0 +1,8 @@
+flowchart LR
+    L[load ledger] --> G[1. Generate<br/>propose sub-questions]
+    G --> D[2. Dedup<br/>drop already-asked]
+    D --> R[3. Research<br/>sub-agent answers each<br/>→ writes to vault]
+    R --> RF[4. Reflect<br/>new answers spawn follow-ups]
+    RF --> S{5. Novelty<br/>decayed?}
+    S -->|no| L
+    S -->|yes| STOP[stop · disable schedule]

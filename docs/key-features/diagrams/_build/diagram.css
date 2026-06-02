@@ -1,0 +1,56 @@
+/* Warm friendly-tech styling for CapyHome key-feature diagrams.
+   Soft drop shadows + rounded nodes give the "a bit more than a plain flowchart" feel,
+   while staying clean and readable for a technical Medium/LinkedIn audience.
+
+   NOTE: do NOT change font-weight here. Mermaid measures node widths with the base
+   font during layout; bolding afterwards makes text overflow its box and clip. */
+
+svg { background: #FBF6EC; }
+
+/* Rounded, soft-shadowed nodes (shadow kept small so it doesn't clip the viewBox) */
+.node rect,
+.node polygon,
+.node circle,
+.node ellipse {
+  rx: 14px;
+  ry: 14px;
+  filter: drop-shadow(0 1.5px 2px rgba(58, 46, 34, 0.18));
+}
+
+/* Subgraph / cluster containers */
+.cluster rect {
+  rx: 18px;
+  ry: 18px;
+  filter: drop-shadow(0 2px 3px rgba(58, 46, 34, 0.10));
+}
+.cluster .cluster-label .nodeLabel,
+.cluster text { fill: #6B4A29; }
+
+/* Thicker, friendlier edges */
+.edgePaths path,
+.flowchart-link,
+.messageLine0,
+.messageLine1 { stroke-width: 2.2px !important; }
+
+.edgeLabel, .edgeLabel p {
+  background-color: #FBF6EC !important;
+  color: #3A2E22;
+}
+
+/* Sequence / state niceties */
+.actor { rx: 12px; ry: 12px; }
+.state-note, .note { filter: drop-shadow(0 1.5px 2px rgba(58, 46, 34, 0.15)); }
+.statediagram-state rect, .statediagram-cluster rect { rx: 14px; ry: 14px; }
+
+/* Mindmap nodes a touch rounder */
+.mindmap-node > rect { rx: 16px; ry: 16px; }
+
+/* Mindmap: replace the default neon-rainbow with a warm 4-tone cycle so it
+   matches the rest of the set. Root = honey; branches cycle cream/sage/honey/tan. */
+.mindmap-node.section-root > circle { fill: #E8B04B !important; stroke: #8B5E34 !important; }
+.mindmap-node.section-0 > rect,  .mindmap-node.section-4 > rect,  .mindmap-node.section-8 > rect  { fill: #FDEFD2 !important; stroke: #C9A66B !important; }
+.mindmap-node.section-1 > rect,  .mindmap-node.section-5 > rect,  .mindmap-node.section-9 > rect  { fill: #DCE8D0 !important; stroke: #7C9A6B !important; }
+.mindmap-node.section-2 > rect,  .mindmap-node.section-6 > rect,  .mindmap-node.section-10 > rect { fill: #FBE9C2 !important; stroke: #C9A66B !important; }
+.mindmap-node.section-3 > rect,  .mindmap-node.section-7 > rect,  .mindmap-node.section-11 > rect { fill: #EAD8BF !important; stroke: #B98C5A !important; }
+.mindmap-node .text-inner-tspan, .mindmap-node text { fill: #3A2E22 !important; }
+path.edge { stroke: #C9A66B !important; stroke-width: 2px !important; }

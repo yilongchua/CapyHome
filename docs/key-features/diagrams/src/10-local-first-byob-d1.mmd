@@ -1,0 +1,8 @@
+flowchart LR
+    CFG[config.yaml] --> R[model router]
+    R --> O[OpenAI]
+    R --> A[Anthropic]
+    R --> G[Gemini]
+    R --> D[DeepSeek]
+    R --> LL[llama.cpp · fully local]
+    R -.->|swap any time,<br/>mix per task| TASK[the task doesn't care]

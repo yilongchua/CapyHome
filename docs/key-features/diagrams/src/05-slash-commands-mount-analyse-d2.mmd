@@ -1,0 +1,5 @@
+flowchart LR
+    U["native folder picker<br/>(real OS dialog)"] --> J[dreamy_mount.json<br/>stores real path]
+    J --> MW[MountFolderMiddleware]
+    MW -->|translates| VP["/mnt/user-data/mounted/*<br/>(what the agent sees)"]
+    VP <-->|transparent| RP[/your/real/path on disk/]

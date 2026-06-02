@@ -1,0 +1,8 @@
+flowchart LR
+    S[search] -->|always markdown| Q[ingestion queue]
+    Q -->|guards: 72h dedup +<br/>must have extracted content| OK[queued]
+    OK --> IDLE{{vault idle?<br/>Off / 15 / 30 min}}
+    IDLE -->|yes| ING[auto-ingest:<br/>compile + tag entities/concepts<br/>trust-score gate]
+    ING --> SETTLE[~60s settle]
+    SETTLE --> LINT[auto-lint:<br/>up to 2 passes, prune low value]
+    LINT --> CACHE[(continuously maintained,<br/>self-pruning cache)]

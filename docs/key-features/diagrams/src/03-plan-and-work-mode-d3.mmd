@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant WM as WorkModeMiddleware
+    participant M as Model
+    loop until no ready todos
+        WM->>WM: pick first ready todo
+        WM->>M: emit phase_started → "execute THIS step only"
+        M-->>WM: step done
+        WM->>WM: mark complete → emit phase_completed
+    end
+    WM->>M: all done → write final summary
+    Note over WM: stuck? (pending but none ready)<br/>emit plan_adapted → ask user to revise

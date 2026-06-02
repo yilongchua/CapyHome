@@ -1,0 +1,10 @@
+flowchart LR
+    A[Raw source<br/>web page / doc / clip] --> B[01_raw/sources<br/>immutable capture]
+    B --> C{Ingestion<br/>2 LLM passes}
+    C -->|Pass 1: analyze| D[entities, concepts,<br/>key claims, summary]
+    C -->|Pass 2: generate| E[clean compiled<br/>markdown page]
+    D --> F[entity pages]
+    D --> G[concept pages]
+    D --> H[synthesis pages<br/>cross-source roll-ups]
+    E --> I[02_compiled/sources]
+    F & G & H & I --> J[(searchable vault)]

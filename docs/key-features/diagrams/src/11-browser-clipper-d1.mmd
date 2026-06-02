@@ -1,0 +1,8 @@
+flowchart LR
+    PG[page you're reading] --> MODE{clip mode}
+    MODE -->|Article/Main| A["extract <article>/<main>"]
+    MODE -->|Selection| S[just your highlight]
+    MODE -->|Full Page| F[whole page]
+    A & S & F --> MD[→ markdown]
+    MD --> Q[POST /api/vault/clip]
+    TRIG["toolbar click · right-click menu ·<br/>Alt+Shift+V / Cmd+Shift+V"] --> MODE

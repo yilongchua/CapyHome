@@ -1,0 +1,5 @@
+flowchart TD
+    CACHE[(local archive)] --> L1[01_raw: original captures preserved]
+    CACHE --> L2[02_compiled: clean indexed pages]
+    CACHE --> L3[deferred embeddings + search index]
+    L1 & L2 & L3 --> ANALYSIS[later analysis is FAST:<br/>reason over a curated local archive,<br/>not re-fetch the web each time]

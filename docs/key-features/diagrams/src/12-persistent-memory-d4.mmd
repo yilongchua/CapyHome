@@ -1,0 +1,7 @@
+flowchart LR
+    OP{control} --> RED[Redact<br/>by id or pattern + PII masking]
+    OP --> FT[Forget thread<br/>purge one conversation's facts]
+    OP --> DF[Delete fact]
+    OP --> CL[Clear scope]
+    RED & FT & DF & CL --> PURGE[updates memory.json<br/>AND purges search index]
+    PURGE --> VER[append-only version log<br/>reason · actor · hash chain]

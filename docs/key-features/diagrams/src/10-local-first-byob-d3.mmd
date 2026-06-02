@@ -1,0 +1,7 @@
+flowchart LR
+    SB["/mnt/user-data/<br/>uploads · workspace · outputs · mounted"]
+    SB --> P{pluggable provisioner}
+    P --> L[Local]
+    P --> Dk[Docker]
+    P --> K[Kubernetes]
+    note["dev on a laptop, deploy to a cluster —<br/>the agent doesn't know the difference"]

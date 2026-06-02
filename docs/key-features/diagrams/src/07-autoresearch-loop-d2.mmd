@@ -1,0 +1,9 @@
+stateDiagram-v2
+    [*] --> pending
+    pending --> in_progress: researcher dispatched
+    in_progress --> answered: vault entry written
+    pending --> duplicate: matches existing question
+    pending --> rejected: off-topic
+    in_progress --> blocked: researcher failed
+    answered --> [*]
+    duplicate --> [*]

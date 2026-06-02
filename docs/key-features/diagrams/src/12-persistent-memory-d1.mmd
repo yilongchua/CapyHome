@@ -1,0 +1,7 @@
+flowchart LR
+    CONV[conversation] --> FILT[strip tool noise +<br/>ephemeral file paths]
+    FILT --> Q[debounced queue<br/>~30s, batched]
+    Q --> EX[LLM fact extraction<br/>+ confidence score]
+    EX --> GATE{confidence ≥ 0.7?}
+    GATE -->|yes| STORE[(memory.json + index)]
+    GATE -->|no| DROP[discard]

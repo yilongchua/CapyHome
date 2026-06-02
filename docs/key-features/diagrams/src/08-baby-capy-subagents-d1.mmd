@@ -1,0 +1,9 @@
+flowchart TD
+    L[Lead Agent<br/>plans & synthesizes]
+    L --> B1[Baby Capy<br/>source-researcher]
+    L --> B2[Baby Capy<br/>bash runner]
+    L --> B3[Baby Capy<br/>comparison-researcher]
+    B1 -->|clean summary| L
+    B2 -->|clean summary| L
+    B3 -->|clean summary| L
+    note["each: own context · own tools · own budget · can't see the others"]

@@ -1,0 +1,5 @@
+flowchart LR
+    NEW[recent generated questions] --> DUP[measure duplicate fraction]
+    DUP --> T{duplicates ≥ threshold<br/>default 70%?}
+    T -->|no, still learning| GO[run another iteration]
+    T -->|yes, well running dry| END[declare sufficient · stop · disable daily job]

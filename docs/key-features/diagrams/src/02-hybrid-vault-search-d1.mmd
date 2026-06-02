@@ -1,0 +1,6 @@
+flowchart LR
+    Q[your query] --> L[BM25 lexical<br/>K1=1.5, B=0.75]
+    Q --> V[vector similarity<br/>embedded chunks]
+    L --> RRF[Reciprocal Rank Fusion<br/>k = 60]
+    V --> RRF
+    RRF --> R[final ranked results<br/>with snippet + why]

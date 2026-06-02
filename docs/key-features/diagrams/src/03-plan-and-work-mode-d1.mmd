@@ -1,0 +1,8 @@
+flowchart LR
+    G[your goal] --> P[Planner LLM<br/>structures the work]
+    P --> E[Evaluator LLM<br/>quality-checks the plan]
+    E -->|revise| P
+    E -->|good| PM[plan.md written]
+    PM --> A{approved?}
+    A -->|you click Execute<br/>or Auto Mode| W[Work Mode<br/>= the Generator]
+    W --> D[deliverables]

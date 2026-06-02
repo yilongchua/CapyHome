@@ -1,0 +1,10 @@
+flowchart LR
+    M["/mount your folder"] --> A["/analyse"]
+    A --> S1[.docs/ markdown mirror]
+    A --> S2[.analyse/ artifacts]
+    S1 & S2 --> R{you review}
+    R -->|looks good| P["/publishdocs"]
+    P --> F[(your real folder)]
+    R -.->|not yet| X[nothing is written]
+    style F fill:#dfd
+    style X fill:#fdd

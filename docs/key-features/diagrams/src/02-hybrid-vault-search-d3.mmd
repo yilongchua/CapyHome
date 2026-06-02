@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant Agent
+    participant Vault as query_knowledge_vault
+    participant Web as web_search
+    Agent->>Vault: "what do I already know about X?"
+    Vault-->>Agent: ranked hits (or nothing)
+    alt vault has it
+        Agent->>Agent: reason over local knowledge
+    else gap
+        Agent->>Web: search the web (then ingest)
+    end

@@ -1,0 +1,13 @@
+flowchart TD
+    subgraph "knowledge_vault/"
+      R["01_raw/sources/<br/>immutable, timestamped captures"]
+      subgraph C["02_compiled/"]
+        C1[sources/]
+        C2[entities/  → automattic.md, jp-morgan.md]
+        C3[concepts/  → employee-autonomy.md]
+        C4[syntheses/  → cross-source summaries]
+      end
+      O["03_ops/<br/>queues · reports · research ledgers"]
+    end
+    R --> C
+    C --> O

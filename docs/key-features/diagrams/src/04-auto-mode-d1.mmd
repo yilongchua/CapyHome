@@ -1,0 +1,10 @@
+flowchart TD
+    P[Planner writes plan.md] --> Q1{Auto Mode?}
+    Q1 -->|off| W1[wait for you to click Execute]
+    Q1 -->|on| AP[auto-approve → hand off now]
+    W1 --> EX[Work Mode executes]
+    AP --> EX
+    EX --> C{clarification needed?}
+    C -->|off| W2[interrupt, wait for you]
+    C -->|on + has recommended| AS["auto-select recommended<br/>tag: [Auto Mode] Selected"]
+    C -->|on + NO recommended| W2

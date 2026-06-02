@@ -1,0 +1,4 @@
+flowchart LR
+    Q[clarification raised] --> R{has a 'recommended'<br/>option?}
+    R -->|yes| A[auto-pick it · keep going · log it]
+    R -->|no — genuinely open| H[leave it in the queue<br/>for the human]

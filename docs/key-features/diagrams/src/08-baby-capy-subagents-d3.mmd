@@ -1,0 +1,5 @@
+flowchart LR
+    R[DAG computes ready_ids] --> F{independent?}
+    F -->|todo-1, -2, -3 ready| PAR["fan out: 3 Baby Capys at once"]
+    PAR --> J[all report back]
+    J --> NEXT[todo-4 was waiting → now ready]

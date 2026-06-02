@@ -1,0 +1,10 @@
+flowchart TD
+    subgraph "Monolith (everyone else)"
+      P[one giant prompt:<br/>every instruction, always] --> M[diluted attention · high cost · every turn]
+    end
+    subgraph "Skills (CapyHome)"
+      T[task arrives] --> Match{which skill fits?}
+      Match -->|ppt| S1[load ppt-generation only]
+      Match -->|data| S2[load data-analysis only]
+      Match -->|none| S0[stay lean]
+    end

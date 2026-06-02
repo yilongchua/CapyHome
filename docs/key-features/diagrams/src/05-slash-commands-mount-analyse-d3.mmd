@@ -1,0 +1,10 @@
+flowchart TD
+    W[walk mounted folder] --> C[convert every file → markdown<br/>text · PDF extract · image OCR · xlsx/docx]
+    C --> D[.docs/ mirror]
+    C --> AN[.analyse/ artifacts]
+    AN --> A1[index.md]
+    AN --> A2[directory_tree.md + critical paths]
+    AN --> A3[file_catalog.md]
+    AN --> A4[failed_files.md]
+    AN --> A5[repo_overview.md ← async LLM job]
+    A1 & A2 & A3 & A4 & A5 --> AG[agent gets a real MAP,<br/>not a blind heap of files]

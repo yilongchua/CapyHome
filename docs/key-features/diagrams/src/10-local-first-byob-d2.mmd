@@ -1,0 +1,15 @@
+flowchart TD
+    subgraph "your machine — nothing leaves"
+      LM[local model<br/>llama.cpp]
+      SX[SearXNG metasearch]
+      OX[Onyx retrieval]
+      C4[crawl4ai extraction]
+      V[(Knowledge Vault)]
+      MEM[(Persistent Memory)]
+    end
+    LM <--> SX & OX & C4
+    SX & OX & C4 --> V
+    LM <--> V & MEM
+    CLOUD[cloud model / service]:::opt
+    LM -.->|only if YOU point it out| CLOUD
+    classDef opt stroke-dasharray: 5 5

@@ -1,0 +1,7 @@
+flowchart TD
+    A[lexical scores:<br/>0–40 unbounded] -.->|incompatible scales| X[naive blend = garbage]
+    B[vector scores:<br/>0–1 cosine] -.-> X
+    A --> C[take RANK in each list]
+    B --> C
+    C --> D["RRF: 1 / (k + rank)"]
+    D --> E[ranks high in either → floats up<br/>ranks high in both → floats to top]

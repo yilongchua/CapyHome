@@ -1,0 +1,6 @@
+flowchart LR
+    AG[agent: web_search tool] -->|POST /search| FA[FastAPI front door :9000]
+    FA --> SX[SearXNG<br/>metasearch]
+    FA --> C4[Crawl4AI<br/>content extraction]
+    FA --> PKG[write markdown package<br/>result.md + result.json]
+    PKG --> AG

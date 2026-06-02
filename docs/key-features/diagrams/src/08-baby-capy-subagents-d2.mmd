@@ -1,0 +1,11 @@
+flowchart LR
+    subgraph "single agent (everyone else)"
+      S1[step1] --> S2[step2] --> S3[…] --> S9[step9<br/>context clogged, $$ up, reasoning muddy]
+    end
+    subgraph "lead + pack (CapyHome)"
+      LL[lead: clean context] --> SUM[3 short summaries]
+      P1[Baby Capy: only its slice]
+      P2[Baby Capy: only its slice]
+      P3[Baby Capy: only its slice]
+      P1 & P2 & P3 --> SUM
+    end

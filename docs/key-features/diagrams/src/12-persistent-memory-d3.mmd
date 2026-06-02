@@ -1,0 +1,7 @@
+flowchart LR
+    MSG[your new message] --> SCORE["score = 0.65·lexical + 0.35·(confidence × decay)"]
+    DECAY[recency decay<br/>~60-day half-life] --> SCORE
+    SCORE --> TH{above relevance bar?}
+    TH -->|yes| INJ[inject — capped at ~2000 tokens]
+    TH -->|no| HOLD[stay out of the prompt]
+    RULES[active behavior rules] --> INJ

@@ -1,0 +1,8 @@
+flowchart LR
+    WS[Web search<br/>see article 06] --> Q[ingestion queue]
+    AR[Autoresearch loop<br/>see article 07] --> Q
+    BC[Browser clipper<br/>see article 11] --> Q
+    Q --> ING[ingest + compile]
+    ING --> V[(Knowledge Vault)]
+    V --> SR[Hybrid search<br/>see article 02]
+    SR --> AG[the agent reasons<br/>over what it knows]
