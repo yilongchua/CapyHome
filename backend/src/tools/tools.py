@@ -53,7 +53,6 @@ _COMMUNITY_TOOL_MODES: dict[str, frozenset[str]] = {
     "bash": frozenset({"work", "auto"}),
     "write_file": frozenset({"work", "auto"}),
     "str_replace": frozenset({"work", "auto"}),
-    "comfyui_generate": frozenset({"work", "auto"}),
 }
 
 SUBAGENT_TOOLS = [
@@ -79,7 +78,7 @@ def _community_tool_allowed_in_mode(tool_name: str, mode: str | None) -> bool:
 def _get_community_tool_enabled(tool_name: str) -> bool:
     """Return the enabled state for a community tool from extensions_config.json.
 
-    Defaults to True when no override exists (backwards compatible).
+    communityTools overrides apply; absent entry → True (backwards compatible).
     """
     try:
         from src.config.extensions_config import ExtensionsConfig
@@ -90,6 +89,8 @@ def _get_community_tool_enabled(tool_name: str) -> bool:
     except Exception as exc:
         logger.warning("Could not read community tool state for '%s': %s", tool_name, exc)
         return True
+
+
 
 
 def get_available_tools(

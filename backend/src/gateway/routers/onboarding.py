@@ -75,14 +75,6 @@ class TestLlmResponse(BaseModel):
     error: str | None = None
 
 
-class TestComfyuiRequest(BaseModel):
-    base_url: str = Field(..., description="ComfyUI base URL (e.g. http://127.0.0.1:8188)")
-
-
-class TestComfyuiResponse(BaseModel):
-    ok: bool
-    error: str | None = None
-
 
 class TestGenericRequest(BaseModel):
     url: str = Field(..., description="URL to health-check via GET")
@@ -353,31 +345,6 @@ async def test_llm_endpoint(request: TestLlmRequest) -> TestLlmResponse:
         return TestLlmResponse(ok=False, error=f"HTTP {exc.response.status_code}: {exc.response.text[:200]}")
     except Exception as exc:
         return TestLlmResponse(ok=False, error=str(exc))
-
-
-@router.post(
-    "/test-comfyui",
-    response_model=TestComfyuiResponse,
-    summary="Test ComfyUI Endpoint",
-    description="Hit the /system_stats endpoint to verify a ComfyUI server is reachable.",
-)
-async def test_comfyui_endpoint(request: TestComfyuiRequest) -> TestComfyuiResponse:
-    base_url = request.base_url.rstrip("/")
-    health_url = f"{base_url}/system_stats"
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(health_url)
-            response.raise_for_status()
-        return TestComfyuiResponse(ok=True)
-    except httpx.TimeoutException:
-        return TestComfyuiResponse(ok=False, error="Connection timed out")
-    except httpx.ConnectError:
-        return TestComfyuiResponse(ok=False, error="Connection refused — is the ComfyUI server running?")
-    except httpx.HTTPStatusError as exc:
-        return TestComfyuiResponse(ok=False, error=f"HTTP {exc.response.status_code}: {exc.response.text[:200]}")
-    except Exception as exc:
-        return TestComfyuiResponse(ok=False, error=str(exc))
 
 
 @router.post(

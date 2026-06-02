@@ -32,12 +32,6 @@ COMMUNITY_TOOL_REGISTRY: dict[str, CommunityToolEntry] = {
         "description": "Persist useful answers or curated notes into the local knowledge vault.",
         "source": "builtin",
     },
-    "comfyui_generate": {
-        "import_path": "src.community.comfyui.tools:comfyui_generate_tool",
-        "display_name": "ComfyUI Generate",
-        "description": "Submit image/video generation requests to a local ComfyUI server.",
-        "source": "config",
-    },
     "image_search": {
         "import_path": "src.community.image_search.tools:image_search_tool",
         "display_name": "Image Search",

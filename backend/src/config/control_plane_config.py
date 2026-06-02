@@ -53,7 +53,6 @@ class ToolBackendEndpointConfig(BaseModel):
 
 
 class ToolBackendsConfig(BaseModel):
-    comfyui: ToolBackendEndpointConfig = Field(default_factory=ToolBackendEndpointConfig)
     model_config = ConfigDict(extra="allow")
 
 

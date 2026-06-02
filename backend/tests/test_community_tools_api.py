@@ -17,11 +17,11 @@ def test_registry_has_expected_tools():
     expected = {
         "query_knowledge_vault",
         "save_to_knowledge_vault",
-        "comfyui_generate",
         "image_search",
     }
     assert set(COMMUNITY_TOOL_REGISTRY.keys()) == expected
     assert "web_search" not in COMMUNITY_TOOL_REGISTRY, "web_search is now an MCP tool, not a builtin community tool"
+    assert "comfyui_generate" not in COMMUNITY_TOOL_REGISTRY, "comfyui_generate is now a toolBackend tool, not a community tool"
 
 
 def test_registry_entries_have_required_fields():
@@ -39,7 +39,7 @@ def test_builtin_tools_are_marked_correctly():
 
 
 def test_config_tools_are_marked_correctly():
-    config_expected = {"comfyui_generate", "image_search"}
+    config_expected = {"image_search"}
     for name in config_expected:
         assert COMMUNITY_TOOL_REGISTRY[name]["source"] == "config", f"{name} should be 'config'"
 
@@ -117,10 +117,10 @@ def test_update_unknown_tool_returns_404(gateway_client):
 
 def test_list_reflects_saved_override(gateway_client):
     client, _ = gateway_client
-    client.put("/api/tools/community/comfyui_generate", json={"enabled": False})
+    client.put("/api/tools/community/image_search", json={"enabled": False})
     resp = client.get("/api/tools/community")
     data = resp.json()
-    tool = next(t for t in data["tools"] if t["name"] == "comfyui_generate")
+    tool = next(t for t in data["tools"] if t["name"] == "image_search")
     assert tool["enabled"] is False
 
 

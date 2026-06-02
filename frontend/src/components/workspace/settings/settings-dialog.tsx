@@ -10,7 +10,6 @@ import {
   WrenchIcon,
   BotIcon,
   GlobeIcon,
-  ImageIcon,
   PuzzleIcon,
   Share2Icon,
   LibraryIcon,
@@ -30,7 +29,6 @@ import { AppearanceSettingsPage } from "@/components/workspace/settings/appearan
 import { AutoresearchCleanupSettingsPage } from "@/components/workspace/settings/autoresearch-cleanup-settings-page";
 import { BrowserExtensionSettingsPage } from "@/components/workspace/settings/browser-extension-settings-page";
 import { BrowserSettingsPage } from "@/components/workspace/settings/browser-settings-page";
-import { ComfyuiSettingsPage } from "@/components/workspace/settings/comfyui-settings-page";
 import { EmbeddingSettingsPage } from "@/components/workspace/settings/embedding-settings-page";
 import { GeneralSettingsPage } from "@/components/workspace/settings/general-settings-page";
 import { KnowledgeVaultSettingsPage } from "@/components/workspace/settings/knowledge-vault-settings-page";
@@ -55,7 +53,6 @@ type SettingsSection =
   | "embedding"
   | "browser"
   | "browserExtension"
-  | "comfyui"
   | "about";
 
 type SettingsDialogProps = React.ComponentProps<typeof Dialog> & {
@@ -126,7 +123,6 @@ export function SettingsDialog(props: SettingsDialogProps) {
         label: t.settings.sections.browserExtension,
         icon: PuzzleIcon,
       },
-      { id: "comfyui", label: t.settings.sections.comfyui, icon: ImageIcon },
       { id: "about", label: t.settings.sections.about, icon: InfoIcon },
     ],
     [
@@ -142,7 +138,6 @@ export function SettingsDialog(props: SettingsDialogProps) {
       t.settings.sections.embedding,
       t.settings.sections.browser,
       t.settings.sections.browserExtension,
-      t.settings.sections.comfyui,
       t.settings.sections.about,
     ],
   );
@@ -202,7 +197,6 @@ export function SettingsDialog(props: SettingsDialogProps) {
               {activeSection === "browserExtension" && (
                 <BrowserExtensionSettingsPage />
               )}
-              {activeSection === "comfyui" && <ComfyuiSettingsPage />}
               {activeSection === "about" && <AboutSettingsPage />}
             </div>
           </ScrollArea>

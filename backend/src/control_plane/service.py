@@ -2837,12 +2837,6 @@ class ControlPlaneService:
     def _integration_service_catalog(self) -> list[dict[str, str]]:
         return [
             {
-                "id": "comfyui",
-                "label": "ComfyUI",
-                "start_command": "start-comfyui",
-                "stop_command": "stop-comfyui",
-            },
-            {
                 "id": "websearch",
                 "label": "WebSearch",
                 "start_command": "start-websearch",
@@ -2864,21 +2858,6 @@ class ControlPlaneService:
                 "headers": {},
                 "timeout": 8.0,
                 "can_start": False,
-            }
-        )
-
-        comfyui_cfg = app_config.tool_backends.comfyui
-        comfyui_base_url = comfyui_cfg.base_url or os.getenv("COMFYUI_BASE_URL", "http://localhost:8188")
-        comfyui_health_path = comfyui_cfg.health_path or "/system_stats"
-        services.append(
-            {
-                "id": "comfyui",
-                "label": "ComfyUI",
-                "base_url": comfyui_base_url,
-                "health_path": comfyui_health_path,
-                "headers": comfyui_cfg.headers,
-                "timeout": max(1.0, float(comfyui_cfg.timeout_seconds)),
-                "can_start": True,
             }
         )
 
@@ -3061,8 +3040,6 @@ class ControlPlaneService:
         return items
 
     def _docker_keywords_for_service(self, service_id: str) -> list[str]:
-        if service_id == "comfyui":
-            return ["comfyui"]
         if service_id == "websearch":
             return ["websearch"]
         return []
@@ -3361,26 +3338,6 @@ class ControlPlaneService:
             payload["source"] = "runtime"
             scheduler_jobs.append(payload)
 
-        tool_backends = {}
-        for name in ["comfyui"]:
-            backend = getattr(app_config.tool_backends, name)
-            tool_backends[name] = {
-                "enabled": backend.enabled,
-                "base_url": backend.base_url,
-                "secrets_ready": all(
-                    (not secret.required) or bool(os.getenv(secret.env_var))
-                    for secret in backend.secret_refs
-                ),
-                "health": self._check_http_health(
-                    base_url=backend.base_url,
-                    health_path=backend.health_path,
-                    headers=backend.headers,
-                    timeout=backend.timeout_seconds,
-                )
-                if backend.enabled
-                else {"healthy": False, "reason": "disabled"},
-            }
-
         mcp_servers = {}
         for name, server in extensions.mcp_servers.items():
             mcp_servers[name] = {
@@ -3401,7 +3358,6 @@ class ControlPlaneService:
         return {
             "generated_at": utcnow(),
             "channels": channel_service.get_status() if channel_service is not None else {"service_running": False, "channels": {}},
-            "tool_backends": tool_backends,
             "mcp_servers": mcp_servers,
             "folder_sync_targets": [target.model_dump(mode="json") for target in app_config.pipelines.folder_sync_targets],
             "audit_log": [event.model_dump(mode="json") for event in snapshot.audit_log[-50:]],

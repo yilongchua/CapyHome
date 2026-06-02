@@ -8,6 +8,7 @@ Notes on the surface area:
   `config.yaml`'s `tools:` section.
 - web_search has been removed from BUILTIN_TOOLS; it is now registered as an
   MCP server in extensions_config.json so users can add/remove it themselves.
+- comfyui_generate has been removed entirely; a new ComfyUI MCP server is being built.
 - `internal_tools.json` consolidates the first-party builtins + sandbox tools.
   Community tools stay in config.yaml (Phase 3 scope).
 - Both paths feed into `get_available_tools`; community tools come from
@@ -80,8 +81,6 @@ def test_get_available_tools_flag_on_keeps_all_legacy_surface() -> None:
     config = get_app_config()
     config.json_driven_tools = True
     tools = _names(get_available_tools(include_mcp=False, subagent_enabled=False))
-    # First-party builtins, community tools (from config.yaml), and sandbox tools
-    # should all appear in the JSON-driven catalog.
     for legacy in BUILTIN_TOOLS:
         assert legacy.name in tools, f"Missing in JSON path: {legacy.name}"
     assert SANDBOX_NAMES.issubset(tools)
