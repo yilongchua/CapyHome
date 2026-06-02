@@ -324,6 +324,8 @@ export interface Translations {
       darkDescription: string;
       capyhome: string;
       capyHomeDescription: string;
+      accenture: string;
+      accentureDescription: string;
       languageTitle: string;
       languageDescription: string;
     };

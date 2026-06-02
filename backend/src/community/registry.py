@@ -20,12 +20,6 @@ class CommunityToolEntry(TypedDict):
 
 
 COMMUNITY_TOOL_REGISTRY: dict[str, CommunityToolEntry] = {
-    "web_search": {
-        "import_path": "src.community.web_search.tools:web_search_tool",
-        "display_name": "Web Search",
-        "description": "Search the web via a local SearXNG-compatible backend.",
-        "source": "builtin",
-    },
     "query_knowledge_vault": {
         "import_path": "src.community.knowledge_vault_search.tool:query_knowledge_vault_tool",
         "display_name": "Knowledge Vault Search",

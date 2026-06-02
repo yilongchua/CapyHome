@@ -1,5 +1,6 @@
 "use client";
 
+import { useThemeAssets } from "@/hooks/use-theme-assets";
 import { cn } from "@/lib/utils";
 
 export function Welcome({
@@ -9,6 +10,7 @@ export function Welcome({
   className?: string;
   mode?: "work" | "plan";
 }) {
+  const asset = useThemeAssets();
   return (
     <div
       className={cn(
@@ -18,7 +20,7 @@ export function Welcome({
     >
       <div className="text-2xl font-bold">
         <div className="flex items-center gap-2">
-          <img src="/CapyHome/Logo.webp" alt="CapyHome logo" className="size-8" />
+          <img src={asset("Logo.webp")} alt="CapyHome logo" className="size-8" />
           <span>Welcome to CapyHome!</span>
         </div>
       </div>

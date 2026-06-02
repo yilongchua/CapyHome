@@ -112,7 +112,7 @@ def get_available_tools(
         mode: Optional runtime mode (`plan`, `work`, or `auto`). Selects between
             `internal_tools_plan.json` and `internal_tools_work.json` so the
             LLM-facing tool descriptions can be tailored per mode and so
-            mode-scoped community tools (web_search, knowledge_vault, etc.) are
+            mode-scoped community tools (knowledge_vault, etc.) are
             included only in the appropriate mode. Defaults to work when unset.
 
     Returns:
@@ -257,9 +257,9 @@ def _build_builtin_tools_from_json(*, subagent_enabled: bool, supports_vision: b
         except Exception:
             logger.exception("Skipping tool '%s' — handler resolution failed", defn.name)
 
-    # Carry over BUILTIN_TOOLS entries (community tools like web_search,
-    # knowledge_vault_*) that have no JSON entry, but only when the active
-    # mode admits them per _COMMUNITY_TOOL_MODES.
+    # Carry over BUILTIN_TOOLS entries (community tools like knowledge_vault_*)
+    # that have no JSON entry, but only when the active mode admits them per
+    # _COMMUNITY_TOOL_MODES.
     for tool in BUILTIN_TOOLS:
         if tool.name in json_names:
             continue

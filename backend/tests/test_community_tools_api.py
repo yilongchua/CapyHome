@@ -15,13 +15,13 @@ from src.community.registry import COMMUNITY_TOOL_REGISTRY
 
 def test_registry_has_expected_tools():
     expected = {
-        "web_search",
         "query_knowledge_vault",
         "save_to_knowledge_vault",
         "comfyui_generate",
         "image_search",
     }
     assert set(COMMUNITY_TOOL_REGISTRY.keys()) == expected
+    assert "web_search" not in COMMUNITY_TOOL_REGISTRY, "web_search is now an MCP tool, not a builtin community tool"
 
 
 def test_registry_entries_have_required_fields():
@@ -33,7 +33,7 @@ def test_registry_entries_have_required_fields():
 
 
 def test_builtin_tools_are_marked_correctly():
-    builtin_expected = {"web_search", "query_knowledge_vault", "save_to_knowledge_vault"}
+    builtin_expected = {"query_knowledge_vault", "save_to_knowledge_vault"}
     for name in builtin_expected:
         assert COMMUNITY_TOOL_REGISTRY[name]["source"] == "builtin", f"{name} should be 'builtin'"
 
@@ -91,20 +91,20 @@ def test_list_community_tools_defaults_all_enabled(gateway_client):
 
 def test_update_community_tool_disables_and_persists(gateway_client):
     client, config_path = gateway_client
-    resp = client.put("/api/tools/community/web_search", json={"enabled": False})
+    resp = client.put("/api/tools/community/query_knowledge_vault", json={"enabled": False})
     assert resp.status_code == 200
     data = resp.json()
     assert data["enabled"] is False
 
     # Verify persisted to file
     saved = json.loads(config_path.read_text())
-    assert saved["communityTools"]["web_search"]["enabled"] is False
+    assert saved["communityTools"]["query_knowledge_vault"]["enabled"] is False
 
 
 def test_update_community_tool_re_enables(gateway_client):
     client, _ = gateway_client
-    client.put("/api/tools/community/web_search", json={"enabled": False})
-    resp = client.put("/api/tools/community/web_search", json={"enabled": True})
+    client.put("/api/tools/community/query_knowledge_vault", json={"enabled": False})
+    resp = client.put("/api/tools/community/query_knowledge_vault", json={"enabled": True})
     assert resp.status_code == 200
     assert resp.json()["enabled"] is True
 
@@ -128,14 +128,11 @@ def test_list_reflects_saved_override(gateway_client):
 
 
 def test_get_available_tools_respects_community_override(tmp_path):
-    """Disabling web_search via communityTools should exclude it from the tool list."""
+    """Disabling query_knowledge_vault via communityTools should exclude it from the tool list."""
     config_file = tmp_path / "extensions_config.json"
     config_file.write_text(
-        json.dumps({"mcpServers": {}, "skills": {}, "communityTools": {"web_search": {"enabled": False}}})
+        json.dumps({"mcpServers": {}, "skills": {}, "communityTools": {"query_knowledge_vault": {"enabled": False}}})
     )
-
-    mock_tool = MagicMock()
-    mock_tool.name = "web_search"
 
     mock_app_config = MagicMock()
     mock_app_config.tools = []
@@ -145,15 +142,13 @@ def test_get_available_tools_respects_community_override(tmp_path):
     with (
         patch("src.tools.tools.get_app_config", return_value=mock_app_config),
         patch("src.config.extensions_config.ExtensionsConfig.resolve_config_path", return_value=config_file),
-        patch("src.community.web_search.web_search_tool", mock_tool),
-        patch("src.tools.tools.web_search_tool", mock_tool),
     ):
         from src.tools.tools import get_available_tools
 
         tools = get_available_tools(include_mcp=False)
 
     tool_names = [t.name for t in tools]
-    assert "web_search" not in tool_names
+    assert "query_knowledge_vault" not in tool_names
 
 
 def test_get_available_tools_builtin_enabled_by_default(tmp_path):
@@ -179,5 +174,6 @@ def test_get_available_tools_builtin_enabled_by_default(tmp_path):
 
     tool_names = [t.name for t in tools]
     # All builtin tools should be present when not overridden
-    for name in ("web_search", "query_knowledge_vault", "save_to_knowledge_vault"):
+    for name in ("query_knowledge_vault", "save_to_knowledge_vault"):
         assert name in tool_names, f"Expected {name} in default tool list"
+    assert "web_search" not in tool_names, "web_search is now an MCP tool and must not appear in BUILTIN_TOOLS"

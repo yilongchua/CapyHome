@@ -15,34 +15,19 @@ import {
 import { useI18n } from "@/core/i18n/hooks";
 import { useLocalSettings } from "@/core/settings";
 import { env } from "@/env";
+import { useThemeAssets } from "@/hooks/use-theme-assets";
 import { cn } from "@/lib/utils";
-
-const DEFAULT_ICON = {
-  src: "/CapyHome/Logo.webp",
-  width: 32,
-  height: 32,
-  alt: "CapyHome",
-};
-
-const PLAN_MODE_ICON = {
-  src: "/CapyHome/plan-mode-icon.webp",
-  width: 297,
-  height: 223,
-  alt: "Plan mode",
-};
-
-const WORK_MODE_ICON = {
-  src: "/CapyHome/work-mode-icon.webp",
-  width: 342,
-  height: 204,
-  alt: "Work mode",
-};
 
 export function WorkspaceHeader({ className }: { className?: string }) {
   const { t } = useI18n();
   const { state } = useSidebar();
   const pathname = usePathname();
   const [settings] = useLocalSettings();
+  const asset = useThemeAssets();
+
+  const DEFAULT_ICON = { src: asset("Logo.webp"), width: 32, height: 32, alt: "CapyHome" };
+  const PLAN_MODE_ICON = { src: asset("plan-mode-icon.webp"), width: 297, height: 223, alt: "Plan mode" };
+  const WORK_MODE_ICON = { src: asset("work-mode-icon.webp"), width: 342, height: 204, alt: "Work mode" };
 
   const isNewChat = pathname === "/workspace/chats/new";
   const navIcon = isNewChat

@@ -326,6 +326,40 @@
   --sidebar-ring: oklch(0.55 0.08 55);
 }
 
+.accenture {
+  --background: oklch(0.99 0.005 307);
+  --foreground: oklch(0.15 0.02 307);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.15 0.02 307);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.15 0.02 307);
+  --primary: oklch(0.43 0.31 307);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.93 0.04 307);
+  --secondary-foreground: oklch(0.15 0.02 307);
+  --muted: oklch(0.96 0.02 307);
+  --muted-foreground: oklch(0.45 0.06 307);
+  --accent: oklch(0.9 0.05 307);
+  --accent-foreground: oklch(0.15 0.02 307);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.68 0.18 307);
+  --input: oklch(0.72 0.15 307);
+  --ring: oklch(0.43 0.31 307);
+  --chart-1: oklch(0.43 0.31 307);
+  --chart-2: oklch(0.55 0.22 307);
+  --chart-3: oklch(0.65 0.15 307);
+  --chart-4: oklch(0.34 0.26 307);
+  --chart-5: oklch(0.75 0.1 307);
+  --sidebar: oklch(0.96 0.025 307);
+  --sidebar-foreground: oklch(0.15 0.02 307);
+  --sidebar-primary: oklch(0.43 0.31 307);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.91 0.05 307);
+  --sidebar-accent-foreground: oklch(0.15 0.02 307);
+  --sidebar-border: oklch(0.68 0.18 307);
+  --sidebar-ring: oklch(0.43 0.31 307);
+}
+
 /* CapyHome theme: thicker dark-brown lines + framed UI */
 .capyhome .border { border-width: 2px; }
 .capyhome .border-t { border-top-width: 2px; }

@@ -35,6 +35,7 @@ import {
 import { useI18n } from "@/core/i18n/hooks";
 import { hasPendingToolResultsInCurrentTurn } from "@/core/messages/utils";
 import { useModels } from "@/core/models/hooks";
+import { useThemeAssets } from "@/hooks/use-theme-assets";
 import { useLocalSettings } from "@/core/settings";
 import {
   clearPendingChatLaunchPayload,
@@ -191,6 +192,7 @@ function ChatPageContent({
   const { t } = useI18n();
   const router = useRouter();
   const [settings, setSettings] = useLocalSettings();
+  const asset = useThemeAssets();
   const selectedModelName =
     typeof settings.context.model_name === "string"
       ? settings.context.model_name
@@ -919,8 +921,8 @@ function ChatPageContent({
                     ? {
                         backgroundImage:
                           settings.context.mode === "plan"
-                            ? "url('/CapyHome/plan-mode-chat.webp')"
-                            : "url('/CapyHome/work-mode-chat.webp')",
+                            ? `url('${asset("plan-mode-chat.webp")}')`
+                            : `url('${asset("work-mode-chat.webp")}')`,
                         backgroundSize: "cover",
                         backgroundPosition:
                           settings.context.mode === "plan"

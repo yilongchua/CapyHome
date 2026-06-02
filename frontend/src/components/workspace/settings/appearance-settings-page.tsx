@@ -9,17 +9,31 @@ import { cn } from "@/lib/utils";
 
 import { SettingsSection } from "./settings-section";
 
-type ThemeMode = "light" | "dark" | "capyhome";
+type ThemeMode = "light" | "dark" | "capyhome" | "accenture";
 
 function CapyHomeIcon({ className }: SVGProps<SVGSVGElement>) {
   return (
-     
     <img
       src="/icon.png"
       alt=""
       aria-hidden
       className={cn("object-contain", className)}
     />
+  );
+}
+
+function AccentureIcon({ className }: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+      className={cn("size-4", className)}
+    >
+      <circle cx="12" cy="12" r="10" fill="#A100F2" />
+      <path d="M8 16 L12 8 L16 16" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <line x1="9.5" y1="13" x2="14.5" y2="13" stroke="white" strokeWidth="2" strokeLinecap="round" />
+    </svg>
   );
 }
 
@@ -48,8 +62,16 @@ export function AppearanceSettingsPage() {
         description: t.settings.appearance.capyHomeDescription,
         icon: CapyHomeIcon,
       },
+      {
+        id: "accenture" as const,
+        label: t.settings.appearance.accenture,
+        description: t.settings.appearance.accentureDescription,
+        icon: AccentureIcon,
+      },
     ],
     [
+      t.settings.appearance.accenture,
+      t.settings.appearance.accentureDescription,
       t.settings.appearance.capyhome,
       t.settings.appearance.capyHomeDescription,
       t.settings.appearance.dark,
@@ -103,13 +125,17 @@ function ThemePreviewCard({
       ? "border-neutral-800 bg-neutral-900 text-neutral-200"
       : mode === "capyhome"
         ? "border-amber-900/30 bg-[oklch(0.945_0.035_75)] text-[oklch(0.28_0.045_55)]"
-        : "border-slate-200 bg-white text-slate-900";
+        : mode === "accenture"
+          ? "border-purple-300 bg-white text-[oklch(0.15_0.02_307)]"
+          : "border-slate-200 bg-white text-slate-900";
   const dotClass =
     mode === "dark"
       ? "bg-emerald-400"
       : mode === "capyhome"
         ? "bg-amber-700"
-        : "bg-emerald-500";
+        : mode === "accenture"
+          ? "bg-[#A100F2]"
+          : "bg-emerald-500";
   return (
     <button
       type="button"

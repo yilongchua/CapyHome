@@ -36,7 +36,7 @@ export default async function RootLayout({
           defaultTheme="capyhome"
           enableSystem={false}
           disableTransitionOnChange
-          themes={["light", "dark", "capyhome"]}
+          themes={["light", "dark", "capyhome", "accenture"]}
         >
           <I18nProvider initialLocale={locale}>{children}</I18nProvider>
         </ThemeProvider>

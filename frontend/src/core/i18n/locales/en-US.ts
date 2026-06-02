@@ -380,6 +380,8 @@ export const enUS: Translations = {
       darkDescription: "Dim palette that reduces glare for focus.",
       capyhome: "CapyHome",
       capyHomeDescription: "Warm earthy browns inspired by the capyhome.",
+      accenture: "Accenture",
+      accentureDescription: "Clean purple and white inspired by Accenture.",
       languageTitle: "Language",
       languageDescription: "Switch between languages.",
     },
