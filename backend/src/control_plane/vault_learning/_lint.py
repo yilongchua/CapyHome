@@ -337,6 +337,10 @@ class LintMixin:
 
         def _judge_one(start: int, batch: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
             """Score one batch. Pure: returns its verdicts, mutates nothing shared."""
+            # Bail immediately if cancel was requested before this worker started
+            # its HTTP call — avoids sending a batch we'll discard anyway.
+            if cancelled():
+                return {}
             prompt = self._build_judge_prompt(batch, user_context, vault_context, strict=strict)
             try:
                 response = model.invoke(prompt)
@@ -360,8 +364,7 @@ class LintMixin:
             return parsed
 
         if workers == 1:
-            # Sequential path — identical to legacy behaviour, plus a cancel
-            # check between batches (stop at next safe boundary).
+            # Sequential path — cancel check before every batch.
             for start, batch in batches:
                 if cancelled():
                     logger.info("vault_lint_llm_cancelled start=%d", start)
@@ -370,11 +373,11 @@ class LintMixin:
                 _report(len(batch))
             return verdicts
 
-        # Parallel path: ThreadPoolExecutor work-steals batches across workers.
-        # Per-batch results are merged on the main thread as futures complete,
-        # so the shared `verdicts` dict is never written concurrently. On cancel
-        # we stop scheduling and drop unstarted work; in-flight batches finish.
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="vault-judge") as pool:
+        # Parallel path. We manage the executor manually (not via context manager)
+        # so that shutdown(wait=False) can abandon in-flight LLM calls immediately
+        # on cancel instead of blocking until all 3 workers finish their HTTP calls.
+        pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="vault-judge")
+        try:
             futures = {pool.submit(_judge_one, start, batch): start for start, batch in batches}
             for future in as_completed(futures):
                 try:
@@ -387,10 +390,14 @@ class LintMixin:
                         "vault_lint_llm_batch_failed start=%d", futures[future]
                     )
                 if cancelled():
-                    logger.info("vault_lint_llm_cancelled (parallel) — dropping unstarted batches")
+                    logger.info("vault_lint_llm_cancelled (parallel) — abandoning workers")
                     for f in futures:
                         f.cancel()
                     break
+        finally:
+            # wait=False: don't block for in-flight LLM calls to return.
+            # cancel_futures=True: drop any queued-but-not-started batches.
+            pool.shutdown(wait=False, cancel_futures=True)
         return verdicts
 
     # ------------------------------------------------------------------
