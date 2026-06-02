@@ -35,7 +35,6 @@ import type {
   VaultFileResponse,
   VaultFileWriteRequest,
   VaultIngestStatusResponse,
-  VaultLintResponse,
   VaultEntityBrowserResponse,
   VaultEntityDismissalsResponse,
   VaultEntityDismissRequest,
@@ -373,19 +372,16 @@ export async function cancelVaultIngest(): Promise<VaultIngestStatusResponse> {
 }
 
 export async function lintVault(options?: {
-  dryRun?: boolean;
   useLlm?: boolean;
-  entitySlugs?: string[];
-  conceptSlugs?: string[];
+  strict?: boolean;
   workers?: number;
   modelName?: string | null;
-}): Promise<VaultLintResponse> {
+}): Promise<VaultLintJobStatus> {
   const body: Record<string, unknown> = {
-    dry_run: options?.dryRun ?? true,
+    dry_run: false,
     use_llm: options?.useLlm ?? false,
+    strict: options?.strict ?? false,
   };
-  if (options?.entitySlugs !== undefined) body.entity_slugs = options.entitySlugs;
-  if (options?.conceptSlugs !== undefined) body.concept_slugs = options.conceptSlugs;
   if (options?.workers !== undefined) {
     body.workers = Math.max(1, Math.min(8, Math.trunc(options.workers)));
   }
@@ -398,7 +394,7 @@ export async function lintVault(options?: {
   if (!response.ok) {
     await parseError(response, `Failed to lint vault: ${response.statusText}`);
   }
-  return response.json() as Promise<VaultLintResponse>;
+  return response.json() as Promise<VaultLintJobStatus>;
 }
 
 export interface VaultLintJobStatus {
@@ -411,6 +407,13 @@ export interface VaultLintJobStatus {
   batch_size?: number;
   processed?: number;
   total?: number;
+  strict?: boolean;
+  last_entities_flagged?: number | null;
+  last_concepts_flagged?: number | null;
+  last_entities_removed?: number | null;
+  last_concepts_removed?: number | null;
+  last_dry_run?: boolean | null;
+  last_sample?: { slug: string; kind: string; reason: string }[];
   accepted?: boolean | null;
   message?: string | null;
 }

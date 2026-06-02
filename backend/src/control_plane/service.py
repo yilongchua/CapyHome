@@ -110,11 +110,12 @@ class ControlPlaneService:
         self._vault_ingest_job: dict[str, Any] = self._new_vault_ingest_job_state()
         self._vault_ingest_lock = threading.Lock()
         self._vault_ingest_logger: logging.Logger | None = None
-        # Lint (LLM-judge) run tracking + cooperative cancellation. Lint is a
-        # single blocking request, so the cancel endpoint sets this Event and
-        # the judge loop checks it between batches (stop at next safe boundary).
+        # Lint run tracking. The lint runs in a daemon thread (vault router).
+        # Cancel sets the Event (checked between batches) AND raises SystemExit
+        # in the lint thread via ctypes for an immediate hard stop.
         self._vault_lint_lock = threading.Lock()
         self._vault_lint_cancel = threading.Event()
+        self._vault_lint_thread: threading.Thread | None = None
         self._vault_lint_job: dict[str, Any] = {
             "status": "idle",
             "started_at": None,
@@ -125,6 +126,7 @@ class ControlPlaneService:
             "batch_size": 0,
             "processed": 0,
             "total": 0,
+            "strict": False,
         }
         # Process-cached read-only vault manager (see _cached_read_vault_manager).
         self._vault_read_manager: VaultLearningManager | None = None
@@ -2279,6 +2281,8 @@ class ControlPlaneService:
         *,
         dry_run: bool = True,
         use_llm: bool = False,
+        strict: bool = False,
+        judge_limit: int | None = None,
         entity_slugs: list[str] | None = None,
         concept_slugs: list[str] | None = None,
         judge_batch_size: int = 20,
@@ -2308,6 +2312,11 @@ class ControlPlaneService:
         track = use_llm and entity_slugs is None and concept_slugs is None
         if track:
             self._vault_lint_cancel.clear()
+            # Thread reference is set by the router before calling this method
+            # (vault.py: service._vault_lint_thread = t). Do NOT override with
+            # current_thread() here — for background runs that would capture the
+            # correct daemon thread, but for any direct/inline call it would
+            # capture the HTTP worker thread and cancel would kill it instead.
             with self._vault_lint_lock:
                 self._vault_lint_job.update(
                     {
@@ -2320,6 +2329,7 @@ class ControlPlaneService:
                         "batch_size": int(judge_batch_size),
                         "processed": 0,
                         "total": 0,
+                        "strict": bool(strict),
                     }
                 )
 
@@ -2329,10 +2339,13 @@ class ControlPlaneService:
                 self._vault_lint_job["total"] = int(total)
                 self._vault_lint_job["updated_at"] = self._utcnow_iso()
 
+        report: dict[str, Any] | None = None
         try:
             report = manager.lint_and_prune_pages(
                 dry_run=dry_run,
                 use_llm=use_llm,
+                strict=strict,
+                judge_limit=judge_limit,
                 entity_slugs_to_prune=entity_slugs,
                 concept_slugs_to_prune=concept_slugs,
                 judge_batch_size=judge_batch_size,
@@ -2343,22 +2356,39 @@ class ControlPlaneService:
             )
         finally:
             if track:
+                self._vault_lint_thread = None
+                e_flagged = report.get("entities", {}).get("flagged", []) if report else []
+                c_flagged = report.get("concepts", {}).get("flagged", []) if report else []
                 with self._vault_lint_lock:
                     self._vault_lint_job.update(
                         {
                             "status": "cancelled" if self._vault_lint_cancel.is_set() else "idle",
                             "updated_at": self._utcnow_iso(),
+                            "last_entities_flagged": len(e_flagged),
+                            "last_concepts_flagged": len(c_flagged),
+                            "last_entities_removed": report.get("entities", {}).get("removed", 0) if report else 0,
+                            "last_concepts_removed": report.get("concepts", {}).get("removed", 0) if report else 0,
+                            "last_dry_run": bool(dry_run),
+                            "last_sample": [
+                                {"slug": f["slug"], "kind": "entity", "reason": f["reasons"][0] if f.get("reasons") else ""}
+                                for f in e_flagged[:10]
+                            ] + [
+                                {"slug": f["slug"], "kind": "concept", "reason": f["reasons"][0] if f.get("reasons") else ""}
+                                for f in c_flagged[:10]
+                            ],
                         }
                     )
-        if not dry_run and (
+        if report and not dry_run and (
             report.get("entities", {}).get("removed", 0)
             or report.get("concepts", {}).get("removed", 0)
         ):
             with self._vault_explorer_cache_lock:
                 self._vault_explorer_cache = {}
-        return report
+        return report or {}
 
     def cancel_vault_lint_job(self) -> dict[str, Any]:
+        import ctypes
+
         with self._vault_lint_lock:
             running = str(self._vault_lint_job.get("status") or "idle") == "running"
             if not running:
@@ -2367,11 +2397,30 @@ class ControlPlaneService:
                 snapshot["message"] = "No vault lint job is running."
                 return snapshot
             self._vault_lint_job["cancel_requested"] = True
+            self._vault_lint_job["status"] = "cancelled"
             self._vault_lint_job["updated_at"] = self._utcnow_iso()
+            # Set inside the lock so the lint thread's finally block cannot
+            # acquire the lock, check is_set()=False, and flip status back to
+            # 'idle' in the narrow window between lock-release and set().
+            self._vault_lint_cancel.set()
             snapshot = dict(self._vault_lint_job)
-        self._vault_lint_cancel.set()
+            thread = self._vault_lint_thread
+
+        # Hard-kill: raise SystemExit in the lint thread. Only fires at the
+        # next Python bytecode dispatch, so it won't interrupt a blocking C
+        # I/O call (e.g. httpx recv) — cooperative cancel via the Event is
+        # the primary stop mechanism; this catches the Python-only segments.
+        if thread is not None and thread.is_alive() and thread.ident is not None:
+            try:
+                ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                    ctypes.c_ulong(thread.ident),
+                    ctypes.py_object(SystemExit),
+                )
+            except Exception:
+                pass
+
         snapshot["accepted"] = True
-        snapshot["message"] = "Stopping lint at the next batch boundary."
+        snapshot["message"] = "Lint stopped immediately."
         return snapshot
 
     def get_vault_lint_status(self) -> dict[str, Any]:

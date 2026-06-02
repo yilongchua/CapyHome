@@ -25,12 +25,6 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -64,7 +58,7 @@ import {
   useVaultLintStatus,
   useVaultStatus,
 } from "@/core/control-plane";
-import type { VaultExplorerFileNode, VaultExplorerResponse, VaultLintResponse } from "@/core/control-plane";
+import type { VaultExplorerFileNode, VaultExplorerResponse } from "@/core/control-plane";
 import { useI18n } from "@/core/i18n/hooks";
 import { useModels } from "@/core/models/hooks";
 import { streamdownPlugins } from "@/core/streamdown";
@@ -267,9 +261,6 @@ export default function VaultPage() {
     availableModels.find((m) => m.name === selectedLintModel)?.display_name ??
     selectedLintModel ??
     "Default model";
-  const [lintPreview, setLintPreview] = useState<VaultLintResponse | null>(null);
-  const lintTotalToRemove =
-    (lintPreview?.entities.flagged.length ?? 0) + (lintPreview?.concepts.flagged.length ?? 0);
   // Poll lint progress unconditionally so a job started by another tab, the
   // idle auto-run, or before a page reload is still surfaced — the server job
   // status is authoritative, not this tab's mutation state.
@@ -350,43 +341,14 @@ export default function VaultPage() {
     },
     onAutoLint: () => {
       if (lintVaultMutation.isPending || ingestRunning) return;
-      // Up to 2 prune passes: pass 1 removes flagged pages; pass 2 catches any
-      // pages newly orphaned by pass 1's removals. Each pass is preview (LLM
-      // judge) -> commit (apply the flagged slugs). Default model, 1 worker.
-      // Fire-and-forget async IIFE so the callback stays () => void.
-      void (async () => {
-        try {
-          for (let pass = 1; pass <= 2; pass++) {
-          toast.message(`Idle auto-run: lint pass ${pass}/2 (judging, default model)…`);
-          const preview = await lintVaultMutation.mutateAsync({
-            dryRun: true,
-            useLlm: true,
-            workers: 1,
-            modelName: null,
-          });
-          setLintPreview(preview);
-          if (preview.cancelled) {
-            toast.message("Idle auto-run: lint cancelled.");
-            return;
-          }
-          const entitySlugs = preview.entities.flagged.map((f) => f.slug);
-          const conceptSlugs = preview.concepts.flagged.map((f) => f.slug);
-          if (entitySlugs.length === 0 && conceptSlugs.length === 0) {
-            if (pass === 1) toast.message("Idle auto-run: nothing to prune.");
-            break;
-          }
-          const result = await lintVaultMutation.mutateAsync({
-            dryRun: false,
-            entitySlugs,
-            conceptSlugs,
-          });
-          const removed = (result.entities.removed ?? 0) + (result.concepts.removed ?? 0);
-          toast.success(`Idle auto-run: lint pass ${pass}/2 pruned ${removed} page${removed === 1 ? "" : "s"}.`);
-          }
-        } catch (error) {
-          toast.error(error instanceof Error ? error.message : "Idle auto-run lint failed.");
-        }
-      })();
+      toast.message("Idle auto-run: starting lint (strict, default model)…");
+      lintVaultMutation.mutate(
+        { useLlm: true, strict: true, workers: 1, modelName: null },
+        {
+          onSuccess: () => toast.success("Idle auto-run: lint started — pruning in background."),
+          onError: (error) => toast.error(error instanceof Error ? error.message : "Idle auto-run lint failed."),
+        },
+      );
     },
   });
   const ingestEtaLabel = (() => {
@@ -661,13 +623,13 @@ export default function VaultPage() {
                       onClick={() => {
                         lintVaultMutation.mutate(
                           {
-                            dryRun: true,
                             useLlm: true,
+                            strict: true,
                             workers: selectedLintWorkers,
                             modelName: selectedLintModel,
                           },
                           {
-                            onSuccess: (preview) => setLintPreview(preview),
+                            onSuccess: () => toast.success("Lint started — pruning in background."),
                             onError: (error) => toast.error(error.message),
                           },
                         );
@@ -681,7 +643,7 @@ export default function VaultPage() {
                             })`
                       }
                     >
-                      {lintVaultMutation.isPending && lintPreview === null ? (
+                      {lintVaultMutation.isPending ? (
                         <Loader2Icon className="mr-2 size-4 animate-spin" />
                       ) : (
                         <SparklesIcon className="mr-2 size-4" />
@@ -1012,114 +974,6 @@ export default function VaultPage() {
           </div>
         </div>
       </WorkspaceBody>
-      <Dialog
-        open={lintPreview !== null}
-        onOpenChange={(open) => {
-          if (!open) setLintPreview(null);
-        }}
-      >
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Vault lint preview</DialogTitle>
-            <DialogDescription>
-              {lintPreview === null ? null : lintTotalToRemove === 0 ? (
-                "Nothing to prune — the vault is clean."
-              ) : (
-                <>
-                  About to prune <b>{lintPreview.entities.flagged.length}</b> entit
-                  {lintPreview.entities.flagged.length === 1 ? "y" : "ies"} (of {lintPreview.entities.total_before})
-                  {" and "}
-                  <b>{lintPreview.concepts.flagged.length}</b> concept
-                  {lintPreview.concepts.flagged.length === 1 ? "" : "s"} (of {lintPreview.concepts.total_before}).
-                  Entities will also be added to the dismissal list so future ingests won&apos;t re-create them.
-                </>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          {lintPreview !== null && lintTotalToRemove > 0 ? (
-            <div className="max-h-80 space-y-3 overflow-y-auto text-xs">
-              {lintPreview.entities.flagged.length > 0 ? (
-                <div>
-                  <p className="mb-1 font-medium">Entities ({lintPreview.entities.flagged.length})</p>
-                  <ul className="space-y-0.5">
-                    {lintPreview.entities.flagged.slice(0, 50).map((f) => (
-                      <li key={`e-${f.slug}`} className="flex justify-between gap-2">
-                        <span className="truncate">{f.label}</span>
-                        <span className="shrink-0 text-muted-foreground">{f.reasons.join(", ")}</span>
-                      </li>
-                    ))}
-                    {lintPreview.entities.flagged.length > 50 ? (
-                      <li className="text-muted-foreground">
-                        … and {lintPreview.entities.flagged.length - 50} more
-                      </li>
-                    ) : null}
-                  </ul>
-                </div>
-              ) : null}
-              {lintPreview.concepts.flagged.length > 0 ? (
-                <div>
-                  <p className="mb-1 font-medium">Concepts ({lintPreview.concepts.flagged.length})</p>
-                  <ul className="space-y-0.5">
-                    {lintPreview.concepts.flagged.slice(0, 50).map((f) => (
-                      <li key={`c-${f.slug}`} className="flex justify-between gap-2">
-                        <span className="truncate">{f.label}</span>
-                        <span className="shrink-0 text-muted-foreground">{f.reasons.join(", ")}</span>
-                      </li>
-                    ))}
-                    {lintPreview.concepts.flagged.length > 50 ? (
-                      <li className="text-muted-foreground">
-                        … and {lintPreview.concepts.flagged.length - 50} more
-                      </li>
-                    ) : null}
-                  </ul>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setLintPreview(null)}>
-              {lintTotalToRemove === 0 ? "Close" : "Cancel"}
-            </Button>
-            {lintTotalToRemove > 0 ? (
-              <Button
-                onClick={() => {
-                  if (!lintPreview) return;
-                  const entitySlugs = lintPreview.entities.flagged.map((f) => f.slug);
-                  const conceptSlugs = lintPreview.concepts.flagged.map((f) => f.slug);
-                  lintVaultMutation.mutate(
-                    {
-                      dryRun: false,
-                      entitySlugs,
-                      conceptSlugs,
-                    },
-                    {
-                      onSuccess: (result) => {
-                        const removed =
-                          (result.entities.removed ?? 0) + (result.concepts.removed ?? 0);
-                        toast.success(
-                          removed > 0
-                            ? `Pruned ${result.entities.removed} entit${result.entities.removed === 1 ? "y" : "ies"} and ${result.concepts.removed} concept${result.concepts.removed === 1 ? "" : "s"}.`
-                            : "Nothing was pruned.",
-                        );
-                        setLintPreview(null);
-                      },
-                      onError: (error) => toast.error(error.message),
-                    },
-                  );
-                }}
-                disabled={lintVaultMutation.isPending}
-              >
-                {lintVaultMutation.isPending ? (
-                  <Loader2Icon className="mr-2 size-4 animate-spin" />
-                ) : (
-                  <Trash2Icon className="mr-2 size-4" />
-                )}
-                Prune {lintTotalToRemove}
-              </Button>
-            ) : null}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </WorkspaceContainer>
   );
 }

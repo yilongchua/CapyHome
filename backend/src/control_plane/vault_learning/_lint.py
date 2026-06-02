@@ -101,13 +101,22 @@ class LintMixin:
         batch: list[dict[str, Any]],
         user_context: dict[str, Any],
         vault_context: dict[str, Any],
+        *,
+        strict: bool = False,
     ) -> str:
         lines: list[str] = []
-        lines.append(
-            "You are reviewing pages in a personal knowledge vault. The user searches "
-            "and references these pages later — your job is to decide which pages "
-            "are worth keeping for their future search/lookup needs."
-        )
+        if strict:
+            lines.append(
+                "You are auditing pages in a personal AI knowledge vault. "
+                "Your goal is aggressive pruning — remove any page that would not "
+                "meaningfully enrich an AI answer to a user's natural-language question."
+            )
+        else:
+            lines.append(
+                "You are reviewing pages in a personal knowledge vault. The user searches "
+                "and references these pages later — your job is to decide which pages "
+                "are worth keeping for their future search/lookup needs."
+            )
         lines.append("")
         lines.append("USER CONTEXT (from their stored memory):")
         if user_context.get("work_context"):
@@ -135,18 +144,68 @@ class LintMixin:
             for title in sample_titles:
                 lines.append(f"  • {title}")
         lines.append("")
-        lines.append("DECISION RULES:")
-        lines.append("- KEEP if the page label is something the user might plausibly")
-        lines.append("  search for, browse to, or want to re-encounter — OR if the")
-        lines.append("  entity/concept organizes knowledge meaningfully in their domain.")
-        lines.append("- REMOVE only when you are confident the page provides zero")
-        lines.append("  lookup value: news outlet/site names ('Times Now News',")
-        lines.append("  'Facebook'), generic stopwords mistakenly extracted as")
-        lines.append("  entities, malformed labels, or pages so broad they could")
-        lines.append("  never help search (e.g. 'website', 'page').")
-        lines.append("")
-        lines.append("CRITICAL: bias strongly toward KEEP. False removals destroy")
-        lines.append("real knowledge. When uncertain, choose 'keep'.")
+        if strict:
+            lines.append(
+                "These pages are retrieved automatically by semantic search to enrich AI "
+                "answers when the user asks natural-language questions such as:"
+            )
+            lines.append('  "What is the best time to visit the Netherlands?"')
+            lines.append('  "What is an agentic harness?"')
+            lines.append('  "How do I implement an evaluation loop?"')
+            lines.append("")
+            lines.append(
+                "A page is USEFUL if retrieving it would add meaningful detail, context, or "
+                "specificity to an AI answer about that topic. "
+                "A page is USELESS if it would never be meaningfully retrieved, or if "
+                "retrieving it would add noise rather than signal."
+            )
+            lines.append("")
+            lines.append("REMOVE if any of the following apply:")
+            lines.append("- The label is a fragment, stopword, or malformed extraction — it does")
+            lines.append("  not name a real thing (e.g. 'according', 'actually', '500-bus',")
+            lines.append("  'actually-spend-living').")
+            lines.append("- The label is a one-time event, transient reference, or hyper-specific")
+            lines.append("  item with no lasting knowledge value beyond its single source")
+            lines.append("  (e.g. 'acah2025', '6-bridges-boat-trip', 'a-regaleira').")
+            lines.append("- The label is a generic process phrase or broad category that does not")
+            lines.append("  name a specific retrievable thing (e.g. 'remote work trends',")
+            lines.append("  'cost comparison', 'best practices', 'tools overview', 'activities',")
+            lines.append("  'accommodations').")
+            lines.append("- The page duplicates coverage already provided by a more specific page")
+            lines.append("  (e.g. keep 'digital-nomad-city-rankings-2025', remove the vaguer")
+            lines.append("  'digital-nomad-city-rankings' if both exist).")
+            lines.append("- The label names a person or organisation with no clear connection to")
+            lines.append("  the user's knowledge domains and has only 1–2 source refs.")
+            lines.append("")
+            lines.append("KEEP if any of the following apply:")
+            lines.append("- The label names a specific place, region, or country — these are")
+            lines.append("  reliably retrieved by travel and location questions.")
+            lines.append("- The label names a specific tool, platform, framework, or technology —")
+            lines.append("  even with few refs, named tools anchor knowledge retrieval.")
+            lines.append("- The label names a well-defined concept directly in the user's active")
+            lines.append("  knowledge domains (see vault domain above).")
+            lines.append("- The label names a publication, website, or platform that acts as a")
+            lines.append("  knowledge hub connecting multiple sources.")
+            lines.append("- Retrieving this page would add specific, non-obvious detail to an AI")
+            lines.append("  answer that general training knowledge would not provide.")
+            lines.append("")
+            lines.append(
+                "When uncertain, ask: 'if an AI retrieved this page while answering a user "
+                "question, would it help or clutter the answer?' If it would help even "
+                "slightly, KEEP. If it would add noise or irrelevance, REMOVE."
+            )
+        else:
+            lines.append("DECISION RULES:")
+            lines.append("- KEEP if the page label is something the user might plausibly")
+            lines.append("  search for, browse to, or want to re-encounter — OR if the")
+            lines.append("  entity/concept organizes knowledge meaningfully in their domain.")
+            lines.append("- REMOVE only when you are confident the page provides zero")
+            lines.append("  lookup value: generic stopwords mistakenly extracted as entities,")
+            lines.append("  malformed labels, or pages so broad they could never help search")
+            lines.append("  (e.g. 'website', 'page').")
+            lines.append("")
+            lines.append("CRITICAL: bias strongly toward KEEP. False removals destroy")
+            lines.append("real knowledge. When uncertain, choose 'keep'.")
         lines.append("")
         lines.append(
             "Respond with a JSON array, one object per item: "
@@ -241,6 +300,7 @@ class LintMixin:
         model_name: str | None = None,
         should_cancel: Callable[[], bool] | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
+        strict: bool = False,
     ) -> dict[str, dict[str, str]]:
         verdicts: dict[str, dict[str, str]] = {}
         if not pages:
@@ -277,7 +337,7 @@ class LintMixin:
 
         def _judge_one(start: int, batch: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
             """Score one batch. Pure: returns its verdicts, mutates nothing shared."""
-            prompt = self._build_judge_prompt(batch, user_context, vault_context)
+            prompt = self._build_judge_prompt(batch, user_context, vault_context, strict=strict)
             try:
                 response = model.invoke(prompt)
                 raw = (
@@ -383,6 +443,8 @@ class LintMixin:
         *,
         dry_run: bool = True,
         use_llm: bool = False,
+        strict: bool = False,
+        judge_limit: int | None = None,
         entity_slugs_to_prune: list[str] | None = None,
         concept_slugs_to_prune: list[str] | None = None,
         judge_batch_size: int = 20,
@@ -523,6 +585,9 @@ class LintMixin:
 
             all_candidates = entity_candidates + concept_candidates
 
+            if judge_limit is not None and judge_limit > 0:
+                all_candidates = all_candidates[:judge_limit]
+
             if use_llm and all_candidates:
                 user_context = self._collect_user_context_for_judge()
                 vault_context = self._collect_vault_domain_context()
@@ -535,6 +600,7 @@ class LintMixin:
                     model_name=judge_model,
                     should_cancel=should_cancel,
                     progress_callback=progress_callback,
+                    strict=strict,
                 )
                 for candidate in all_candidates:
                     verdict = verdicts.get(candidate["slug"])

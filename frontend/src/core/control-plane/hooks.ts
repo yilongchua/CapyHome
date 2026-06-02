@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 
 import {
   publishWorkspaceRefresh,
@@ -373,14 +374,12 @@ export function useCancelVaultLint() {
 
 export function useVaultLintStatus(options?: { refetchInterval?: number; enabled?: boolean }) {
   const isVisible = useDocumentVisible();
+  const queryClient = useQueryClient();
+  const prevStatusRef = useRef<string | undefined>(undefined);
   const { data } = useWorkspaceRefreshQuery<VaultLintJobStatus>({
     queryKey: ["control-plane", "vault-lint-status"],
     queryFn: () => getVaultLintStatus(),
     enabled: options?.enabled ?? true,
-    // Derive the cadence from the authoritative server job, not the client
-    // mutation, so an in-flight lint started by another tab / before a reload
-    // is still surfaced. Paused while backgrounded; fast while running, slow
-    // baseline while idle. Mirrors useVaultIngestStatus.
     refetchInterval: (query) => {
       if (!isVisible) return false;
       if (typeof options?.refetchInterval === "number") {
@@ -391,30 +390,35 @@ export function useVaultLintStatus(options?: { refetchInterval?: number; enabled
     },
     refreshDomains: ["vault"],
   });
+
+  // Invalidate vault views when the background lint job finishes so the
+  // explorer/entity-browser reflect the actual post-prune state. Fires on
+  // the running → idle/cancelled transition, not at POST /lint time.
+  const currentStatus = data?.status;
+  useEffect(() => {
+    if (prevStatusRef.current === "running" && currentStatus !== "running" && currentStatus !== undefined) {
+      void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-explorer"] });
+      void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-status"] });
+      void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-entity-browser"] });
+      publishControlPlaneRefresh(["vault"]);
+    }
+    prevStatusRef.current = currentStatus;
+  }, [currentStatus, queryClient]);
+
   return { lintStatus: data ?? null };
 }
 
 export function useLintVault() {
-  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (options?: {
-      dryRun?: boolean;
       useLlm?: boolean;
-      entitySlugs?: string[];
-      conceptSlugs?: string[];
+      strict?: boolean;
       workers?: number;
       modelName?: string | null;
     }) => lintVault(options),
-    onSuccess: (_data, variables) => {
-      // Only invalidate vault views after a real prune so a dry-run preview
-      // doesn't churn the explorer / entity-browser unnecessarily.
-      if (variables?.dryRun === false) {
-        void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-explorer"] });
-        void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-status"] });
-        void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-entity-browser"] });
-        publishControlPlaneRefresh(["vault"]);
-      }
-    },
+    // No query invalidation here — the background lint hasn't deleted anything
+    // yet when the POST /lint 200 arrives. Invalidation fires in
+    // useVaultLintStatus when it observes the job transition to idle/cancelled.
   });
 }
 

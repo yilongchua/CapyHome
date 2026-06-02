@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -136,6 +137,8 @@ class VaultIngestStatusResponse(BaseModel):
 class VaultLintRequest(BaseModel):
     dry_run: bool = True
     use_llm: bool = False
+    strict: bool = False
+    judge_limit: int | None = None
     entity_slugs: list[str] | None = None
     concept_slugs: list[str] | None = None
     # Parallel LLM-judge workers. All hit the same model endpoint, so keep this
@@ -180,6 +183,13 @@ class VaultLintJobStatusResponse(BaseModel):
     batch_size: int = 0
     processed: int = 0
     total: int = 0
+    strict: bool = False
+    last_entities_flagged: int | None = None
+    last_concepts_flagged: int | None = None
+    last_entities_removed: int | None = None
+    last_concepts_removed: int | None = None
+    last_dry_run: bool | None = None
+    last_sample: list[dict] = Field(default_factory=list)
     accepted: bool | None = None
     message: str | None = None
 
@@ -437,23 +447,61 @@ def cancel_vault_ingest() -> VaultIngestStatusResponse:
     return VaultIngestStatusResponse.model_validate(payload)
 
 
-@router.post("/lint", response_model=VaultLintResponse)
-def lint_vault(request: VaultLintRequest | None = None) -> VaultLintResponse:
+@router.post("/lint")
+def lint_vault(request: VaultLintRequest | None = None) -> VaultLintResponse | VaultLintJobStatusResponse:
     service = get_control_plane_service()
     req = request or VaultLintRequest()
-    try:
-        payload = service.lint_vault_pages(
-            dry_run=bool(req.dry_run),
-            use_llm=bool(req.use_llm),
-            entity_slugs=req.entity_slugs,
-            concept_slugs=req.concept_slugs,
-            judge_batch_size=int(req.batch_size),
-            judge_workers=int(req.workers),
-            judge_model=(req.model_name or None),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-    return VaultLintResponse.model_validate(payload)
+
+    # Inline paths: dry-run, explicit slug-commit, or heuristic-only prune
+    # (use_llm=False). These are fast and return full VaultLintResponse results.
+    if bool(req.dry_run) or req.entity_slugs is not None or req.concept_slugs is not None or not bool(req.use_llm):
+        try:
+            payload = service.lint_vault_pages(
+                dry_run=bool(req.dry_run),
+                use_llm=bool(req.use_llm),
+                strict=bool(req.strict),
+                judge_limit=(int(req.judge_limit) if req.judge_limit is not None else None),
+                entity_slugs=req.entity_slugs,
+                concept_slugs=req.concept_slugs,
+                judge_batch_size=int(req.batch_size),
+                judge_workers=int(req.workers),
+                judge_model=(req.model_name or None),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        return VaultLintResponse.model_validate(payload)
+
+    # LLM-judge live prune: long-running, runs in a background daemon thread so
+    # the gateway event loop stays free for cancel/status polling.
+    current_status = service.get_vault_lint_status()
+    if current_status.get("status") == "running":
+        raise HTTPException(status_code=409, detail="A lint job is already running.")
+
+    def _run() -> None:
+        try:
+            service.lint_vault_pages(
+                dry_run=False,
+                use_llm=True,
+                strict=bool(req.strict),
+                judge_limit=(int(req.judge_limit) if req.judge_limit is not None else None),
+                entity_slugs=None,
+                concept_slugs=None,
+                judge_batch_size=int(req.batch_size),
+                judge_workers=int(req.workers),
+                judge_model=(req.model_name or None),
+            )
+        except Exception:
+            pass  # errors recorded inside lint_vault_pages via the job dict
+
+    t = threading.Thread(target=_run, daemon=True, name="vault-lint")
+    # Register before start so cancel_vault_lint_job has the right thread
+    # reference immediately; the service does NOT call current_thread() itself.
+    service._vault_lint_thread = t
+    t.start()
+
+    # Return the job status (status=running) so callers can immediately poll.
+    payload = service.get_vault_lint_status()
+    return VaultLintJobStatusResponse.model_validate(payload)
 
 
 @router.post("/lint/cancel", response_model=VaultLintJobStatusResponse)
