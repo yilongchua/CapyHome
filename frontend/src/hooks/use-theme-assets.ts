@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 
 const THEME_ASSET_FOLDER: Record<string, string> = {
@@ -11,6 +12,14 @@ const THEME_ASSET_FOLDER: Record<string, string> = {
 
 export function useThemeAssets() {
   const { theme } = useTheme();
-  const folder = THEME_ASSET_FOLDER[theme ?? "capyhome"] ?? "CapyHome";
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Use default folder until mounted to match SSR output and avoid hydration mismatch.
+  // next-themes resolves the theme from localStorage only on the client.
+  const folder = mounted ? (THEME_ASSET_FOLDER[theme ?? "capyhome"] ?? "CapyHome") : "CapyHome";
   return (filename: string) => `/${folder}/${filename}`;
 }
