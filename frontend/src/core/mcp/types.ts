@@ -8,6 +8,14 @@ export interface MCPServerConfig extends Record<string, unknown> {
   url?: string;
   headers?: Record<string, string>;
   excluded_tools?: string[];
+  health_url?: string;
+  timeout_seconds?: number;
+}
+
+export interface MCPHealthResult {
+  ok: boolean;
+  status_code?: number;
+  error?: string | null;
 }
 
 export interface MCPConfig {

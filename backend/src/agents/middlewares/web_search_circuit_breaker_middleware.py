@@ -53,11 +53,17 @@ def _is_real_human(message: Any) -> bool:
     return _message_type(message) == "human" and not _message_name(message)
 
 
+def _is_web_search_tool(name: str) -> bool:
+    """True for tool names that represent a web/searx search (builtin or MCP)."""
+    n = name.lower()
+    return "web_search" in n or "websearch" in n or "searx" in n
+
+
 def _is_web_search_failure(message: Any) -> bool:
     if _message_type(message) != "tool":
         return False
     name = _message_name(message).lower()
-    if name and "web_search" not in name and "searx" not in name:
+    if name and not _is_web_search_tool(name):
         return False
     content = _message_content(message)
     if TIMEOUT_MESSAGE_FINGERPRINT in content or _CIRCUIT_OPEN_FINGERPRINT in content:
@@ -90,7 +96,7 @@ class WebSearchCircuitBreakerMiddleware(AgentMiddleware[AgentState]):
 
     def _maybe_block(self, request: ToolCallRequest) -> ToolMessage | None:
         tool_name = str(request.tool_call.get("name") or "")
-        if tool_name != "web_search":
+        if not _is_web_search_tool(tool_name):
             return None
         state = request.state or {}
         messages = state.get("messages", []) if isinstance(state, dict) else []
@@ -102,8 +108,8 @@ class WebSearchCircuitBreakerMiddleware(AgentMiddleware[AgentState]):
             tool_call_id=request.tool_call.get("id", ""),
             content=(
                 f"{_CIRCUIT_OPEN_FINGERPRINT}\n"
-                f"web_search already failed {failures} time(s) in this user run. "
-                "Skip further web_search retries for now. Use successful prior results, "
+                f"Web search ({tool_name}) already failed {failures} time(s) in this user run. "
+                "Skip further web search retries for now. Use successful prior results, "
                 "query_knowledge_vault if available, or answer from established knowledge with clear caveats."
             ),
         )

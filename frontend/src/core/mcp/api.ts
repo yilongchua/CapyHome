@@ -1,6 +1,6 @@
 import { getBackendBaseURL } from "@/core/config";
 
-import type { MCPConfig, MCPPreviewRequest, MCPPreviewResult } from "./types";
+import type { MCPConfig, MCPHealthResult, MCPPreviewRequest, MCPPreviewResult } from "./types";
 
 export async function loadMCPConfig() {
   const response = await fetch(`${getBackendBaseURL()}/api/mcp/config`);
@@ -25,4 +25,14 @@ export async function previewMCPServer(
     body: JSON.stringify(request),
   });
   return response.json() as Promise<MCPPreviewResult>;
+}
+
+export async function checkMCPServerHealth(
+  serverName: string,
+): Promise<MCPHealthResult> {
+  const response = await fetch(
+    `${getBackendBaseURL()}/api/mcp/servers/${encodeURIComponent(serverName)}/health`,
+    { method: "POST" },
+  );
+  return response.json() as Promise<MCPHealthResult>;
 }

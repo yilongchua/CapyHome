@@ -43,13 +43,14 @@ import type { CommunityTool } from "@/core/community-tools";
 import { useI18n } from "@/core/i18n/hooks";
 import {
   useAddMCPServer,
+  useCheckMCPServerHealth,
   useEnableMCPServer,
   useMCPConfig,
   usePreviewMCPServer,
   useRemoveMCPServer,
   useUpdateToolExclusions,
 } from "@/core/mcp/hooks";
-import type { MCPPreviewResult, MCPServerConfig } from "@/core/mcp/types";
+import type { MCPHealthResult, MCPPreviewResult, MCPServerConfig } from "@/core/mcp/types";
 import { useLocalSettings } from "@/core/settings";
 import { DEFAULT_TOOL_ICON_BY_TOOL, TOOL_ICON_OPTIONS, type ToolIconKey } from "@/core/tools/presentation";
 import { env } from "@/env";
@@ -305,12 +306,14 @@ function MCPServerCard({
   const { mutate: removeServer } = useRemoveMCPServer();
   const { mutate: updateExclusions } = useUpdateToolExclusions();
   const { mutateAsync: preview } = usePreviewMCPServer();
+  const { mutateAsync: checkHealth, isPending: checkingHealth } = useCheckMCPServerHealth();
 
   const [expanded, setExpanded] = useState(false);
   const [previewResult, setPreviewResult] = useState<
     MCPPreviewResult | undefined
   >(undefined);
   const [previewing, setPreviewing] = useState(false);
+  const [healthResult, setHealthResult] = useState<MCPHealthResult | undefined>(undefined);
 
   const isStatic = env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true";
   const excluded = config.excluded_tools ?? [];
@@ -354,6 +357,34 @@ function MCPServerCard({
           </ItemDescription>
         </ItemContent>
         <ItemActions>
+          {config.health_url && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className={
+                healthResult
+                  ? healthResult.ok
+                    ? "text-green-600"
+                    : "text-destructive"
+                  : "text-muted-foreground"
+              }
+              disabled={checkingHealth || isStatic}
+              onClick={async () => {
+                setHealthResult(undefined);
+                const result = await checkHealth(name);
+                setHealthResult(result);
+              }}
+              title={
+                healthResult
+                  ? healthResult.ok
+                    ? `Healthy (${healthResult.status_code})`
+                    : (healthResult.error ?? "Unhealthy")
+                  : "Check health"
+              }
+            >
+              <GlobeIcon className="size-3.5" />
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
@@ -462,6 +493,8 @@ function MCPServerCard({
 interface ServerFormState {
   name: string;
   url: string;
+  health_url: string;
+  timeout_seconds: string;
 }
 
 type DetectedEndpoint = {
@@ -476,6 +509,8 @@ function serverConfigToForm(
   return {
     name,
     url: cfg.url ?? "",
+    health_url: cfg.health_url ?? "",
+    timeout_seconds: cfg.timeout_seconds != null ? String(cfg.timeout_seconds) : "",
   };
 }
 
@@ -485,12 +520,15 @@ function formToServerConfig(
   detected: DetectedEndpoint | null,
 ): MCPServerConfig {
   const endpoint = detected ?? { type: "http" as const, url: form.url.trim() };
+  const parsed = parseInt(form.timeout_seconds.trim(), 10);
   return {
     enabled: true,
     type: endpoint.type,
     description: "",
     url: endpoint.url,
     excluded_tools: excludedTools,
+    health_url: form.health_url.trim() || undefined,
+    timeout_seconds: !isNaN(parsed) && parsed > 0 ? parsed : undefined,
   };
 }
 
@@ -510,6 +548,8 @@ function AddMCPServerDialog({
   const defaultForm: ServerFormState = {
     name: "",
     url: "",
+    health_url: "",
+    timeout_seconds: "",
   };
 
   const [form, setForm] = useState<ServerFormState>(
@@ -652,6 +692,28 @@ function AddMCPServerDialog({
               placeholder={t.settings.tools.serverUrlPlaceholder}
               value={form.url}
               onChange={set("url")}
+            />
+          </Field>
+
+          {/* Health check URL */}
+          <Field label="Health check URL (optional)">
+            <input
+              className="border-input bg-background focus-visible:ring-ring w-full rounded-md border px-3 py-1.5 text-sm focus-visible:ring-1 focus-visible:outline-none"
+              placeholder="e.g. http://localhost:9000/health"
+              value={form.health_url}
+              onChange={set("health_url")}
+            />
+          </Field>
+
+          {/* Timeout */}
+          <Field label="Timeout (seconds, optional)">
+            <input
+              type="number"
+              min={1}
+              className="border-input bg-background focus-visible:ring-ring w-full rounded-md border px-3 py-1.5 text-sm focus-visible:ring-1 focus-visible:outline-none"
+              placeholder="e.g. 25"
+              value={form.timeout_seconds}
+              onChange={set("timeout_seconds")}
             />
           </Field>
 

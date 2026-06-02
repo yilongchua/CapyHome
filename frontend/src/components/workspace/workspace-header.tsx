@@ -18,21 +18,21 @@ import { env } from "@/env";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_ICON = {
-  src: "/Logo.webp",
+  src: "/CapyHome/Logo.webp",
   width: 32,
   height: 32,
   alt: "CapyHome",
 };
 
 const PLAN_MODE_ICON = {
-  src: "/plan-mode-icon.webp",
+  src: "/CapyHome/plan-mode-icon.webp",
   width: 297,
   height: 223,
   alt: "Plan mode",
 };
 
 const WORK_MODE_ICON = {
-  src: "/work-mode-icon.webp",
+  src: "/CapyHome/work-mode-icon.webp",
   width: 342,
   height: 204,
   alt: "Work mode",

@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 from typing import Any, Literal
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -44,6 +45,8 @@ class McpServerConfigResponse(BaseModel):
     oauth: McpOAuthConfigResponse | None = Field(default=None, description="OAuth configuration for MCP HTTP/SSE servers")
     description: str = Field(default="", description="Human-readable description of what this MCP server provides")
     excluded_tools: list[str] = Field(default_factory=list, description="Tool names to exclude from this server's tool list")
+    health_url: str | None = Field(default=None, description="Optional health-check URL (GET)")
+    timeout_seconds: int | None = Field(default=None, description="Optional per-server HTTP timeout override (seconds)")
 
 
 class McpConfigResponse(BaseModel):
@@ -231,3 +234,45 @@ async def preview_mcp_server_endpoint(request: McpPreviewRequest) -> McpPreviewR
         tools=[McpPreviewToolResponse(**t) for t in result.get("tools", [])],
         error=result.get("error"),
     )
+
+
+class McpHealthResponse(BaseModel):
+    """Response from the MCP server health-check endpoint."""
+
+    ok: bool
+    status_code: int | None = None
+    error: str | None = None
+
+
+@router.post(
+    "/mcp/servers/{server_name}/health",
+    response_model=McpHealthResponse,
+    summary="Check MCP Server Health",
+    description="Perform a GET request to the server's health_url and report whether it returned a 2xx response. Always returns HTTP 200; errors are reported as ok=false.",
+)
+async def check_mcp_server_health(server_name: str) -> McpHealthResponse:
+    """Ping the health_url configured on an MCP server.
+
+    Always returns HTTP 200. Unreachable or non-2xx responses are reported as
+    ``ok=false`` with an ``error`` message so the frontend can display them inline.
+    """
+    config = get_extensions_config()
+    server_cfg = config.mcp_servers.get(server_name)
+    if server_cfg is None:
+        return McpHealthResponse(ok=False, error=f"MCP server '{server_name}' not found in config")
+
+    health_url = server_cfg.health_url
+    if not health_url:
+        return McpHealthResponse(ok=False, error="No health_url configured for this server")
+
+    timeout = float(server_cfg.timeout_seconds or 10)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.get(health_url)
+        if response.is_success:
+            return McpHealthResponse(ok=True, status_code=response.status_code)
+        return McpHealthResponse(ok=False, status_code=response.status_code, error=f"Server returned {response.status_code}")
+    except httpx.TimeoutException:
+        return McpHealthResponse(ok=False, error=f"Health check timed out after {timeout:.0f}s")
+    except Exception as exc:
+        return McpHealthResponse(ok=False, error=str(exc))

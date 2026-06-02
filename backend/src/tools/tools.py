@@ -4,7 +4,6 @@ from pathlib import Path
 from langchain.tools import BaseTool
 
 from src.community.knowledge_vault_search import query_knowledge_vault_tool, save_to_knowledge_vault_tool
-from src.community.web_search import web_search_tool
 from src.config import get_app_config
 from src.reflection import resolve_variable
 from src.tools.builtins import ask_user_for_clarification_tool, present_file_tool, recall_tool, task_tool, view_image_tool, write_todos_tool
@@ -36,7 +35,6 @@ BUILTIN_TOOLS = [
     ask_user_for_clarification_tool,
     recall_tool,
     write_todos_tool,
-    web_search_tool,
     query_knowledge_vault_tool,
     save_to_knowledge_vault_tool,
 ]
@@ -47,7 +45,6 @@ BUILTIN_TOOLS = [
 # Membership semantics: a tool is exposed in a mode iff that mode is in its set.
 # Tools absent from this map are exposed in every mode.
 _COMMUNITY_TOOL_MODES: dict[str, frozenset[str]] = {
-    "web_search": frozenset({"plan", "work", "auto"}),
     "query_knowledge_vault": frozenset({"work", "auto"}),
     "save_to_knowledge_vault": frozenset({"work", "auto"}),
     # Execution tools defined in config.yaml. The JSON work catalog already

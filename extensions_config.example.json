@@ -1,5 +1,13 @@
 {
   "mcpServers": {
+    "websearch": {
+      "enabled": false,
+      "type": "http",
+      "url": "http://localhost:9000/mcp",
+      "description": "Web search via local SearXNG instance. Start the service with: make websearch (or docker compose in websearch/ directory).",
+      "health_url": "http://localhost:9000/health",
+      "timeout_seconds": 25
+    },
     "filesystem": {
       "enabled": false,
       "type": "stdio",

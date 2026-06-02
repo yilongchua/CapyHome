@@ -44,6 +44,8 @@ class McpServerConfig(BaseModel):
     oauth: McpOAuthConfig | None = Field(default=None, description="OAuth configuration (for sse or http type)")
     description: str = Field(default="", description="Human-readable description of what this MCP server provides")
     excluded_tools: list[str] = Field(default_factory=list, description="Tool names to exclude from this server's tool list")
+    health_url: str | None = Field(default=None, description="Optional health-check URL (GET). Used by the settings panel to verify the server is reachable.")
+    timeout_seconds: int | None = Field(default=None, description="Optional per-server HTTP timeout override (seconds). Null falls back to routing.timeouts.tools defaults.")
     model_config = ConfigDict(extra="allow")
 
 

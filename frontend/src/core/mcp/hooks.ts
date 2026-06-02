@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { loadMCPConfig, previewMCPServer, updateMCPConfig } from "./api";
-import type { MCPPreviewRequest, MCPPreviewResult, MCPServerConfig } from "./types";
+import { checkMCPServerHealth, loadMCPConfig, previewMCPServer, updateMCPConfig } from "./api";
+import type { MCPHealthResult, MCPPreviewRequest, MCPPreviewResult, MCPServerConfig } from "./types";
 
 export function useMCPConfig() {
   const { data, isLoading, error } = useQuery({
@@ -109,5 +109,11 @@ export function useUpdateToolExclusions() {
 export function usePreviewMCPServer() {
   return useMutation<MCPPreviewResult, Error, MCPPreviewRequest>({
     mutationFn: (request) => previewMCPServer(request),
+  });
+}
+
+export function useCheckMCPServerHealth() {
+  return useMutation<MCPHealthResult, Error, string>({
+    mutationFn: (serverName) => checkMCPServerHealth(serverName),
   });
 }

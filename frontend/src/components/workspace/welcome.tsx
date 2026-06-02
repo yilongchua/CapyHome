@@ -18,7 +18,7 @@ export function Welcome({
     >
       <div className="text-2xl font-bold">
         <div className="flex items-center gap-2">
-          <img src="/Logo.webp" alt="CapyHome logo" className="size-8" />
+          <img src="/CapyHome/Logo.webp" alt="CapyHome logo" className="size-8" />
           <span>Welcome to CapyHome!</span>
         </div>
       </div>

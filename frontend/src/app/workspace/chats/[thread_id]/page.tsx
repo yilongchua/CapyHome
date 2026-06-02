@@ -919,8 +919,8 @@ function ChatPageContent({
                     ? {
                         backgroundImage:
                           settings.context.mode === "plan"
-                            ? "url('/plan-mode-chat.webp')"
-                            : "url('/work-mode-chat.webp')",
+                            ? "url('/CapyHome/plan-mode-chat.webp')"
+                            : "url('/CapyHome/work-mode-chat.webp')",
                         backgroundSize: "cover",
                         backgroundPosition:
                           settings.context.mode === "plan"
