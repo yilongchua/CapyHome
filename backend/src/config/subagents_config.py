@@ -15,6 +15,11 @@ class SubagentOverrideConfig(BaseModel):
         ge=1,
         description="Timeout in seconds for this subagent (None = use global default)",
     )
+    max_turns: int | None = Field(
+        default=None,
+        ge=1,
+        description="Max agent turns (LangGraph recursion_limit) for this subagent (None = use the subagent's own default)",
+    )
 
 
 class SubagentsAppConfig(BaseModel):
@@ -58,6 +63,17 @@ class SubagentsAppConfig(BaseModel):
         if override is not None and override.timeout_seconds is not None:
             return override.timeout_seconds
         return self.timeout_seconds
+
+    def get_max_turns_for(self, agent_name: str) -> int | None:
+        """Get the config.yaml max_turns override for an agent, or None if unset.
+
+        Returns None when there is no per-agent override, so the caller keeps the
+        subagent's own ``max_turns`` default.
+        """
+        override = self.agents.get(agent_name)
+        if override is not None and override.max_turns is not None:
+            return override.max_turns
+        return None
 
 
 _subagents_config: SubagentsAppConfig = SubagentsAppConfig()

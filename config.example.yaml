@@ -357,6 +357,11 @@ subagents:
       timeout_seconds: 600
     general-purpose:
       timeout_seconds: 1800
+    # Plan-Mode planning helpers — max_turns sourced here (not hard-coded).
+    scope-researcher:
+      max_turns: 12
+    finder-agent:
+      max_turns: 15
 
 # -----------------------------------------------------------------------------
 # Observability — tracing, metrics, benchmarks, execution traces

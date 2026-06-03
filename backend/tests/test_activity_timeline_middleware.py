@@ -31,9 +31,9 @@ def test_before_model_converts_runtime_events_and_updates_context_metrics(monkey
             "event": "task_running",
             "task_id": "task-1",
             "group_id": "task-1",
-            "subagent_type": "source-researcher",
+            "subagent_type": "knowledge-researcher",
             "description": "Research Bali remote work",
-            "group_title": "source-researcher: Research Bali remote work",
+            "group_title": "knowledge-researcher: Research Bali remote work",
             "tool_summary": "web_search: latest ai news",
         },
     )
@@ -69,10 +69,10 @@ def test_before_model_converts_runtime_events_and_updates_context_metrics(monkey
     assert "context_metrics" in update
 
     lines = [event.get("line", "") for event in update["activity_timeline"]["events"]]
-    assert any(line.startswith("Baby Capy - source-researcher is working on") for line in lines)
+    assert any(line.startswith("Baby Capy - knowledge-researcher is working on") for line in lines)
     assert any(line == "CapyHome is thinking..." for line in lines)
     subagent_event = next(event for event in update["activity_timeline"]["events"] if event.get("actor") == "baby_capy")
-    assert subagent_event.get("group_title") == "source-researcher: Research Bali remote work"
+    assert subagent_event.get("group_title") == "knowledge-researcher: Research Bali remote work"
     assert subagent_event.get("group_role") == "step"
 
     context_metrics = update["context_metrics"]

@@ -81,17 +81,31 @@ def test_every_tool_has_at_least_one_example(definitions) -> None:
 
 
 def test_plan_catalog_excludes_execution_tools() -> None:
-    """Plan-mode catalog must not expose execution tools (`bash`, `write_file`,
-    `str_replace`, `task`). PhaseToolFilterMiddleware will hide them at runtime
-    anyway, but keeping them out of the plan file is the whole point of the split.
+    """Plan-mode catalog must not expose write/execute tools (`bash`, `write_file`,
+    `str_replace`). `task` IS allowed in plan mode but only spawns read-only
+    planning subagents (scope-researcher, finder-agent) — gated by SubagentConfig
+    `modes` in task_tool, not by excluding the tool from the catalog.
     """
     plan_path = TOOLS_DIR / "internal_tools_plan.json"
     if not plan_path.exists():
         pytest.skip("internal_tools_plan.json not present")
     plan_defns = load_tool_definitions(plan_path)
-    forbidden = {"bash", "write_file", "str_replace", "task"}
+    forbidden = {"bash", "write_file", "str_replace"}
     leaked = {defn.name for defn in plan_defns} & forbidden
     assert not leaked, f"Execution tools leaked into plan catalog: {sorted(leaked)}"
+
+
+def test_plan_catalog_task_only_offers_planning_subagents() -> None:
+    """The plan-mode `task` entry must offer only the read-only planning
+    subagents, never execution subagents like `general-purpose` or `bash`."""
+    plan_path = TOOLS_DIR / "internal_tools_plan.json"
+    if not plan_path.exists():
+        pytest.skip("internal_tools_plan.json not present")
+    plan_defns = {defn.name: defn for defn in load_tool_definitions(plan_path)}
+    task_defn = plan_defns.get("task")
+    assert task_defn is not None, "plan catalog must expose `task` for planning subagents"
+    enum = set(task_defn.parameters.properties["subagent_type"].get("enum", []))
+    assert enum == {"scope-researcher", "finder-agent"}, f"plan `task` enum drifted: {sorted(enum)}"
 
 
 def test_work_catalog_includes_execution_tools() -> None:

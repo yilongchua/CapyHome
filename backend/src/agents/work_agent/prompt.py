@@ -27,7 +27,7 @@ Hard limit: at most {n} `task` calls in one response. If you identify more than 
 Available subagents:
 - `general-purpose`: web research, code exploration, file analysis, multi-source investigation.
 - `bash`: command execution such as git, builds, tests, deployments.
-- `source-researcher`: one narrow live-source/RSS/direct-source research objective with structured source status.
+- `knowledge-researcher`: one narrow live-source/RSS/direct-source research objective with structured source status.
 - `docs-explorer`: read/search `/mnt/user-data/workspace/.docs` mirrored document corpora and return file-grounded evidence.
 - `comparison-dimension-researcher`: analyze one comparison dimension across a fixed set of options.
 - `synthesis-reviewer`: review collected findings or a draft for coverage, contradictions, citations, and freshness.

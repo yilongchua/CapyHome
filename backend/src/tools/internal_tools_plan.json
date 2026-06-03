@@ -203,7 +203,7 @@
       "write_todos(todos=[{\"id\": \"todo-1\", \"content\": \"Outline doc structure\", \"status\": \"in_progress\"}])",
       "write_todos(todos=[{\"id\": \"todo-1\", \"content\": \"Draft Q2 invoice for Acme Corp\", \"status\": \"pending\"}, {\"id\": \"todo-2\", \"content\": \"Email invoice to client for approval\", \"status\": \"pending\", \"depends_on\": [\"todo-1\"]}])",
       "write_todos(todos=[{\"id\": \"todo-1\", \"content\": \"Draft Q2 invoice for Acme Corp\", \"status\": \"pending\"}, {\"id\": \"todo-2\", \"content\": \"Generate expense summary XLSX\", \"status\": \"pending\"}, {\"id\": \"todo-3\", \"content\": \"Email both files to client\", \"status\": \"pending\", \"depends_on\": [\"todo-1\", \"todo-2\"]}])",
-      "write_todos(todos=[{\"id\": \"todo-1\", \"content\": \"Survey weekend events in Singapore\", \"status\": \"pending\", \"owner\": \"subagent\", \"subagent_type\": \"source-researcher\"}])"
+      "write_todos(todos=[{\"id\": \"todo-1\", \"content\": \"Survey weekend events in Singapore\", \"status\": \"pending\", \"owner\": \"subagent\", \"subagent_type\": \"knowledge-researcher\"}])"
     ],
     "parameters": {
       "type": "object",
@@ -241,7 +241,7 @@
               },
               "subagent_type": {
                 "type": "string",
-                "enum": ["general-purpose", "source-researcher", "docs-explorer", "comparison-dimension-researcher", "synthesis-reviewer", "vault-source-researcher"],
+                "enum": ["general-purpose", "knowledge-researcher", "docs-explorer", "comparison-dimension-researcher", "synthesis-reviewer", "vault-source-researcher"],
                 "description": "Required when `owner=subagent`. Names the subagent that will execute this todo."
               },
               "target_endpoint": {
@@ -325,6 +325,104 @@
         "end_line": {
           "type": "integer",
           "description": "Optional 1-indexed inclusive end line. Must be supplied TOGETHER with `start_line`. If `end_line` exceeds the file length, you get the lines up to the actual end with no error."
+        }
+      }
+    }
+  },
+  {
+    "name": "grep",
+    "description": "Search file contents for a regular-expression pattern, recursively — in Plan Mode this is your primary way to MAP and UNDERSTAND a codebase or document folder before drafting the plan: find where a symbol, route, config key, or phrase lives, trace how the pieces connect, and gauge the size and shape of the work. Skips binary files and common noise directories (.git, node_modules, .venv, __pycache__, build/cache). Each match is returned as `path:line:text`. Read-only and safe for scope discovery; does NOT honor `.gitignore`. Pair with `ls` (structure) and `read_file` (read the specific lines a match points at) to build an accurate picture of the repo.",
+    "handler": "src.sandbox.tools:grep_tool",
+    "mode": [
+      "plan"
+    ],
+    "phase": [
+      "draft",
+      "approved"
+    ],
+    "groups": [
+      "sandbox"
+    ],
+    "endpoint": "any",
+    "requires_vision": false,
+    "requires_subagent_enabled": false,
+    "returns": "Newline-joined matches as `path:line:text` (capped at `max_results`, default 200). Returns the literal `(no matches)` when nothing matches, an appended truncation note when the cap is hit, or `Error: ...` on sandbox failure.",
+    "examples": [
+      "grep(description=\"Find the app entrypoint\", pattern=\"def main\", path=\"/mnt/user-data/workspace\", include=\"*.py\")",
+      "grep(description=\"Locate route registration to map the API\", pattern=\"include_router|add_route\", path=\"/mnt/user-data/workspace\")",
+      "grep(description=\"Survey TODO/FIXME markers to scope work\", pattern=\"TODO|FIXME\", path=\"/mnt/user-data/workspace\", case_insensitive=true)"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": [
+        "description",
+        "pattern",
+        "path"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Short one-line explanation of why you're searching. Shown in the activity timeline. Pass FIRST in the call."
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Regular-expression pattern to search for (basic POSIX regex, as understood by `grep`). Pass SECOND in the call."
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute path to the file or directory to search. Virtual `/mnt/user-data/...` paths are translated automatically. Pass THIRD in the call."
+        },
+        "case_insensitive": {
+          "type": "boolean",
+          "description": "Match case-insensitively. Default false."
+        },
+        "include": {
+          "type": "string",
+          "description": "Optional filename glob to restrict the search (e.g. `*.py`, `*.md`). Omit to search all files."
+        },
+        "max_results": {
+          "type": "integer",
+          "description": "Maximum number of matching lines to return (1-1000). Default 200; output past the cap is truncated with a note."
+        }
+      }
+    }
+  },
+  {
+    "name": "task",
+    "description": "Delegate ONE scoped scope-discovery objective to a planning subagent that runs in its own isolated context, then returns a structured brief you reason over while drafting the plan. In Plan Mode the only subagents available are read-only planning helpers — they investigate and report, they NEVER execute work or produce the deliverable. Use this to understand the problem faster, especially by running several finders in PARALLEL across independent facets (e.g. one `finder-agent` mapping the backend while another maps the frontend, or several `scope-researcher` calls covering different sub-topics). The subagent does NOT see this conversation — its `prompt` must be fully self-contained: state the one facet/area, any constraints, and the brief you want back. Keep each delegation to a single narrow objective; split broad asks into multiple `task` calls. Do NOT use for: work you can do directly with `ls`/`grep`/`read_file`/`web_search`; anything that edits files or executes the plan (that is Work Mode); questions that need the user (use `ask_user_for_clarification`).",
+    "handler": "src.tools.builtins.task_tool:task_tool",
+    "mode": ["plan"],
+    "phase": ["draft", "approved"],
+    "groups": ["subagents"],
+    "endpoint": "any",
+    "requires_vision": false,
+    "requires_subagent_enabled": true,
+    "returns": "String containing the planning subagent's structured brief (truncated if it exceeds ~20k tokens). Returns an error string if `subagent_type` is unknown or not available in Plan Mode, or if the subagent times out. Lifecycle events (`task_started`, `task_running`, `task_completed`, `task_failed`, `task_timed_out`) stream out-of-band to the client.",
+    "examples": [
+      "task(description=\"Map the repo structure\", prompt=\"Map and understand the backend at /mnt/user-data/workspace. Read the README and entrypoints (main.py/app.py), then report: top-level structure, where the HTTP layer / business logic / config live, how startup wires things together, and any constraints worth knowing before planning improvements. Do not propose changes.\", subagent_type=\"finder-agent\")",
+      "task(description=\"Scope the comparison\", prompt=\"Understand the SCOPE of comparing managed Postgres providers for a small SaaS. Return: the sub-dimensions that matter (pricing model, regions, backups, connection limits, etc.), credible source types to consult during execution, and any ambiguities the planner should resolve. Do not pick a winner.\", subagent_type=\"scope-researcher\")",
+      "task(description=\"Understand the auth module\", prompt=\"Map /mnt/user-data/workspace/src/auth. Report how authentication flows (entrypoints, middleware, token handling), where each responsibility lives, and what a change to the login path would touch. Read-only; no edits.\", subagent_type=\"finder-agent\")"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": ["description", "prompt", "subagent_type"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Short (3-5 word) label for UI and log display, e.g. `\"Map the repo structure\"`. Shown verbatim in the activity timeline."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The full, self-contained objective for the planning subagent. Must include: (1) the one facet/area to investigate, (2) any scope limits, (3) the brief you want back. The subagent does not see this conversation. Never ask it to produce the deliverable — only to investigate and report."
+        },
+        "subagent_type": {
+          "type": "string",
+          "enum": ["scope-researcher", "finder-agent"],
+          "description": "Which planning subagent to invoke. `scope-researcher`: understands the SCOPE of one facet using `web_search` + `query_knowledge_vault` (sub-topics, sources, ambiguities). `finder-agent`: FINDS AND UNDERSTANDS local files/directories using `grep`/`ls`/`read_file` (maps a repo/folder, reads README/entrypoints/configs, reports where things live)."
+        },
+        "max_turns": {
+          "type": "integer",
+          "description": "Optional override for the subagent's recursion limit (LangGraph `recursion_limit`). Defaults to the subagent's configured max (from config.yaml `subagents.agents.<name>.max_turns`, else the subagent default). Lower to bound cost; raise only if the default is provably too small."
         }
       }
     }

@@ -63,7 +63,7 @@ def test_make_work_agent_uses_plan_prompt_when_current_mode_is_plan(monkeypatch)
 
     rendered_prompt = result["system_prompt"]
     assert "<plan_mode>" in rendered_prompt, "plan-mode section missing when current_mode='plan'"
-    assert "Your ONLY job is to produce a plan.md" in rendered_prompt
+    assert "Produce a plan.md that a Work Mode agent can execute faithfully" in rendered_prompt
 
 
 def test_make_work_agent_omits_plan_prompt_when_current_mode_is_work(monkeypatch):

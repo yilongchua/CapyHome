@@ -47,7 +47,7 @@ def _planner(monkeypatch) -> PlannerMiddleware:
                         "steps": [
                             {
                                 "description": "Web search candidates",
-                                "subagent_types": ["source-researcher"],
+                                "subagent_types": ["knowledge-researcher"],
                                 "tools": ["web_search"],
                                 "output_artifact_path": "/mnt/user-data/workspace/candidates.md",
                                 "completion_requirement": ">= 15 entries",
@@ -101,7 +101,7 @@ def test_parse_plan_response_captures_rich_fields() -> None:
                     "steps": [
                         {
                             "description": "web search",
-                            "subagent_types": ["source-researcher"],
+                            "subagent_types": ["knowledge-researcher"],
                             "tools": ["web_search"],
                             "output_artifact_path": "/mnt/user-data/workspace/candidates.md",
                             "completion_requirement": ">= 15 entries",
@@ -133,7 +133,7 @@ def test_render_plan_md_includes_rich_todo_sections() -> None:
             "steps": [
                 {
                     "description": "web search",
-                    "subagent_types": ["source-researcher"],
+                    "subagent_types": ["knowledge-researcher"],
                     "tools": ["web_search"],
                     "output_artifact_path": "/mnt/user-data/workspace/candidates.md",
                     "completion_requirement": "15 entries",
@@ -145,7 +145,7 @@ def test_render_plan_md_includes_rich_todo_sections() -> None:
     assert "Objective: Find 10" in md
     assert "Steps:" in md
     assert "1. web search" in md
-    assert "Subagent: source-researcher" in md
+    assert "Subagent: knowledge-researcher" in md
     assert "Tools: web_search" in md
     assert "/mnt/user-data/workspace/candidates.md" in md
     assert "Done when: top10.md exists" in md

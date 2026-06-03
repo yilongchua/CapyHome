@@ -74,7 +74,7 @@ def test_research_subagents_route_to_helper_endpoint():
 
     middleware = SubagentLimitMiddleware(max_concurrent=3, router=Router(), requested_model="model-a", max_primary_per_turn=1)
     endpoint = middleware._target_endpoint(
-        {"name": "task", "id": "t1", "args": {"description": "research", "subagent_type": "source-researcher"}}
+        {"name": "task", "id": "t1", "args": {"description": "research", "subagent_type": "knowledge-researcher"}}
     )
 
     assert endpoint == "helper"

@@ -65,7 +65,7 @@ def _make_result(
 
 def test_task_tool_returns_error_for_unknown_subagent(monkeypatch):
     monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: None)
-    monkeypatch.setattr(task_tool_module, "get_subagent_names", lambda: ["general-purpose", "source-researcher"])
+    monkeypatch.setattr(task_tool_module, "get_subagent_names", lambda: ["general-purpose", "knowledge-researcher"])
 
     result = task_tool_module.task_tool.func(
         runtime=None,
@@ -76,13 +76,13 @@ def test_task_tool_returns_error_for_unknown_subagent(monkeypatch):
     )
 
     assert result.startswith("Error: Unknown subagent type")
-    assert "source-researcher" in result
+    assert "knowledge-researcher" in result
 
 
 @pytest.mark.parametrize(
     "subagent_type",
     [
-        "source-researcher",
+        "knowledge-researcher",
         "docs-explorer",
         "comparison-dimension-researcher",
         "synthesis-reviewer",
@@ -216,9 +216,9 @@ def test_task_tool_emits_running_and_completed_events(monkeypatch):
     assert all(e.get("trace_already_streamed") is True for e in runtime_events)
 
 
-def test_source_researcher_broad_prompt_is_rewritten_to_ready_todo(monkeypatch):
+def test_knowledge_researcher_broad_prompt_is_rewritten_to_ready_todo(monkeypatch):
     config = SubagentConfig(
-        name="source-researcher",
+        name="knowledge-researcher",
         description="source researcher",
         system_prompt="Research prompt",
         max_turns=5,
@@ -267,7 +267,7 @@ def test_source_researcher_broad_prompt_is_rewritten_to_ready_todo(monkeypatch):
         runtime=runtime,
         description="EV mega brief",
         prompt=broad_prompt,
-        subagent_type="source-researcher",
+        subagent_type="knowledge-researcher",
         tool_call_id="tc-rewrite",
     )
 
@@ -280,9 +280,9 @@ def test_source_researcher_broad_prompt_is_rewritten_to_ready_todo(monkeypatch):
     assert runtime_events[0]["original_description"] == "EV mega brief"
 
 
-def test_source_researcher_rejects_broad_prompt_when_multiple_ready_todos_are_ambiguous(monkeypatch):
+def test_knowledge_researcher_rejects_broad_prompt_when_multiple_ready_todos_are_ambiguous(monkeypatch):
     config = SubagentConfig(
-        name="source-researcher",
+        name="knowledge-researcher",
         description="source researcher",
         system_prompt="Research prompt",
         max_turns=5,
@@ -308,16 +308,16 @@ def test_source_researcher_rejects_broad_prompt_when_multiple_ready_todos_are_am
         runtime=runtime,
         description="EV mega brief",
         prompt=broad_prompt,
-        subagent_type="source-researcher",
+        subagent_type="knowledge-researcher",
         tool_call_id="tc-ambiguous",
     )
 
-    assert output.startswith("Task rejected: source-researcher accepts one narrow objective only.")
+    assert output.startswith("Task rejected: knowledge-researcher accepts one narrow objective only.")
 
 
-def test_source_researcher_rejects_broad_prompt_without_narrow_scope_hint(monkeypatch):
+def test_knowledge_researcher_rejects_broad_prompt_without_narrow_scope_hint(monkeypatch):
     config = SubagentConfig(
-        name="source-researcher",
+        name="knowledge-researcher",
         description="source researcher",
         system_prompt="Research prompt",
         max_turns=5,
@@ -336,11 +336,11 @@ def test_source_researcher_rejects_broad_prompt_without_narrow_scope_hint(monkey
         runtime=runtime,
         description="EV mega brief",
         prompt=broad_prompt,
-        subagent_type="source-researcher",
+        subagent_type="knowledge-researcher",
         tool_call_id="tc-reject",
     )
 
-    assert output.startswith("Task rejected: source-researcher accepts one narrow objective only.")
+    assert output.startswith("Task rejected: knowledge-researcher accepts one narrow objective only.")
 
 
 def test_task_tool_forwards_parent_agent_tool_groups(monkeypatch):

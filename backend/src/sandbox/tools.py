@@ -338,6 +338,78 @@ def read_file_tool(
         return f"Error: Unexpected error reading file: {type(e).__name__}: {e}"
 
 
+_GREP_EXCLUDE_DIRS = (
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    "dist",
+    "build",
+    ".next",
+    ".turbo",
+)
+
+
+@tool("grep", parse_docstring=True)
+def grep_tool(
+    runtime: ToolRuntime[ContextT, ThreadState],
+    description: str,
+    pattern: str,
+    path: str,
+    case_insensitive: bool = False,
+    include: str | None = None,
+    max_results: int = 200,
+) -> str:
+    """Search file contents for a regular-expression pattern, recursively. Use this to find where a symbol, string, config key, or phrase appears across a codebase or document folder — far faster than reading files one by one.
+
+    Skips binary files and common noise directories (`.git`, `node_modules`, `.venv`, `__pycache__`, build/cache dirs). Each match is returned as `path:line:text`. Does NOT honor `.gitignore`.
+
+    Args:
+        description: Explain why you are searching in short words. ALWAYS PROVIDE THIS PARAMETER FIRST.
+        pattern: The regular-expression pattern to search for (basic POSIX regex, as understood by `grep`). ALWAYS PROVIDE THIS PARAMETER SECOND.
+        path: The **absolute** path to the file or directory to search in. ALWAYS PROVIDE THIS PARAMETER THIRD.
+        case_insensitive: Match case-insensitively. Default is False.
+        include: Optional filename glob to restrict the search (e.g. `*.py`, `*.md`). Omit to search all files.
+        max_results: Maximum number of matching lines to return (1-1000). Default is 200.
+    """
+    try:
+        sandbox = ensure_sandbox_initialized(runtime)
+        ensure_thread_directories_exist(runtime)
+        if is_local_sandbox(runtime):
+            thread_data = get_thread_data(runtime)
+            path = replace_virtual_path(path, thread_data)
+
+        capped = max(1, min(int(max_results), 1000))
+        parts = ["grep", "-rnI"]
+        if case_insensitive:
+            parts.append("-i")
+        if include:
+            parts.append(f"--include={shlex.quote(include)}")
+        parts.extend(f"--exclude-dir={d}" for d in _GREP_EXCLUDE_DIRS)
+        # -e guards patterns that begin with '-'; quote pattern/path for the shell.
+        parts.extend(["-e", shlex.quote(pattern), shlex.quote(path)])
+        # head bounds the output; `|| true` swallows grep's exit-1-on-no-match so
+        # the sandbox does not append a spurious "Exit Code: 1".
+        command = " ".join(parts) + f" 2>/dev/null | head -n {capped} || true"
+
+        output = sandbox.execute_command(command)
+        if not output or output.strip() in ("", "(no output)"):
+            return "(no matches)"
+        lines = output.splitlines()
+        if len(lines) >= capped:
+            output += f"\n... (truncated at {capped} matches; narrow the pattern, path, or `include` glob)"
+        return output
+    except SandboxError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        return f"Error: Unexpected error running grep: {type(e).__name__}: {e}"
+
+
 @tool("write_file", parse_docstring=True)
 def write_file_tool(
     runtime: ToolRuntime[ContextT, ThreadState],

@@ -21,7 +21,7 @@ from src.agents.thread_state import ThreadState
 from src.agents.work_agent.prompt import get_skills_prompt_section
 from src.subagents import SubagentExecutor, get_subagent_config
 from src.subagents.executor import SubagentStatus, cleanup_background_task, get_background_task_result
-from src.subagents.registry import get_subagent_names
+from src.subagents.registry import get_subagent_names, get_subagent_names_for_mode
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,32 @@ def _summarize_subagent_activity(message: dict) -> str | None:
     return None
 
 
+def _resolve_task_mode(runtime: object) -> str:
+    """Resolve the canonical runtime mode ('work' or 'plan') for `task` gating.
+
+    Reads the `configurable` dict from the tool runtime, falling back to the
+    LangGraph runnable config. Defaults to 'work' when nothing is available
+    (e.g. direct/unit invocation).
+    """
+    from src.agents.common.mode import resolve_current_mode
+
+    configurable: dict = {}
+    runtime_cfg = getattr(runtime, "config", None) if runtime is not None else None
+    if isinstance(runtime_cfg, dict):
+        configurable = runtime_cfg.get("configurable", {}) or {}
+    if not configurable:
+        try:
+            from langgraph.config import get_config
+
+            configurable = (get_config() or {}).get("configurable", {}) or {}
+        except Exception:
+            configurable = {}
+    try:
+        return resolve_current_mode(configurable)
+    except Exception:
+        return "work"
+
+
 def _normalize_subagent_label(value: str) -> str:
     label = value.strip()
     if not label:
@@ -198,7 +224,7 @@ def _ready_todo_scope_hint(runtime: ToolRuntime[ContextT, ThreadState] | None, *
         return None
 
     # Multiple ready todos can be executed in parallel. Only rewrite a broad
-    # source-researcher prompt when its short description clearly names one.
+    # knowledge-researcher prompt when its short description clearly names one.
     description_tokens = _tokens(description)
     if not description_tokens:
         return None
@@ -246,7 +272,7 @@ def task_tool(
       multiple dependent steps, or would benefit from isolated context.
     - **bash**: Command execution specialist for running bash commands. Use for
       git operations, build processes, or when command output would be verbose.
-    - **source-researcher**: External source researcher for one narrow live-source,
+    - **knowledge-researcher**: External source researcher for one narrow live-source,
       RSS, or direct-source research objective.
     - **docs-explorer**: Local corpus explorer for uploaded or mounted documents
       mirrored into `/mnt/user-data/workspace/.docs`.
@@ -272,19 +298,34 @@ def task_tool(
         max_turns: Optional maximum number of agent turns. Defaults to subagent's configured max.
     """
     # Get subagent configuration
+    config = get_subagent_config(subagent_type)
+    if config is None:
+        available = ", ".join(get_subagent_names())
+        return f"Error: Unknown subagent type '{subagent_type}'. Available: {available}"
+
+    # Mode gating: a subagent may only be spawned in a runtime mode listed in its
+    # `modes`. Plan Mode exposes only planning helpers (scope-researcher,
+    # finder-agent); Work/Auto exposes the execution subagents.
+    current_mode = _resolve_task_mode(runtime)
+    if current_mode not in config.modes:
+        available = ", ".join(sorted(get_subagent_names_for_mode(current_mode)))
+        return (
+            f"Error: subagent '{subagent_type}' is not available in {current_mode} mode "
+            f"(its allowed modes: {', '.join(config.modes)}). "
+            f"Available in {current_mode} mode: {available or '(none)'}."
+        )
+
+    # Draft-plan gate: execution subagents are gated until the plan is approved.
+    # Planning subagents (modes include 'plan') are exempt — they run *during*
+    # drafting, which is the whole point of the plan-mode finder tier.
     plan_state = runtime.state.get("plan") if runtime and runtime.state else None
-    if isinstance(plan_state, dict):
+    if isinstance(plan_state, dict) and "plan" not in config.modes:
         plan_status = _normalize_plan_status(plan_state.get("status"))
         if plan_status == "draft":
             return (
                 "Task execution is gated because the current plan is still in draft state. "
                 "Use the explicit execute-plan action first, then retry."
             )
-
-    config = get_subagent_config(subagent_type)
-    if config is None:
-        available = ", ".join(get_subagent_names())
-        return f"Error: Unknown subagent type '{subagent_type}'. Available: {available}"
 
     # Build config overrides
     overrides: dict = {}
@@ -302,7 +343,7 @@ def task_tool(
     normalized_description = _normalize_description(description)
     normalized_subagent_type = _normalize_subagent_label(subagent_type)
     rewritten_scope = False
-    if normalized_subagent_type == "source-researcher" and _source_research_prompt_is_broad(prompt):
+    if normalized_subagent_type == "knowledge-researcher" and _source_research_prompt_is_broad(prompt):
         scope_hint = _ready_todo_scope_hint(runtime, description=description)
         if scope_hint:
             prompt = _rewrite_source_research_prompt(prompt, scope_hint)
@@ -310,7 +351,7 @@ def task_tool(
             rewritten_scope = True
         else:
             return (
-                "Task rejected: source-researcher accepts one narrow objective only. "
+                "Task rejected: knowledge-researcher accepts one narrow objective only. "
                 "Split the request into smaller scoped task calls (one evidence dimension per task) and retry."
             )
 

@@ -1,10 +1,10 @@
-"""Source researcher subagent configuration."""
+"""Knowledge researcher subagent configuration."""
 
 from src.subagents.config import SubagentConfig
 
-SOURCE_RESEARCHER_CONFIG = SubagentConfig(
-    name="source-researcher",
-    description="""External source researcher for one narrow, current-information objective.
+KNOWLEDGE_RESEARCHER_CONFIG = SubagentConfig(
+    name="knowledge-researcher",
+    description="""External knowledge researcher for one narrow, current-information objective.
 
 Use this subagent when:
 - A task needs fresh web, RSS, direct-source, or public-source evidence
@@ -12,7 +12,7 @@ Use this subagent when:
 - A previous broad web_search attempt failed and a smaller, source-focused pass is useful
 
 Do NOT use for local document analysis, final synthesis, or broad multi-topic research briefs.""",
-    system_prompt="""You are a source researcher working on one delegated research objective. Your job is to gather current external evidence and return structured source notes that the parent agent can synthesize.
+    system_prompt="""You are a knowledge researcher working on one delegated research objective. Your job is to gather current external evidence and return structured source notes that the parent agent can synthesize.
 
 <scope>
 - Work on exactly one topic, question, or evidence gap.

@@ -172,8 +172,8 @@
     "requires_subagent_enabled": true,
     "returns": "String containing the subagent's final response (truncated if it exceeds ~20k tokens). Returns an error string if `subagent_type` is unknown, if called while a plan is still in `draft`, or if the subagent times out. Lifecycle events (`task_started`, `task_running`, `task_completed`, `task_failed`, `task_timed_out`) stream out-of-band to the client.",
     "examples": [
-      "task(description=\"Research async patterns\", prompt=\"Survey Python asyncio cancellation patterns in 2024-2025 sources. Return 3-5 sources with one-sentence summaries and direct URL citations. Focus on structured concurrency primitives (TaskGroup, anyio).\", subagent_type=\"source-researcher\")",
-      "task(description=\"Find weekend events\", prompt=\"Find 5-8 family-friendly events happening in Singapore between 2026-05-30 and 2026-06-01. For each event return: name, venue, time, one-line description, ticket/price info if any, and the source URL. Skip nightlife and 18+ events.\", subagent_type=\"source-researcher\")",
+      "task(description=\"Research async patterns\", prompt=\"Survey Python asyncio cancellation patterns in 2024-2025 sources. Return 3-5 sources with one-sentence summaries and direct URL citations. Focus on structured concurrency primitives (TaskGroup, anyio).\", subagent_type=\"knowledge-researcher\")",
+      "task(description=\"Find weekend events\", prompt=\"Find 5-8 family-friendly events happening in Singapore between 2026-05-30 and 2026-06-01. For each event return: name, venue, time, one-line description, ticket/price info if any, and the source URL. Skip nightlife and 18+ events.\", subagent_type=\"knowledge-researcher\")",
       "task(description=\"Organise case files\", prompt=\"Enumerate the files under /mnt/user-data/workspace/uploads/case-acme-v-beta/. Group them by document type (pleadings, evidence, correspondence, court orders, expert reports). Return a markdown index: per group, list filename and a one-line role description. Do not open or modify the files.\", subagent_type=\"general-purpose\")",
       "task(description=\"Run full test suite\", prompt=\"Run `make test` from the repo root and report: (1) pass/fail count, (2) the names and first 5 lines of any failing test, (3) total duration. Do not attempt to fix failures.\", subagent_type=\"bash\")"
     ],
@@ -191,8 +191,8 @@
         },
         "subagent_type": {
           "type": "string",
-          "enum": ["general-purpose", "bash", "source-researcher", "docs-explorer", "comparison-dimension-researcher", "synthesis-reviewer", "vault-source-researcher"],
-          "description": "Which subagent to invoke. `general-purpose`: all-tool exploratory worker, default max_turns from config. `bash`: shell-command specialist for verbose output. `source-researcher`: one narrow external/live-source objective; default max_turns=25; auto-narrows broad prompts. `docs-explorer`: searches the local corpus / mounted documents in `/mnt/user-data/workspace/.docs`. `comparison-dimension-researcher`: researches one comparison dimension across a fixed option set; default max_turns=25. `synthesis-reviewer`: reviews collected findings for coverage, contradictions, citations, and freshness. `vault-source-researcher`: autoresearch helper that writes findings into the knowledge vault."
+          "enum": ["general-purpose", "bash", "knowledge-researcher", "docs-explorer", "comparison-dimension-researcher", "synthesis-reviewer", "vault-source-researcher"],
+          "description": "Which subagent to invoke. `general-purpose`: all-tool exploratory worker, default max_turns from config. `bash`: shell-command specialist for verbose output. `knowledge-researcher`: one narrow external/live-source objective; default max_turns=25; auto-narrows broad prompts. `docs-explorer`: searches the local corpus / mounted documents in `/mnt/user-data/workspace/.docs`. `comparison-dimension-researcher`: researches one comparison dimension across a fixed option set; default max_turns=25. `synthesis-reviewer`: reviews collected findings for coverage, contradictions, citations, and freshness. `vault-source-researcher`: autoresearch helper that writes findings into the knowledge vault."
         },
         "max_turns": {
           "type": "integer",
@@ -244,7 +244,7 @@
       "write_todos(todos=[{\"id\": \"todo-1\", \"content\": \"Outline doc structure\", \"status\": \"in_progress\"}])",
       "write_todos(todos=[{\"id\": \"todo-1\", \"status\": \"completed\"}, {\"id\": \"todo-2\", \"content\": \"Email invoice to client for approval\", \"status\": \"in_progress\", \"depends_on\": [\"todo-1\"]}])",
       "write_todos(todos=[{\"id\": \"todo-1\", \"content\": \"Draft Q2 invoice for Acme Corp\", \"status\": \"in_progress\"}, {\"id\": \"todo-2\", \"content\": \"Generate expense summary XLSX\", \"status\": \"pending\"}, {\"id\": \"todo-3\", \"content\": \"Email both files to client\", \"status\": \"pending\", \"depends_on\": [\"todo-1\", \"todo-2\"]}])",
-      "write_todos(todos=[{\"content\": \"Survey weekend events in Singapore\", \"status\": \"pending\", \"owner\": \"subagent\", \"subagent_type\": \"source-researcher\"}])"
+      "write_todos(todos=[{\"content\": \"Survey weekend events in Singapore\", \"status\": \"pending\", \"owner\": \"subagent\", \"subagent_type\": \"knowledge-researcher\"}])"
     ],
     "parameters": {
       "type": "object",
@@ -282,7 +282,7 @@
               },
               "subagent_type": {
                 "type": "string",
-                "enum": ["general-purpose", "bash", "source-researcher", "docs-explorer", "comparison-dimension-researcher", "synthesis-reviewer", "vault-source-researcher"],
+                "enum": ["general-purpose", "bash", "knowledge-researcher", "docs-explorer", "comparison-dimension-researcher", "synthesis-reviewer", "vault-source-researcher"],
                 "description": "Required when `owner=subagent`. Names the subagent that will execute this todo."
               },
               "target_endpoint": {
@@ -483,6 +483,65 @@
         "replace_all": {
           "type": "boolean",
           "description": "If true, replace every occurrence of `old_str` (use for renames, bulk substitutions). Defaults to false (single occurrence; uniqueness enforced)."
+        }
+      }
+    }
+  },
+  {
+    "name": "grep",
+    "description": "Search file contents for a regular-expression pattern, recursively. Use this to find where a symbol, string, config key, import, or phrase appears across a codebase or document folder — far faster and cheaper than reading files one by one, and the right first step before an edit so you change every call site. Skips binary files and common noise directories (.git, node_modules, .venv, __pycache__, build/cache). Each match is returned as `path:line:text`. Does NOT honor `.gitignore`. For pattern matching that needs full regex extensions, multiline, or replacement, fall back to `bash` with `rg`/`grep`/`sed`.",
+    "handler": "src.sandbox.tools:grep_tool",
+    "mode": [
+      "work",
+      "auto"
+    ],
+    "phase": [
+      "draft",
+      "approved"
+    ],
+    "groups": [
+      "sandbox"
+    ],
+    "endpoint": "any",
+    "requires_vision": false,
+    "requires_subagent_enabled": false,
+    "returns": "Newline-joined matches as `path:line:text` (capped at `max_results`, default 200). Returns the literal `(no matches)` when nothing matches, an appended truncation note when the cap is hit, or `Error: ...` on sandbox failure.",
+    "examples": [
+      "grep(description=\"Find all call sites before renaming\", pattern=\"old_function_name\", path=\"/mnt/user-data/workspace\", include=\"*.py\")",
+      "grep(description=\"Locate the config key\", pattern=\"DATABASE_URL\", path=\"/mnt/user-data/workspace\")",
+      "grep(description=\"Find error handling to patch\", pattern=\"except .*Error\", path=\"/mnt/user-data/workspace/src\", case_insensitive=true)"
+    ],
+    "parameters": {
+      "type": "object",
+      "required": [
+        "description",
+        "pattern",
+        "path"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Short one-line explanation of why you're searching. Shown in the activity timeline. Pass FIRST in the call."
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Regular-expression pattern to search for (basic POSIX regex, as understood by `grep`). Pass SECOND in the call."
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute path to the file or directory to search. Virtual `/mnt/user-data/...` paths are translated automatically. Pass THIRD in the call."
+        },
+        "case_insensitive": {
+          "type": "boolean",
+          "description": "Match case-insensitively. Default false."
+        },
+        "include": {
+          "type": "string",
+          "description": "Optional filename glob to restrict the search (e.g. `*.py`, `*.md`). Omit to search all files."
+        },
+        "max_results": {
+          "type": "integer",
+          "description": "Maximum number of matching lines to return (1-1000). Default 200; output past the cap is truncated with a note."
         }
       }
     }

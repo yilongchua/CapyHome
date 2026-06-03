@@ -330,10 +330,10 @@ Required:
 Optional — include ONLY when they carry real signal, otherwise omit:
 - completion_requirement (todo-level): include only when it adds something
   beyond the final step's done-criterion (e.g., a cross-step invariant).
-- steps[].subagent_types: from {source-researcher, docs-explorer,
+- steps[].subagent_types: from {knowledge-researcher, docs-explorer,
   comparison-dimension-researcher, synthesis-reviewer, general-purpose, bash}.
   Omit when the lead agent handles the step directly. Prefer
-  ["source-researcher"] for broad web research (it has its own search budget).
+  ["knowledge-researcher"] for broad web research (it has its own search budget).
 - steps[].tools: from {web_search, query_knowledge_vault,
   read_file, write_file, str_replace, bash, ls, view_image, task,
   present_files}. Omit when the step needs no specific tool gating.
@@ -351,13 +351,13 @@ EXAMPLE rich todo for "Find 10 well-reviewed restaurants matching my criteria":
   "rationale": "Foundational lookup that downstream filtering depends on.",
   "depends_on": [],
   "owner": "lead",
-  "subagent_type": "source-researcher",
+  "subagent_type": "knowledge-researcher",
   "objective": "Produce a candidate list of restaurants with enough headroom to filter to top 10.",
   "failure_fallback": "If web_search returns < 10 results, fall back to model's prior knowledge and label results as 'best-effort from training data'. If criteria are ambiguous, call ask_user_for_clarification.",
   "steps": [
     {
       "description": "Web search for candidate restaurants",
-      "subagent_types": ["source-researcher"],
+      "subagent_types": ["knowledge-researcher"],
       "output_artifact_path": "/mnt/user-data/workspace/candidates.md",
       "completion_requirement": "candidates.md contains at least 15 entries with name + URL"
     },

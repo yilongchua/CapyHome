@@ -102,7 +102,7 @@ void test("subagent task lifecycle collapses by task id", () => {
       timestamp: 1,
       actor: "baby_capy",
       kind: "task_started",
-      line: "Baby Capy - source-researcher is working on restaurants...",
+      line: "Baby Capy - knowledge-researcher is working on restaurants...",
       task_id: "task-1",
     },
     {
@@ -111,7 +111,7 @@ void test("subagent task lifecycle collapses by task id", () => {
       timestamp: 2,
       actor: "baby_capy",
       kind: "task_completed",
-      line: "Baby Capy - source-researcher finished restaurants",
+      line: "Baby Capy - knowledge-researcher finished restaurants",
       task_id: "task-1",
     },
   ]);
@@ -119,7 +119,7 @@ void test("subagent task lifecycle collapses by task id", () => {
   assert.equal(operations.length, 1);
   assert.equal(operations[0]?.operationId, "subagent:task-1");
   assert.equal(operations[0]?.status, "completed");
-  assert.equal(operations[0]?.label, "Baby Capy - source-researcher finished restaurants");
+  assert.equal(operations[0]?.label, "Baby Capy - knowledge-researcher finished restaurants");
 });
 
 void test("generic model response events do not render as progress operations", () => {

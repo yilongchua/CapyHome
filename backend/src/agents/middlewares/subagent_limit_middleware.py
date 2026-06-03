@@ -17,10 +17,14 @@ logger = logging.getLogger(__name__)
 
 _HELPER_SUBAGENT_TYPES = {
     "bash",
-    "source-researcher",
+    "knowledge-researcher",
     "docs-explorer",
     "comparison-dimension-researcher",
     "synthesis-reviewer",
+    # Plan-Mode planning helpers — route to the cheap triage endpoint so the
+    # planner can fan out several finders in parallel without the primary cap.
+    "scope-researcher",
+    "finder-agent",
 }
 
 
