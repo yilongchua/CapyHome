@@ -9,10 +9,20 @@ export interface IdleAutoRunArgs {
   isBusy: boolean;
   /** True specifically while a vault ingest is running. */
   ingestActive: boolean;
+  /**
+   * `started_at` of the latest ingest run (null if none). Used to detect whether
+   * a *fresh* ingest actually ran this cycle — an empty queue never starts a run,
+   * so this stays unchanged and a stale prior `updated` count won't trigger lint.
+   */
+  ingestStartedAt: string | null;
+  /** Items the latest ingest run added/changed. 0 ⇒ nothing was ingested. */
+  ingestUpdatedCount: number;
   /** Start an ingest (caller pins 1 worker + default model). */
   onAutoIngest: () => void;
   /** Start a lint preview (caller pins 1 worker + default model). */
   onAutoLint: () => void;
+  /** Optional: notified when lint is skipped because nothing was ingested. */
+  onAutoLintSkipped?: () => void;
 }
 
 /**
@@ -35,6 +45,9 @@ export function useIdleAutoRun(args: IdleAutoRunArgs): void {
   const lastActivityRef = useRef<number>(Date.now());
   const phaseRef = useRef<"armed" | "awaiting-ingest" | "done">("armed");
   const awaitingSinceRef = useRef<number>(0);
+  // `started_at` captured when this cycle's ingest was kicked off, so we can tell
+  // whether a new run actually happened (vs. an empty queue that never started).
+  const preIngestStartedAtRef = useRef<string | null>(null);
 
   // User-presence + tab-focus events reset the idle timer and re-arm a
   // completed cycle. Backend request activity is captured indirectly: any
@@ -57,7 +70,16 @@ export function useIdleAutoRun(args: IdleAutoRunArgs): void {
     // queue) before kicking off lint — lets the manifest/compile settle.
     const SETTLE_MS = 60_000;
     const id = setInterval(() => {
-      const { idleMinutes, isBusy, ingestActive, onAutoIngest, onAutoLint } = argsRef.current;
+      const {
+        idleMinutes,
+        isBusy,
+        ingestActive,
+        ingestStartedAt,
+        ingestUpdatedCount,
+        onAutoIngest,
+        onAutoLint,
+        onAutoLintSkipped,
+      } = argsRef.current;
       if (idleMinutes <= 0) {
         phaseRef.current = "armed";
         return;
@@ -74,6 +96,8 @@ export function useIdleAutoRun(args: IdleAutoRunArgs): void {
         if (Date.now() - lastActivityRef.current >= idleMs) {
           phaseRef.current = "awaiting-ingest";
           awaitingSinceRef.current = Date.now();
+          // Remember the pre-ingest run marker so we can detect a fresh run.
+          preIngestStartedAtRef.current = ingestStartedAt;
           onAutoIngest();
         }
         return;
@@ -88,7 +112,16 @@ export function useIdleAutoRun(args: IdleAutoRunArgs): void {
         }
         if (Date.now() - awaitingSinceRef.current >= SETTLE_MS) {
           phaseRef.current = "done";
-          onAutoLint();
+          // Only lint if a fresh ingest run actually happened this cycle AND it
+          // ingested something. An empty queue never starts a run (started_at
+          // unchanged); a run that changed nothing reports updated === 0. In
+          // either case there's nothing new to lint, so skip it.
+          const ranThisCycle = ingestStartedAt != null && ingestStartedAt !== preIngestStartedAtRef.current;
+          if (ranThisCycle && ingestUpdatedCount > 0) {
+            onAutoLint();
+          } else {
+            onAutoLintSkipped?.();
+          }
         }
       }
     }, TICK_MS);

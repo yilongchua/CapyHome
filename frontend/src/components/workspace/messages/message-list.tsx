@@ -283,6 +283,29 @@ export function MessageList({
     return next;
   }, [subtaskUpdates]);
   const currentTaskDescription = useCurrentTaskDescription(messages, subtasksById);
+  // Fallback shown in-thread before any tool call produces a more specific
+  // description: surface what the agent is working on (the latest user
+  // request) directly in the conversation, not only in the activity side
+  // panel. Mirrors the "CapyHome is working on …" synthetic activity event.
+  const initialTaskDescription = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.type === "human" && !isSyntheticHumanMessage(message)) {
+        const raw = hasContent(message)
+          ? extractContentFromMessage(message)
+          : "";
+        const normalized = raw.replace(/\s+/g, " ").trim();
+        if (!normalized) {
+          return undefined;
+        }
+        return normalized.length > 140
+          ? `${normalized.slice(0, 139)}…`
+          : normalized;
+      }
+    }
+    return undefined;
+  }, [messages]);
+  const runnerTaskDescription = currentTaskDescription ?? initialTaskDescription;
   const hasFinalAssistantMessage = useMemo(() => {
     let latestHumanIndex = -1;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -664,7 +687,7 @@ export function MessageList({
             ) : (
               <div className="text-muted-foreground rounded-md border bg-muted/20 px-3 py-2 text-xs">
                 {thread.isLoading ? (
-                  <CapyHomeRunner className="my-0 text-xs" taskDescription={currentTaskDescription} />
+                  <CapyHomeRunner className="my-0 text-xs" taskDescription={runnerTaskDescription} />
                 ) : (
                   <div className="flex items-center gap-2">
                     <CircleDashedIcon className="size-3.5 shrink-0" />

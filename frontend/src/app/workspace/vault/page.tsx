@@ -326,6 +326,8 @@ export default function VaultPage() {
     idleMinutes,
     isBusy: ingestRunning || lintVaultMutation.isPending,
     ingestActive: ingestRunning,
+    ingestStartedAt: ingestStatus?.started_at ?? null,
+    ingestUpdatedCount: ingestStatus?.updated ?? 0,
     onAutoIngest: () => {
       if (ingestRunning) return;
       startIngest.mutate(
@@ -349,6 +351,9 @@ export default function VaultPage() {
           onError: (error) => toast.error(error instanceof Error ? error.message : "Idle auto-run lint failed."),
         },
       );
+    },
+    onAutoLintSkipped: () => {
+      toast.message("Idle auto-run: no new sources ingested — skipping lint.");
     },
   });
   const ingestEtaLabel = (() => {
