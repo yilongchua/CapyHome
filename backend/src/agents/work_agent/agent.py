@@ -52,6 +52,7 @@ from src.agents.middlewares.trajectory_middleware import TrajectoryMiddleware
 from src.agents.middlewares.uploads_middleware import UploadsMiddleware
 from src.agents.middlewares.view_image_middleware import ViewImageMiddleware
 from src.agents.middlewares.web_search_circuit_breaker_middleware import WebSearchCircuitBreakerMiddleware
+from src.agents.middlewares.web_search_ingestion_middleware import WebSearchIngestionMiddleware
 from src.agents.middlewares.web_search_summary_middleware import WebSearchSummaryMiddleware
 from src.agents.middlewares.work_mode_middleware import _create_work_mode
 from src.agents.middlewares.write_file_artifact_middleware import WriteFileArtifactMiddleware
@@ -374,6 +375,13 @@ def _create_web_search_summary(ctx: _RegistryContext) -> AgentMiddleware | None:
     return WebSearchSummaryMiddleware(requested_model=ctx.model_name)
 
 
+def _create_web_search_ingestion(ctx: _RegistryContext) -> AgentMiddleware | None:  # noqa: ARG001
+    vault_cfg = get_app_config().knowledge_vault
+    if not (vault_cfg.enabled and vault_cfg.search_results_queue_enabled):
+        return None
+    return WebSearchIngestionMiddleware()
+
+
 def _create_view_image(ctx: _RegistryContext) -> AgentMiddleware | None:
     if ctx.model_config is not None and getattr(ctx.model_config, "supports_vision", False):
         return ViewImageMiddleware()
@@ -546,6 +554,11 @@ def _build_middleware_registry(
         # MiddlewareSpec("phase_tool_filter", bind(_create_phase_tool_filter), after={"planner"}),
         MiddlewareSpec("plan_evaluator", bind(_create_plan_evaluator), after={"planner"}),
         MiddlewareSpec("web_search_summary", bind(_create_web_search_summary), after={"tool_result_truncation"}),
+        # Inner to web_search_summary so it sees the raw, full search result
+        # (before summary may replace the content) and feeds it to the vault
+        # ingestion queue. Restores the enqueue stranded in the deprecated
+        # in-backend web_search tool after the websearch.search MCP migration.
+        MiddlewareSpec("web_search_ingestion", bind(_create_web_search_ingestion), after={"web_search_summary"}),
         MiddlewareSpec("todo", bind(_create_todo), after={"plan_evaluator"}),
         MiddlewareSpec("title", bind(_create_title), after={"todo"}),
         MiddlewareSpec("question_generation", lambda: QuestionGenerationMiddleware(), after={"title"}),

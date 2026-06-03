@@ -872,6 +872,14 @@ class IngestMixin:
             with self._manifest_txn():
                 compile_report = self.compile_incremental()
 
+        # Work is done for any row marked `ingested` this run (and any left over
+        # from a prior run). Drop them now — manifest hash_history is the durable
+        # dedup record, so removal cannot create a duplicate vault source. Also
+        # age out `rejected` rows past their retention window so terminal-row
+        # cleanup is not solely dependent on the lint pass.
+        purged_ingested_count = self.purge_ingested_queue_items()
+        purged_rejected_count = self.purge_aged_rejected_queue_items()
+
         report = {
             "source": source,
             "topic": topic,
@@ -888,6 +896,8 @@ class IngestMixin:
             "rejected_for_policy": rejected_for_policy,
             "fetch_failed": fetch_failed,
             "queue_items_claimed": len(queue_items or []),
+            "purged_ingested_count": purged_ingested_count,
+            "purged_rejected_count": purged_rejected_count,
             "vector_preflight": vector_preflight,
             "compile": compile_report,
         }

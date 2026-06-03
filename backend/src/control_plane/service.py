@@ -1356,6 +1356,10 @@ class ControlPlaneService:
                 definition.config.get("search_results_terminal_retention_hours")
                 or getattr(vault_cfg, "search_results_terminal_retention_hours", 168)
             ),
+            search_results_rejected_retention_hours=int(
+                definition.config.get("search_results_rejected_retention_hours")
+                or getattr(vault_cfg, "search_results_rejected_retention_hours", 72)
+            ),
             claim_lease_seconds=int(
                 definition.config.get("claim_lease_seconds")
                 or getattr(vault_cfg, "claim_lease_seconds", 900)
@@ -2086,6 +2090,30 @@ class ControlPlaneService:
                     # Another worker terminated the job (e.g. failed mid-drain).
                     # Skip Phase 2 so we don't waste compute on a doomed reprocess.
                     return
+
+                # Phase 1.6 — queue housekeeping. Runs once per job on worker 0
+                # regardless of whether anything was claimed, so "Run ingest now"
+                # always flushes terminal rows — including when the queue had
+                # nothing claimable and the drain loop never invoked ingest().
+                # Safe alongside peers: only terminal rows (`ingested`, aged
+                # `rejected`) are removed; other workers' `claimed` items are
+                # left untouched, and manifest hash_history remains the durable
+                # dedup record.
+                try:
+                    purged_ingested = manager.purge_ingested_queue_items()
+                    purged_rejected = manager.purge_aged_rejected_queue_items()
+                    if purged_ingested or purged_rejected:
+                        logger_obj.info(
+                            "vault_ingest_queue_housekeeping job_id=%s purged_ingested=%d purged_rejected=%d",
+                            job_id,
+                            purged_ingested,
+                            purged_rejected,
+                        )
+                except Exception:
+                    logger_obj.exception(
+                        "vault_ingest_queue_housekeeping_failed job_id=%s",
+                        job_id,
+                    )
 
                 try:
                     cleared = self._auto_resolve_vault_queue_approvals()

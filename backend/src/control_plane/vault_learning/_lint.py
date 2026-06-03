@@ -726,6 +726,9 @@ class LintMixin:
 
     def lint_vault(self, *, freshness_window_days: int = 30) -> dict[str, Any]:
         expired_queries = self.expire_queries()
+        # No other periodic trigger drops aged terminal rows when the ingest
+        # loop is idle, so the lint pass owns rejected-row cleanup.
+        purged_rejected_count = self.purge_aged_rejected_queue_items()
         stale_syntheses: list[str] = []
         orphan_pages: list[str] = []
         missing_backlinks: list[str] = []
@@ -771,6 +774,7 @@ class LintMixin:
             "contradictions_count": len(contradictions),
             "open_questions_count": len(open_questions),
             "expired_queries_count": expired_queries["expired_count"],
+            "purged_rejected_count": purged_rejected_count,
             "stale_syntheses": stale_syntheses,
             "orphan_pages": orphan_pages,
             "missing_backlinks": missing_backlinks,

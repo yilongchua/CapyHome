@@ -196,7 +196,13 @@ class KnowledgeVaultConfig(BaseModel):
         default=168,
         ge=1,
         le=8760,
-        description="How long terminal queue records (ingested/rejected) are retained before age-based trim",
+        description="Safety-net age-out for terminal queue records via _trim_queue. Ingested rows are normally purged at the end of each ingest run; rejected rows by the lint pass.",
+    )
+    search_results_rejected_retention_hours: int = Field(
+        default=72,
+        ge=1,
+        le=8760,
+        description="How long rejected queue records are retained before the lint pass drops them",
     )
     claim_lease_seconds: int = Field(
         default=900,

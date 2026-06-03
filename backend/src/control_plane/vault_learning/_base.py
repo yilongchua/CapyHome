@@ -37,6 +37,7 @@ class _VaultLearningBase:
         search_results_dedupe_window_hours: int = 72,
         search_results_max_queue_items: int = 5000,
         search_results_terminal_retention_hours: int = 168,
+        search_results_rejected_retention_hours: int = 72,
         claim_lease_seconds: int = 900,
         max_ingest_attempts: int = 5,
     ) -> None:
@@ -63,6 +64,7 @@ class _VaultLearningBase:
         self.search_results_dedupe_window_hours = int(search_results_dedupe_window_hours)
         self.search_results_max_queue_items = int(search_results_max_queue_items)
         self.search_results_terminal_retention_hours = max(1, int(search_results_terminal_retention_hours))
+        self.search_results_rejected_retention_hours = max(1, int(search_results_rejected_retention_hours))
         self.claim_lease_seconds = max(60, int(claim_lease_seconds))
         self.max_ingest_attempts = max(1, int(max_ingest_attempts))
         # Optional per-run override for the ingest analysis ("CoT") model. When
@@ -367,6 +369,23 @@ class _VaultLearningBase:
             encoding="utf-8",
         )
 
+    @staticmethod
+    def _queue_row_ts(item: dict[str, Any]) -> datetime:
+        """Best-effort timestamp for a queue row, newest-relevant key first.
+
+        Used by both age-based trim (`_trim_queue`) and the explicit rejected
+        sweep in `lint_vault`. Falls back to `datetime.min` so a row with no
+        parseable timestamp is treated as maximally old (eligible for removal).
+        """
+        for key in ("updated_at", "claimed_at", "queued_at"):
+            value = item.get(key)
+            if value:
+                try:
+                    return datetime.fromisoformat(str(value)).replace(tzinfo=UTC)
+                except Exception:
+                    continue
+        return datetime.min.replace(tzinfo=UTC)
+
     def _trim_queue(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Age-based trim that never drops items still owing work.
 
@@ -382,16 +401,7 @@ class _VaultLearningBase:
         now = _utcnow()
         retention = timedelta(hours=self.search_results_terminal_retention_hours)
         cap = self.search_results_max_queue_items
-
-        def _ts(item: dict[str, Any]) -> datetime:
-            for key in ("updated_at", "claimed_at", "queued_at"):
-                value = item.get(key)
-                if value:
-                    try:
-                        return datetime.fromisoformat(str(value)).replace(tzinfo=UTC)
-                    except Exception:
-                        continue
-            return datetime.min.replace(tzinfo=UTC)
+        _ts = self._queue_row_ts
 
         kept: list[dict[str, Any]] = []
         for item in items:

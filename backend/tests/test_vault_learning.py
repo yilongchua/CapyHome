@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 
 import httpx
 import pytest
 
 from src.control_plane.vault_learning import VaultLearningManager
+from src.control_plane.vault_text_utils import utcnow as _utcnow
 
 
 def test_discover_writes_inbox_and_filters_urls(tmp_path: Path) -> None:
@@ -305,7 +307,9 @@ def test_queue_ingest_duplicate_urls_mixed_outcomes_are_mapped_by_queue_id(
     assert report["fetch_failed_count"] == 1
 
     queue_state = {str(item.get("queue_id")): item for item in vault._load_queue()}
-    assert queue_state["q1"]["status"] == "ingested"
+    # q1 ingested successfully and is purged at the end of the run; q2 failed
+    # and stays queued for retry.
+    assert "q1" not in queue_state
     assert queue_state["q2"]["status"] == "queued"
     assert queue_state["q2"]["reason"] == "fetch_failed_retry"
 
@@ -350,3 +354,140 @@ def test_queue_ingest_unknown_status_falls_back_to_retry(tmp_path: Path, monkeyp
     assert len(queue_state) == 1
     assert queue_state[0]["status"] == "queued"
     assert queue_state[0]["reason"] == "unhandled_status_retry"
+
+
+def _seed_queue_row(vault: VaultLearningManager, *, status: str, url: str, ts_iso: str) -> dict:
+    """Append a raw queue row with a controlled status + timestamp."""
+    row = {
+        "queue_id": f"queue-{status}-{url.rsplit('/', 1)[-1]}",
+        "queued_at": ts_iso,
+        "updated_at": ts_iso,
+        "source_tool": "web_search",
+        "query": "q",
+        "title": "T",
+        "url": url,
+        "snippet": "s",
+        "extracted_content": "# T\n\nbody",
+        "status": status,
+        "reason": status,
+        "content_hash": f"hash-{url}",
+        "attempt_count": 1,
+    }
+    queue = vault._load_queue()
+    queue.append(row)
+    vault._save_queue(queue)
+    return row
+
+
+def test_purge_ingested_queue_items_removes_only_ingested(tmp_path: Path) -> None:
+    vault = VaultLearningManager(vault_root=tmp_path)
+    now = _utcnow().isoformat()
+    _seed_queue_row(vault, status="ingested", url="https://example.com/i1", ts_iso=now)
+    _seed_queue_row(vault, status="ingested", url="https://example.com/i2", ts_iso=now)
+    _seed_queue_row(vault, status="queued", url="https://example.com/q1", ts_iso=now)
+    _seed_queue_row(vault, status="claimed", url="https://example.com/c1", ts_iso=now)
+    _seed_queue_row(vault, status="rejected", url="https://example.com/r1", ts_iso=now)
+
+    removed = vault.purge_ingested_queue_items()
+
+    assert removed == 2
+    statuses = sorted(str(item.get("status")) for item in vault._load_queue())
+    assert statuses == ["claimed", "queued", "rejected"]
+
+
+def test_purge_ingested_queue_items_noop_when_none(tmp_path: Path) -> None:
+    vault = VaultLearningManager(vault_root=tmp_path)
+    _seed_queue_row(vault, status="queued", url="https://example.com/q1", ts_iso=_utcnow().isoformat())
+    assert vault.purge_ingested_queue_items() == 0
+    assert len(vault._load_queue()) == 1
+
+
+def test_ingest_run_purges_ingested_and_aged_rejected_rows(tmp_path: Path) -> None:
+    vault = VaultLearningManager(vault_root=tmp_path, min_trust_score=0.2, search_results_rejected_retention_hours=72)
+    # Seed a stale rejected row that should be aged out by the ingest run, and a
+    # fresh rejected row that should survive.
+    _seed_queue_row(vault, status="rejected", url="https://example.com/old-reject", ts_iso=(_utcnow() - timedelta(hours=100)).isoformat())
+    _seed_queue_row(vault, status="rejected", url="https://example.com/new-reject", ts_iso=(_utcnow() - timedelta(hours=1)).isoformat())
+    vault.enqueue_search_results(
+        query="vessel particulars",
+        results=[
+            {
+                "title": "Marine Data Quality",
+                "url": "https://example.com/vessel-quality",
+                "snippet": "desc",
+                "extracted_content": "# Marine Data Quality\n\nVessel particulars improve data quality baselines.",
+                "topic_tags": ["maritime-data-quality"],
+            }
+        ],
+    )
+    claimed = vault.claim_search_queue_items(topic="maritime-data-quality", max_items=5)
+    report = vault.ingest(urls=[], source="autoresearch", topic="maritime data quality", queue_items=claimed)
+
+    assert report["ingested_count"] == 1
+    assert report["purged_ingested_count"] == 1
+    assert report["purged_rejected_count"] == 1
+    # The ingested row and the stale rejected row must be gone; the fresh
+    # rejected row stays until it ages past the retention window.
+    urls = {str(item.get("url")) for item in vault._load_queue()}
+    assert all(str(item.get("status")) != "ingested" for item in vault._load_queue())
+    assert "https://example.com/old-reject" not in urls
+    assert "https://example.com/new-reject" in urls
+
+
+def test_ingest_after_purge_dedupes_via_manifest_not_queue(tmp_path: Path) -> None:
+    """Removing the ingested row must not let a re-queued duplicate create a
+    second vault source — the manifest hash_history backstop catches it."""
+    vault = VaultLearningManager(vault_root=tmp_path, min_trust_score=0.2)
+    payload = {
+        "title": "Marine Data Quality",
+        "url": "https://example.com/vessel-quality",
+        "snippet": "desc",
+        "extracted_content": "# Marine Data Quality\n\nVessel particulars improve data quality baselines.",
+        "topic_tags": ["maritime-data-quality"],
+    }
+    vault.enqueue_search_results(query="vessel particulars", results=[payload])
+    claimed = vault.claim_search_queue_items(topic="maritime-data-quality", max_items=5)
+    first = vault.ingest(urls=[], source="autoresearch", topic="maritime data quality", queue_items=claimed)
+    assert first["ingested_count"] == 1
+    source_count_after_first = len(vault._manifest["sources"])
+
+    # Re-enqueue the same url+content. With the ingested row purged, the queue
+    # dedup guard no longer blocks it, so it is appended again.
+    second_enqueue = vault.enqueue_search_results(query="vessel particulars", results=[payload])
+    assert second_enqueue["appended_count"] == 1
+
+    claimed2 = vault.claim_search_queue_items(topic="maritime-data-quality", max_items=5)
+    second = vault.ingest(urls=[], source="autoresearch", topic="maritime data quality", queue_items=claimed2)
+
+    # Ingest dedups against manifest hash_history -> skipped_unchanged, no new source.
+    assert second["ingested_count"] == 0
+    assert second["skipped_unchanged_count"] == 1
+    assert len(vault._manifest["sources"]) == source_count_after_first
+
+
+def test_purge_aged_rejected_respects_retention_window(tmp_path: Path) -> None:
+    vault = VaultLearningManager(vault_root=tmp_path, search_results_rejected_retention_hours=72)
+    fresh = (_utcnow() - timedelta(hours=1)).isoformat()
+    aged = (_utcnow() - timedelta(hours=100)).isoformat()
+    _seed_queue_row(vault, status="rejected", url="https://example.com/old", ts_iso=aged)
+    _seed_queue_row(vault, status="rejected", url="https://example.com/new", ts_iso=fresh)
+    _seed_queue_row(vault, status="queued", url="https://example.com/q1", ts_iso=aged)
+
+    removed = vault.purge_aged_rejected_queue_items()
+
+    assert removed == 1
+    remaining = {str(item.get("url")) for item in vault._load_queue()}
+    assert "https://example.com/old" not in remaining
+    assert "https://example.com/new" in remaining
+    assert "https://example.com/q1" in remaining  # queued never aged out here
+
+
+def test_lint_vault_purges_aged_rejected_and_reports_count(tmp_path: Path) -> None:
+    vault = VaultLearningManager(vault_root=tmp_path, search_results_rejected_retention_hours=72)
+    aged = (_utcnow() - timedelta(hours=100)).isoformat()
+    _seed_queue_row(vault, status="rejected", url="https://example.com/old", ts_iso=aged)
+
+    report = vault.lint_vault(freshness_window_days=30)
+
+    assert report["purged_rejected_count"] == 1
+    assert all(str(item.get("status")) != "rejected" for item in vault._load_queue())

@@ -47,7 +47,12 @@ class QueueMixin:
                         for item in queue
                         if str(item.get("url") or "") == url
                         and str(item.get("content_hash") or "") == content_hash
-                        and str(item.get("status") or "") in {"queued", "claimed", "ingested"}
+                        # `ingested` is intentionally absent: ingested rows are purged at
+                        # the end of each ingest run (purge_ingested_queue_items), so the
+                        # durable dedup record is manifest["sources"][source_id].hash_history,
+                        # consulted at ingest time (_ingest.py). A re-queued duplicate is
+                        # caught there and returns skipped_unchanged — no duplicate source.
+                        and str(item.get("status") or "") in {"queued", "claimed"}
                         and datetime.fromisoformat(str(item.get("queued_at"))).replace(tzinfo=UTC) >= dedupe_deadline
                     ),
                     None,
@@ -266,6 +271,46 @@ class QueueMixin:
                 item["reason"] = reason
                 item.pop("claim_lease_until", None)
         return len(queued_ids)
+
+    def purge_ingested_queue_items(self) -> int:
+        """Drop rows whose work is fully done, called at the end of each ingest run.
+
+        Only `ingested` rows are removed. The durable dedup record is
+        `manifest["sources"][source_id].hash_history` (consulted at ingest
+        time), not the queue, so removing ingested rows cannot create a
+        duplicate vault source — a re-queued duplicate is caught at ingest and
+        returns `skipped_unchanged`. Non-terminal rows (`queued`, `claimed`)
+        and `rejected` rows are left untouched (the latter are aged out by
+        `purge_aged_rejected_queue_items` from the lint pass).
+        """
+        removed = 0
+        with self._queue_txn() as queue:
+            kept = [item for item in queue if str(item.get("status") or "") != "ingested"]
+            removed = len(queue) - len(kept)
+            if removed:
+                queue[:] = kept
+        return removed
+
+    def purge_aged_rejected_queue_items(self) -> int:
+        """Drop `rejected` rows older than `search_results_rejected_retention_hours`.
+
+        Rejected rows (poison-pill URLs, trust/policy failures) are retained
+        briefly for operator visibility, then removed. Invoked from the lint
+        pass since there is no other periodic trigger for terminal-row cleanup
+        when the ingest loop is idle.
+        """
+        cutoff = _utcnow() - timedelta(hours=self.search_results_rejected_retention_hours)
+        removed = 0
+        with self._queue_txn() as queue:
+            kept = [
+                item
+                for item in queue
+                if not (str(item.get("status") or "") == "rejected" and self._queue_row_ts(item) < cutoff)
+            ]
+            removed = len(queue) - len(kept)
+            if removed:
+                queue[:] = kept
+        return removed
 
     def dedupe_recent_queries(self, *, query_text: str, topic_tags: list[str] | None = None) -> dict[str, Any] | None:
         normalized_key = _query_id_for_identity(query_text, topic_tags or [])
