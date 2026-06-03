@@ -11,10 +11,17 @@ class WebSearchSummaryConfig(BaseModel):
         description="Whether to summarize oversized web-search tool results before they enter context.",
     )
     summary_threshold_chars: int = Field(
-        default=3000,
+        default=12000,
         ge=500,
         le=200000,
-        description="Only summarize tool outputs larger than this many characters.",
+        description=(
+            "Only summarize tool outputs larger than this many characters. Set to match "
+            "routing.timeouts.tool_result_caps['web_search'] (12000) so any result that "
+            "fits the cap reaches the agent in full, and only larger results are summarized. "
+            "Note: results below this threshold are NOT summarized, so "
+            "routing.timeouts.unsummarized_web_search_chars must be >= this value or the "
+            "truncation middleware's adaptive cap will chop the full content."
+        ),
     )
     timeout_seconds: float = Field(
         default=180.0,

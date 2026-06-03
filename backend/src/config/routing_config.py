@@ -66,13 +66,16 @@ class RoutingTimeoutsConfig(BaseModel):
         },
         description="Per-tool truncation cap (chars). 0 disables truncation for that tool.",
     )
-    # Adaptive: when a web_search ToolMessage was NOT summarized (web_search_summary
-    # skipped/failed), apply this smaller cap instead of the regular `web_search`
-    # cap. Synthesis stage drowns when fed multiple raw 12 KB excerpts after a
-    # 3-way concurrent search — see thread-cd90decb audit. Set equal to
-    # tool_result_caps["web_search"] to disable adaptive behavior.
+    # Adaptive: when a web_search ToolMessage lacks the summary marker, apply this
+    # cap instead of the regular `web_search` cap. Originally 3500 to stop synthesis
+    # drowning in raw 12 KB excerpts after a 3-way concurrent search (thread-cd90decb
+    # audit). Now raised to equal tool_result_caps["web_search"] (12000) under the
+    # hybrid policy: results below web_search_summary.summary_threshold_chars (12000)
+    # are intentionally NOT summarized and must reach the agent in full — so the
+    # adaptive cap must not chop them below the regular cap. Lower this again only if
+    # you also lower the summary threshold.
     unsummarized_web_search_chars: int = Field(
-        default=3500,
+        default=12000,
         ge=0,
         le=64000,
         description="Truncation cap for web_search results that lack a summary marker.",

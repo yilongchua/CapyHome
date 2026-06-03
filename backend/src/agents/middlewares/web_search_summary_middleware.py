@@ -43,7 +43,16 @@ _CONTENT_SENTINEL = "<<__CAPYHOME_WS_CONTENT_SLOT__>>"
 _SUMMARY_PROMPT_TEMPLATE = f"""\
 You are a research assistant. The following text is the raw result of a web search query.
 Summarize it into a concise, factual paragraph (max 250 words) that captures all key findings.
-Preserve: specific numbers, dates, names, URLs that are clearly important.
+Preserve: specific numbers, dates, and names that are clearly important.
+
+Cite every sourced claim inline. This summary REPLACES the raw search result the
+downstream agent sees, so source attribution is lost unless you carry it here. After
+each claim, append the source it came from using Markdown link format
+`[citation:TITLE](URL)`, taking TITLE and URL from the matching result in the raw
+results below (each result has its own `url` and `title`). Use only URLs present in the
+raw results — never invent or guess a URL. If a claim cannot be attributed to a result,
+state it without a citation rather than fabricating one.
+
 Do NOT add commentary, opinions, or phrases like "The search results show...".
 Start directly with the key information.
 
