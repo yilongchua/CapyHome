@@ -128,6 +128,12 @@ def create_chat_model(name: str | None = None, thinking_enabled: bool = False, *
     # values (e.g. base_url) take precedence over the config dump, avoiding
     # "multiple values for keyword argument" errors.
     merged = {**model_settings_from_config, **kwargs}
+    # Enable token-level streaming by default so LangGraph forwards incremental
+    # message/thinking deltas to the frontend instead of only emitting a full
+    # message when the model node completes. This is the lever behind
+    # time-to-first-token in the chat thread. An explicit `streaming` value in
+    # the model config (extra="allow") or in caller kwargs still wins.
+    merged.setdefault("streaming", True)
     model_instance = model_class(**merged)
 
     if thinking_enabled and model_config.supports_thinking:
