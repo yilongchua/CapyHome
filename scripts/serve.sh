@@ -9,6 +9,15 @@ set -e
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Ensure user-local tool dirs are on PATH. When launched outside an interactive
+# shell (GUI launcher, bare `bash`), ~/.zshrc / ~/.profile aren't sourced, so
+# tools like `uv` installed under ~/.local/bin would otherwise be missing.
+case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) PATH="$HOME/.local/bin:$PATH" ;;
+esac
+export PATH
+
 # ── Argument parsing ─────────────────────────────────────────────────────────
 
 DEV_MODE=true
