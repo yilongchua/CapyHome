@@ -49,6 +49,5 @@ Return exactly these sections:
     tools=["grep", "ls", "read_file"],
     disallowed_tools=["task", "ask_user_for_clarification", "present_files", "write_file", "str_replace", "bash", "web_search", "query_knowledge_vault", "save_to_knowledge_vault", "view_image", "write_todos"],
     model="inherit",
-    max_turns=15,
     modes=["plan"],
 )

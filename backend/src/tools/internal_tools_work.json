@@ -192,11 +192,11 @@
         "subagent_type": {
           "type": "string",
           "enum": ["general-purpose", "bash", "knowledge-researcher", "docs-explorer", "comparison-dimension-researcher", "synthesis-reviewer", "vault-source-researcher"],
-          "description": "Which subagent to invoke. `general-purpose`: all-tool exploratory worker, default max_turns from config. `bash`: shell-command specialist for verbose output. `knowledge-researcher`: one narrow external/live-source objective; default max_turns=25; auto-narrows broad prompts. `docs-explorer`: searches the local corpus / mounted documents in `/mnt/user-data/workspace/.docs`. `comparison-dimension-researcher`: researches one comparison dimension across a fixed option set; default max_turns=25. `synthesis-reviewer`: reviews collected findings for coverage, contradictions, citations, and freshness. `vault-source-researcher`: autoresearch helper that writes findings into the knowledge vault."
+          "description": "Which subagent to invoke. `general-purpose`: all-tool exploratory worker. `bash`: shell-command specialist for verbose output. `knowledge-researcher`: one narrow external/live-source objective; auto-narrows broad prompts. `docs-explorer`: searches the local corpus / mounted documents in `/mnt/user-data/workspace/.docs`. `comparison-dimension-researcher`: researches one comparison dimension across a fixed option set. `synthesis-reviewer`: reviews collected findings for coverage, contradictions, citations, and freshness. `vault-source-researcher`: autoresearch helper that writes findings into the knowledge vault. All subagents share `subagents.max_turns` (default 50) unless overridden per-agent in config.yaml."
         },
         "max_turns": {
           "type": "integer",
-          "description": "Optional override for the subagent's recursion limit (LangGraph `recursion_limit`). Defaults to the subagent's configured max (25 for researchers, higher for general-purpose). Lower to bound cost on simple tasks; raise only if the default is provably too small."
+          "description": "Optional override for the subagent's recursion limit (LangGraph `recursion_limit`). Defaults to the shared `subagents.max_turns` (50) unless a per-agent override is set in config.yaml. Lower to bound cost on simple tasks; raise only if the default is provably too small."
         }
       }
     }

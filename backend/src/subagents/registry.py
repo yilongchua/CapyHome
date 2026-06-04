@@ -32,7 +32,7 @@ def get_subagent_config(name: str) -> SubagentConfig | None:
         updates["timeout_seconds"] = effective_timeout
 
     effective_max_turns = app_config.get_max_turns_for(name)
-    if effective_max_turns is not None and effective_max_turns != config.max_turns:
+    if effective_max_turns != config.max_turns:
         logger.debug(f"Subagent '{name}': max_turns overridden by config.yaml ({config.max_turns} -> {effective_max_turns})")
         updates["max_turns"] = effective_max_turns
 

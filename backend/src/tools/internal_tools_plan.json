@@ -422,7 +422,7 @@
         },
         "max_turns": {
           "type": "integer",
-          "description": "Optional override for the subagent's recursion limit (LangGraph `recursion_limit`). Defaults to the subagent's configured max (from config.yaml `subagents.agents.<name>.max_turns`, else the subagent default). Lower to bound cost; raise only if the default is provably too small."
+          "description": "Optional override for the subagent's recursion limit (LangGraph `recursion_limit`). Defaults to the shared `subagents.max_turns` (50) unless a per-agent override is set in config.yaml `subagents.agents.<name>.max_turns`. Lower to bound cost; raise only if the default is provably too small."
         }
       }
     }

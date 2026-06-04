@@ -218,9 +218,13 @@ class SubagentExecutor:
         # These middlewares will reuse the sandbox/thread_data from parent agent
         from src.agents.middlewares.permission_middleware import PermissionMiddleware
         from src.agents.middlewares.thread_data_middleware import ThreadDataMiddleware
+        from src.agents.middlewares.tool_error_boundary_middleware import ToolErrorBoundaryMiddleware
         from src.sandbox.middleware import SandboxMiddleware
 
         middlewares = [
+            # Outermost: a single tool exception (e.g. an MCP 504 from websearch.search)
+            # becomes a recoverable error ToolMessage instead of failing the whole subagent run.
+            ToolErrorBoundaryMiddleware(),
             ThreadDataMiddleware(lazy_init=True),  # Compute thread paths
             SandboxMiddleware(lazy_init=True, release_on_exit=False),  # Borrow parent's sandbox; parent owns release.
             PermissionMiddleware(),  # Enforce arg-sensitive permission rules inside delegated runs.

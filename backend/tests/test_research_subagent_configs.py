@@ -103,9 +103,20 @@ def test_finder_agent_is_plan_only_local_files():
 
 
 def test_existing_subagents_default_to_work_modes():
-    # Renamed knowledge-researcher (and peers) stay execution-only.
-    assert get_subagent_config("knowledge-researcher").modes == ["work", "auto"]
+    # knowledge-researcher is now exclusively a Work-Mode subagent.
+    assert get_subagent_config("knowledge-researcher").modes == ["work"]
+    # Peers keep the execution-only default.
     assert get_subagent_config("general-purpose").modes == ["work", "auto"]
+
+
+def test_all_subagents_share_global_max_turns():
+    # max_turns is centralized in config.yaml (subagents.max_turns); every
+    # subagent resolves to the shared default unless overridden per-agent.
+    from src.config.subagents_config import get_subagents_app_config
+
+    expected = get_subagents_app_config().max_turns
+    for name in get_subagent_names_for_mode("work") + get_subagent_names_for_mode("plan"):
+        assert get_subagent_config(name).max_turns == expected, name
 
 
 def test_mode_gating_partitions_plan_vs_work_subagents():

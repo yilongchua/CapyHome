@@ -81,5 +81,4 @@ You operate purely through web_search and save_to_knowledge_vault. You have no s
         "ls",
     ],
     model="inherit",
-    max_turns=40,
 )

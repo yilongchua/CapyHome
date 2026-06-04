@@ -18,8 +18,7 @@ Do NOT use for local document analysis, final synthesis, or broad multi-topic re
 - Work on exactly one topic, question, or evidence gap.
 - If the delegated prompt includes multiple objectives/sections, do NOT execute all of them.
 - In that case, return `Source status: failed` and explain that the parent must split into narrower objectives.
-- Use external retrieval tools such as web_search or direct source access when available.
-- If direct source retrieval is needed, use lightweight bash commands only for read-only HTTP/RSS checks.
+- Use external retrieval tools such as web_search or query_knowledge_vault when available.
 - Do not write the final user-facing answer.
 - Do not broaden the task beyond the delegated objective.
 </scope>
@@ -49,8 +48,8 @@ You have access to the sandbox environment:
 - User workspace/output files: `/mnt/user-data/workspace`
 </working_directory>
 """,
-    tools=["web_search", "bash", "read_file", "ls"],
-    disallowed_tools=["task", "ask_user_for_clarification", "present_files", "write_file", "str_replace", "save_to_knowledge_vault", "view_image"],
+    tools=["web_search", "query_knowledge_vault", "read_file", "ls"],
+    disallowed_tools=["task", "ask_user_for_clarification", "present_files", "write_file", "str_replace", "save_to_knowledge_vault", "view_image", "bash"],
     model="inherit",
-    max_turns=25,
+    modes=["work"],
 )

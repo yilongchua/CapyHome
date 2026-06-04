@@ -46,6 +46,5 @@ Return exactly these sections:
     tools=["web_search", "query_knowledge_vault"],
     disallowed_tools=["task", "ask_user_for_clarification", "present_files", "write_file", "str_replace", "bash", "save_to_knowledge_vault", "view_image", "write_todos"],
     model="inherit",
-    max_turns=12,
     modes=["plan"],
 )

@@ -47,6 +47,7 @@ from src.agents.middlewares.todo_dag_middleware import TodoDagMiddleware
 from src.agents.middlewares.todo_failure_retry_middleware import TodoFailureRetryMiddleware
 from src.agents.middlewares.todo_middleware import TodoMiddleware
 from src.agents.middlewares.tool_disclosure_middleware import ToolDisclosureMiddleware
+from src.agents.middlewares.tool_error_boundary_middleware import ToolErrorBoundaryMiddleware
 from src.agents.middlewares.tool_result_truncation_middleware import ToolResultTruncationMiddleware
 from src.agents.middlewares.trajectory_middleware import TrajectoryMiddleware
 from src.agents.middlewares.uploads_middleware import UploadsMiddleware
@@ -564,6 +565,11 @@ def _build_middleware_registry(
         MiddlewareSpec("question_generation", lambda: QuestionGenerationMiddleware(), after={"title"}),
         MiddlewareSpec("memory", bind(_create_memory), after={"question_generation"}),
         MiddlewareSpec("view_image", bind(_create_view_image), after={"memory"}),
+        # Outermost tool-call wrapper: catches any unhandled tool exception (e.g. an
+        # MCP 504/transport error) that survives retry and turns it into a recoverable
+        # error ToolMessage instead of crashing the whole run. Must sort before "retry"
+        # so RetryPolicyMiddleware still sees raw exceptions and can retry first.
+        MiddlewareSpec("tool_error_boundary", lambda: ToolErrorBoundaryMiddleware(), after={"view_image"}, before={"retry"}),
         MiddlewareSpec("retry", bind(_create_retry), after={"view_image"}),
         # Bound LLM call duration. Sits between retry (so retried calls are
         # also bounded) and subagent_limit. See routing.timeouts in config.yaml.
