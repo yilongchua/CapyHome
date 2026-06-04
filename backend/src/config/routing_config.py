@@ -45,10 +45,9 @@ class RoutingTimeoutsConfig(BaseModel):
         default_factory=lambda: {
             "bash": 600,
             "task": 1800,
-            "web_search": 45,
             "write_todos": 30,
         },
-        description="Per-tool wall-clock timeout (seconds).",
+        description="Per-tool wall-clock timeout (seconds). Keys match the LLM-facing tool name. web_search now runs as MCP tool 'websearch.search', bounded by its per-server timeout_seconds; key it here only for an extra middleware cap.",
     )
     # Tool result truncation: bound the size of ToolMessage content before it
     # enters the agent context. Per-tool override > default. Set to 0 to disable

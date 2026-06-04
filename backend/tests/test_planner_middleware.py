@@ -28,7 +28,7 @@ def _planner(monkeypatch) -> PlannerMiddleware:
         sprint_contracts_config=SimpleNamespace(enabled=False),
     )
 
-    def _fake_invoke(_prompt: str) -> tuple[PlannerOutput, str]:
+    def _fake_invoke(_prompt: str, _runtime: object = None) -> tuple[PlannerOutput, str]:
         return (
             PlannerOutput(
                 title="Research Plan",
@@ -87,7 +87,7 @@ def _planner_with_clarification(monkeypatch) -> PlannerMiddleware:
         sprint_contracts_config=SimpleNamespace(enabled=False),
     )
 
-    def _fake_invoke(_prompt: str) -> tuple[PlannerOutput, str]:
+    def _fake_invoke(_prompt: str, _runtime: object = None) -> tuple[PlannerOutput, str]:
         return (
             PlannerOutput(
                 title="Festival Plan",

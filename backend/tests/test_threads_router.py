@@ -51,6 +51,27 @@ class _NotFoundError(Exception):
     status_code = 404
 
 
+class _ServerError(Exception):
+    status_code = 503
+
+
+class _FlakyThreadsClient:
+    """Fails the delete with a retryable 5xx for the first `fail_times` attempts."""
+
+    def __init__(self, thread_id: str, fail_times: int, *, always_fail: bool = False):
+        self.thread_id = thread_id
+        self.fail_times = fail_times
+        self.always_fail = always_fail
+        self.attempts = 0
+        self.deleted: list[str] = []
+
+    async def delete(self, thread_id: str):
+        self.attempts += 1
+        if self.always_fail or self.attempts <= self.fail_times:
+            raise _ServerError("database is locked")
+        self.deleted.append(thread_id)
+
+
 @pytest.fixture()
 def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Paths:
     paths = Paths(tmp_path)
@@ -105,6 +126,40 @@ def test_delete_thread_handles_legacy_prefixed_thread_id(paths: Paths, monkeypat
     assert not thread_dir.exists()
 
 
+def test_delete_thread_retries_transient_5xx_then_succeeds(paths: Paths, monkeypatch: pytest.MonkeyPatch):
+    thread_id = "thread-locked"
+    (paths.thread_dir(thread_id) / "user-data" / "workspace").mkdir(parents=True)
+
+    flaky = _FlakyThreadsClient(thread_id, fail_times=2)
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(flaky))
+    monkeypatch.setattr(threads, "_DELETE_RETRY_BASE_DELAY", 0.0)
+
+    response = asyncio.run(threads.delete_thread(thread_id))
+
+    assert response.deleted is True
+    assert response.files_deleted is True
+    assert flaky.attempts == 3  # 2 failures + 1 success
+
+
+def test_delete_thread_removes_local_files_even_when_langgraph_delete_fails(paths: Paths, monkeypatch: pytest.MonkeyPatch):
+    thread_id = "thread-stuck"
+    thread_dir = paths.thread_dir(thread_id)
+    (thread_dir / "user-data" / "workspace").mkdir(parents=True)
+
+    flaky = _FlakyThreadsClient(thread_id, fail_times=0, always_fail=True)
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(flaky))
+    monkeypatch.setattr(threads, "_DELETE_RETRY_BASE_DELAY", 0.0)
+
+    with pytest.raises(threads.HTTPException) as excinfo:
+        asyncio.run(threads.delete_thread(thread_id))
+
+    assert excinfo.value.status_code == 502
+    assert "local files removed" in excinfo.value.detail
+    # Local cleanup must still have run despite the LangGraph failure.
+    assert not thread_dir.exists()
+    assert flaky.attempts == threads._DELETE_MAX_ATTEMPTS  # exhausted retries
+
+
 def test_delete_all_threads_deletes_each_thread_and_reports_failures(paths: Paths, monkeypatch: pytest.MonkeyPatch):
     for thread_id in ("thread-a", "thread-b", "thread-c"):
         (paths.thread_dir(thread_id) / "user-data" / "workspace").mkdir(parents=True)
@@ -114,6 +169,7 @@ def test_delete_all_threads_deletes_each_thread_and_reports_failures(paths: Path
         failing_thread_ids={"thread-b"},
     )
     monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(client))
+    monkeypatch.setattr(threads, "_DELETE_RETRY_BASE_DELAY", 0.0)
 
     response = asyncio.run(threads.delete_all_threads())
 

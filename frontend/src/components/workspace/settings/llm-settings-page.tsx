@@ -391,7 +391,7 @@ export function LlmSettingsPage() {
           />
           {collidingDisplayName && (
             <p className="text-destructive text-xs">
-              Display name already used by "{collidingDisplayName}". Pick a unique name.
+              Display name already used by &quot;{collidingDisplayName}&quot;. Pick a unique name.
             </p>
           )}
         </div>

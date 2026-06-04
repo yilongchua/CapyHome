@@ -49,24 +49,29 @@ function parseToolResultObject(result: unknown): Record<string, unknown> | null 
   return null;
 }
 
+/** Coerce an unknown JSON field to a trimmed string; non-strings become "". */
+function asString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function normalizeResultItem(raw: unknown): WebSearchResultItem | null {
   const item = asRecord(raw);
   if (!item) {
     return null;
   }
-  const url = String(item.url ?? "").trim();
+  const url = asString(item.url);
   if (!url) {
     return null;
   }
-  const title = String(item.title ?? url).trim() || url;
-  const snippet = String(item.snippet ?? "").trim();
-  const extracted = String(item.extracted_content ?? "").trim();
+  const title = asString(item.title) || url;
+  const snippet = asString(item.snippet);
+  const extracted = asString(item.extracted_content);
   return {
     title,
     url,
     snippet: truncate(snippet, SNIPPET_MAX_CHARS),
     extractedPreview: truncate(extracted, EXTRACTED_PREVIEW_MAX_CHARS),
-    source: String(item.source ?? "").trim() || undefined,
+    source: asString(item.source) || undefined,
   };
 }
 

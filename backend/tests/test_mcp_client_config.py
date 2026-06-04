@@ -1,5 +1,7 @@
 """Core behavior tests for MCP client server config building."""
 
+from datetime import timedelta
+
 import pytest
 
 from src.config.extensions_config import ExtensionsConfig, McpServerConfig
@@ -46,6 +48,47 @@ def test_build_server_params_http_like_success(transport: str):
         "url": "https://example.com/mcp",
         "headers": {"Authorization": "Bearer token"},
     }
+
+
+def test_build_server_params_http_timeout_uses_timedelta():
+    # streamable-HTTP ("http") expects timedelta for timeout/sse_read_timeout.
+    config = McpServerConfig(type="http", url="http://localhost:9000/mcp", timeout_seconds=40)
+
+    params = build_server_params("websearch", config)
+
+    assert params["timeout"] == timedelta(seconds=40)
+    assert params["sse_read_timeout"] == timedelta(seconds=40)
+
+
+def test_build_server_params_sse_timeout_uses_float_seconds():
+    # SSE transport expects float seconds, not timedelta.
+    config = McpServerConfig(type="sse", url="http://example.com/sse", timeout_seconds=40)
+
+    params = build_server_params("remote", config)
+
+    assert params["timeout"] == 40.0
+    assert params["sse_read_timeout"] == 40.0
+
+
+@pytest.mark.parametrize("transport", ["sse", "http"])
+def test_build_server_params_no_timeout_leaves_defaults(transport: str):
+    # Null timeout_seconds must not inject keys, so adapter defaults apply.
+    config = McpServerConfig(type=transport, url="http://example.com/mcp")
+
+    params = build_server_params("remote", config)
+
+    assert "timeout" not in params
+    assert "sse_read_timeout" not in params
+
+
+def test_build_server_params_stdio_ignores_timeout():
+    # timeout_seconds is only meaningful for sse/http; stdio must not carry it.
+    config = McpServerConfig(type="stdio", command="npx", args=["server"], timeout_seconds=40)
+
+    params = build_server_params("local", config)
+
+    assert "timeout" not in params
+    assert "sse_read_timeout" not in params
 
 
 @pytest.mark.parametrize("transport", ["sse", "http"])

@@ -79,6 +79,44 @@ def _resolve_output_dir(thread_id: str | None) -> Path:
     return default_virtual
 
 
+def write_prompt_log(
+    messages: list[BaseMessage],
+    *,
+    actor: str,
+    thread_id: str | None = None,
+    model_name: str | None = None,
+    invocation_params: dict[str, Any] | None = None,
+) -> None:
+    """Write a single prompt capture explicitly.
+
+    Use this when the callback-based path can't resolve the run context — e.g.
+    the planner streams in a daemon thread where ``get_config()`` (and thus the
+    thread_id) is unavailable, so its prompt would otherwise land in a bogus
+    default directory. Callers pass ``thread_id`` and ``actor`` directly.
+    """
+    if not _is_enabled():
+        return
+    purpose = _safe_name(str(os.getenv("CAPYBARA_PROMPT_LOG_PURPOSE", "prompt_tuning")))
+    safe_actor = _safe_name(actor)
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%fZ")
+    output_dir = _resolve_output_dir(thread_id)
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        file_path = output_dir / f"{timestamp}_{safe_actor}_{purpose}.txt"
+        payload = {
+            "timestamp_utc": timestamp,
+            "purpose": purpose,
+            "actor": safe_actor,
+            "thread_id": thread_id,
+            "model_name": model_name,
+            "invocation_params": invocation_params,
+            "message_count": len(messages),
+        }
+        file_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n\n" + _messages_to_text(messages), encoding="utf-8")
+    except Exception:
+        return
+
+
 class PromptLoggingCallback(BaseCallbackHandler):
     """Logs every chat model prompt to a text file before model invocation."""
 

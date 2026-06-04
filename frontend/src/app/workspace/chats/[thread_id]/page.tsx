@@ -35,7 +35,6 @@ import {
 import { useI18n } from "@/core/i18n/hooks";
 import { hasPendingToolResultsInCurrentTurn } from "@/core/messages/utils";
 import { useModels } from "@/core/models/hooks";
-import { useThemeAssets } from "@/hooks/use-theme-assets";
 import { useLocalSettings } from "@/core/settings";
 import {
   clearPendingChatLaunchPayload,
@@ -52,6 +51,7 @@ import { useMountedFolder } from "@/core/workspace-io/hooks/use-mounted-folder";
 import { useMountedFolderFiles } from "@/core/workspace-io/hooks/use-mounted-folder-files";
 import { publishWorkspaceRefresh } from "@/core/workspace-refresh";
 import { env } from "@/env";
+import { useThemeAssets } from "@/hooks/use-theme-assets";
 import { cn } from "@/lib/utils";
 
 const EXECUTE_PLAN_INTENTS = new Set([
@@ -342,7 +342,7 @@ function ChatPageContent({
           ? String(raw.id)
           : `legacy-${idx}`;
         const question = typeof raw.question === "string" ? raw.question : "";
-        const status = raw.status === "answered" ? "answered" : "pending";
+        const status: "pending" | "answered" = raw.status === "answered" ? "answered" : "pending";
         const answer = typeof raw.answer === "string" ? raw.answer : null;
         const options = Array.isArray(raw.options)
           ? raw.options
@@ -561,6 +561,27 @@ function ChatPageContent({
     },
     [isClarifyingPlan, threadId],
   );
+
+  // Dismissing the clarification panel (the ✕) is treated as "go with the
+  // recommended choice for every question" — the same behaviour as auto mode.
+  // For each pending question we submit the recommended option (falling back to
+  // the first option, then a best-judgement sentinel when a question has no
+  // options) so the run resumes immediately with sensible assumptions instead
+  // of stalling on unanswered clarifications.
+  const handleDismissClarifications = useCallback(() => {
+    if (isClarifyingPlan || normalizedClarifications.length === 0) {
+      return;
+    }
+    const answers = normalizedClarifications.map((c) => {
+      const recommended = c.options.find((option) => option.recommended);
+      const fallback = recommended ?? c.options[0];
+      const answer =
+        (fallback?.label ?? "").trim() ||
+        "No preference — proceed with your best-judgement default.";
+      return { clarification_id: c.id, answer };
+    });
+    handleSubmitClarifications(answers);
+  }, [isClarifyingPlan, normalizedClarifications, handleSubmitClarifications]);
 
   // Auto-trigger Execute Plan when a plan is created and auto_mode is on.
   useEffect(() => {
@@ -1020,6 +1041,7 @@ function ChatPageContent({
                     <PlanClarificationPopup
                       clarifications={normalizedClarifications}
                       onSubmit={handleSubmitClarifications}
+                      onDismiss={handleDismissClarifications}
                       isSubmitting={isClarifyingPlan}
                     />
                   )}

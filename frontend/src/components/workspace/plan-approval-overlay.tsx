@@ -297,7 +297,8 @@ export function PlanClarificationPopup({
             variant="ghost"
             className="text-muted-foreground shrink-0"
             onClick={onDismiss}
-            aria-label="Dismiss clarification"
+            aria-label="Dismiss and use recommended answers"
+            title="Dismiss — proceed with the recommended answer for every question"
             disabled={isSubmitting}
           >
             <XIcon className="size-3.5" />

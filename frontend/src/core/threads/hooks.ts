@@ -64,6 +64,8 @@ export type PlanCreatedEvent = {
   clarification_pending?: boolean;
   clarification_index?: number;
   clarifications?: Array<{
+    id?: string;
+    status?: string;
     question?: string;
     options?: Array<{
       label?: string;

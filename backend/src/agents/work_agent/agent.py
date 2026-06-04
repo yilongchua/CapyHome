@@ -22,13 +22,12 @@ from src.agents.middlewares.model_timeout_middleware import ModelTimeoutMiddlewa
 from src.agents.middlewares.mount_folder_middleware import MountFolderMiddleware
 from src.agents.middlewares.permission_middleware import PermissionMiddleware
 
-# DEPRECATED: PhaseToolFilter and PlanExecutionGate middlewares are no longer
-# registered. web_search is now exposed in Plan Mode directly. Imports are kept
-# commented for reference; the middleware source files remain on disk.
+# DEPRECATED: PhaseToolFilterMiddleware is no longer registered. web_search is
+# now exposed in Plan Mode directly. Import kept commented for reference; the
+# middleware source file remains on disk.
 # from src.agents.middlewares.phase_tool_filter_middleware import PhaseToolFilterMiddleware
 from src.agents.middlewares.plan_evaluator_middleware import PlanEvaluatorMiddleware
-
-# from src.agents.middlewares.plan_execution_gate_middleware import PlanExecutionGateMiddleware
+from src.agents.middlewares.plan_execution_gate_middleware import PlanExecutionGateMiddleware
 from src.agents.middlewares.plan_file_sync_middleware import PlanFileSyncMiddleware
 from src.agents.middlewares.planner_middleware import PlannerMiddleware
 from src.agents.middlewares.pro_followup_middleware import PlanFollowupMiddleware
@@ -538,12 +537,12 @@ def _build_middleware_registry(
         MiddlewareSpec("write_file_artifact", lambda: WriteFileArtifactMiddleware(), after={"sandbox"}),
         MiddlewareSpec("dangling_tool_call", lambda: DanglingToolCallMiddleware(), after={"sandbox"}),
         MiddlewareSpec("work_mode", bind(_create_work_mode), after={"dangling_tool_call"}),
-        # DEPRECATED: plan_execution_gate is no longer registered. web_search and
-        # other execution tools are allowed in Plan Mode directly.
-        # # Planner must run before plan_execution_gate so the gate has a plan to
-        # # consult on turn 1. Otherwise the model's first-turn tool calls bypass
-        # # the gate entirely. See thread-fa33b3bb investigation.
-        # MiddlewareSpec("plan_execution_gate", lambda: PlanExecutionGateMiddleware(requested_model=ctx.model_name), after={"planner"}, before={"permissions"}),
+        # Work-Mode backstop: blocks execution tools while a plan is still draft
+        # (e.g. a never-approved plan recovered via /recover) until the user
+        # approves it via the Execute Plan action. Plan Mode itself is restricted
+        # by the per-mode tool catalog, not this gate. Planner must run before the
+        # gate so a plan exists in state to consult on turn 1 (thread-fa33b3bb).
+        MiddlewareSpec("plan_execution_gate", lambda: PlanExecutionGateMiddleware(), after={"planner"}, before={"permissions"}),
         MiddlewareSpec("permissions", lambda: PermissionMiddleware(), after={"dangling_tool_call"}),
         MiddlewareSpec("tool_disclosure", bind(_create_tool_disclosure), after={"permissions"}),
         MiddlewareSpec("hooks", bind(_create_hooks), after={"tool_disclosure"}),

@@ -413,7 +413,6 @@ def grep_tool(
 @tool("write_file", parse_docstring=True)
 def write_file_tool(
     runtime: ToolRuntime[ContextT, ThreadState],
-    description: str,
     path: str,
     content: str,
     append: bool = False,
@@ -421,9 +420,8 @@ def write_file_tool(
     """Write text content to a file.
 
     Args:
-        description: Explain why you are writing to this file in short words. ALWAYS PROVIDE THIS PARAMETER FIRST.
-        path: The **absolute** path to the file to write to. ALWAYS PROVIDE THIS PARAMETER SECOND.
-        content: The content to write to the file. ALWAYS PROVIDE THIS PARAMETER THIRD.
+        path: The **absolute** path to the file to write to. ALWAYS PROVIDE THIS PARAMETER FIRST.
+        content: The content to write to the file. ALWAYS PROVIDE THIS PARAMETER SECOND.
     """
     try:
         sandbox = ensure_sandbox_initialized(runtime)

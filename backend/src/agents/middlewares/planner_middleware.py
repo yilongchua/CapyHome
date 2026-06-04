@@ -39,6 +39,7 @@ from src.agents.middlewares.work_run_handoff import spawn_work_mode_handoff
 from src.config.handoffs_config import HandoffsConfig
 from src.config.sprint_contracts_config import SprintContractsConfig
 from src.models import create_chat_model, resolve_model_name
+from src.models.prompt_logging import write_prompt_log
 from src.sandbox.path_mapping import to_virtual_path
 
 logger = logging.getLogger(__name__)
@@ -723,7 +724,7 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
             return human_count >= 2
         return human_count > baseline
 
-    def _invoke_planner(self, user_prompt: str) -> tuple[PlannerOutput, str]:
+    def _invoke_planner(self, user_prompt: str, runtime: Runtime | None = None) -> tuple[PlannerOutput, str]:
         # Single-model invariant: honor the user's chat-selected model directly
         # rather than consulting stage-based routing. See src/models/resolver.py.
         model_name = resolve_model_name(self._requested_model)
@@ -731,49 +732,87 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
         system_prompt = PLANNER_SYSTEM_PROMPT.replace("{max_steps}", str(self._max_plan_steps)).replace("{max_clarifications}", str(self._max_clarifications))
         messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
 
-        # Stream tokens and watch the inter-token gap rather than total wall-clock.
-        # Long local generations are fine; only a truly wedged provider (no token
-        # for `_timeout_seconds`) raises TimeoutError. Falls back to .invoke for
-        # model classes that don't expose .stream (e.g. test mocks).
-        stream_fn = getattr(model, "stream", None)
-        if not callable(stream_fn):
-            response = model.invoke(messages)
-            output = _parse_plan_response(extract_text(response.content), max_steps=self._max_plan_steps)
+        # (b) Capture the planner prompt to .prompts/ explicitly. The streaming
+        # call below runs in a daemon thread where the callback-based logger
+        # can't resolve the langgraph config (thread_id), so we log it here with
+        # the known thread_id and a `plan_agent` actor.
+        thread_id = str(_runtime_context(runtime).get("thread_id") or "") if runtime is not None else ""
+        try:
+            write_prompt_log(messages, actor="plan_agent", thread_id=thread_id or None, model_name=model_name)
+        except Exception:
+            logger.debug("planner prompt capture failed", exc_info=True)
+
+        # (a) Bracket the LLM call with trajectory events so the planner's model
+        # call is visible in the timeline (it bypasses TrajectoryMiddleware's
+        # wrap_model_call, which only wraps the graph's main model node).
+        if runtime is not None:
+            append_runtime_event(runtime, {"source": "planner_middleware", "event": "planner_model_call_start", "model_name": model_name})
+        call_started_at = time.monotonic()
+        timed_out = False
+        call_error: str | None = None
+        try:
+            # Stream tokens and watch the inter-token gap rather than total wall-clock.
+            # Long local generations are fine; only a truly wedged provider (no token
+            # for `_timeout_seconds`) raises TimeoutError. Falls back to .invoke for
+            # model classes that don't expose .stream (e.g. test mocks).
+            stream_fn = getattr(model, "stream", None)
+            if not callable(stream_fn):
+                response = model.invoke(messages)
+                output = _parse_plan_response(extract_text(response.content), max_steps=self._max_plan_steps)
+                return output, model_name
+
+            parts: list[str] = []
+            last_token_at = [time.monotonic()]
+            done = threading.Event()
+            error_holder: list[BaseException | None] = [None]
+
+            def _consume() -> None:
+                try:
+                    for chunk in stream_fn(messages):
+                        text = extract_text(getattr(chunk, "content", ""))
+                        if text:
+                            parts.append(text)
+                            last_token_at[0] = time.monotonic()
+                except Exception as e:  # noqa: BLE001
+                    error_holder[0] = e
+                finally:
+                    done.set()
+
+            consumer = threading.Thread(target=_consume, daemon=True)
+            consumer.start()
+
+            poll_interval = 1.0
+            idle_limit = self._timeout_seconds
+            while not done.wait(poll_interval):
+                if time.monotonic() - last_token_at[0] > idle_limit:
+                    # Daemon thread keeps running in the background; the underlying
+                    # HTTP call is not cancelled, but the process owns its lifetime.
+                    raise TimeoutError(f"Planner stream idle for >{idle_limit}s (no token received)")
+
+            if error_holder[0] is not None:
+                raise error_holder[0]
+
+            output = _parse_plan_response("".join(parts), max_steps=self._max_plan_steps)
             return output, model_name
-
-        parts: list[str] = []
-        last_token_at = [time.monotonic()]
-        done = threading.Event()
-        error_holder: list[BaseException | None] = [None]
-
-        def _consume() -> None:
-            try:
-                for chunk in stream_fn(messages):
-                    text = extract_text(getattr(chunk, "content", ""))
-                    if text:
-                        parts.append(text)
-                        last_token_at[0] = time.monotonic()
-            except Exception as e:  # noqa: BLE001
-                error_holder[0] = e
-            finally:
-                done.set()
-
-        consumer = threading.Thread(target=_consume, daemon=True)
-        consumer.start()
-
-        poll_interval = 1.0
-        idle_limit = self._timeout_seconds
-        while not done.wait(poll_interval):
-            if time.monotonic() - last_token_at[0] > idle_limit:
-                # Daemon thread keeps running in the background; the underlying
-                # HTTP call is not cancelled, but the process owns its lifetime.
-                raise TimeoutError(f"Planner stream idle for >{idle_limit}s (no token received)")
-
-        if error_holder[0] is not None:
-            raise error_holder[0]
-
-        output = _parse_plan_response("".join(parts), max_steps=self._max_plan_steps)
-        return output, model_name
+        except TimeoutError:
+            timed_out = True
+            raise
+        except BaseException as exc:  # noqa: BLE001 - re-raised; recorded for the trajectory
+            call_error = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            if runtime is not None:
+                append_runtime_event(
+                    runtime,
+                    {
+                        "source": "planner_middleware",
+                        "event": "planner_model_call_end",
+                        "model_name": model_name,
+                        "duration_ms": round((time.monotonic() - call_started_at) * 1000, 1),
+                        "timed_out": timed_out,
+                        "error": call_error,
+                    },
+                )
 
     @override
     def before_model(self, state: PlannerState, runtime: Runtime) -> dict | None:
@@ -846,7 +885,7 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
         # arrived for `_timeout_seconds` (a wedged provider). The except blocks
         # below emit planning_failed so the frontend can clear the spinner.
         try:
-            plan_output, planner_model = self._invoke_planner(user_prompt)
+            plan_output, planner_model = self._invoke_planner(user_prompt, runtime)
         except TimeoutError:
             logger.warning("Planner LLM stream idle for >%ss; skipping planning", self._timeout_seconds)
             _emit_planning_failed(runtime, reason="timeout")
@@ -1061,9 +1100,16 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
         # Serialize clarifications once so both the SSE event and the persisted
         # plan dict carry the same payload — the frontend popup needs the full
         # list to render the inline clarification panel.
+        # Every clarification carries a stable `id` so the /clarify endpoint (and
+        # the frontend popup) can match answers by id. Without it, answering a
+        # planner-generated clarification 409s ("Unknown clarification id"). The
+        # same id'd list backs the plan_created SSE, plan.clarifications, and the
+        # canonical top-level clarifications queue below.
         clarifications_payload = [
             {
+                "id": f"clarif-{uuid4().hex[:8]}",
                 "question": clarification.question,
+                "clarification_type": "approach_choice",
                 "options": [
                     {
                         "label": option.label,
@@ -1072,6 +1118,9 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
                     }
                     for option in clarification.options
                 ],
+                "blocks": [],
+                "status": "pending",
+                "answer": None,
             }
             for clarification in clarifications
         ]
@@ -1164,6 +1213,13 @@ class PlannerMiddleware(AgentMiddleware[PlannerState]):
             "planner_ephemeral_handoff": planner_handoff.content,
             "planner_ephemeral_clarification": clarification_prompt_message.content if clarification_prompt_message is not None else None,
         }
+
+        # Mirror the clarifications into the canonical top-level queue (merged by
+        # id via merge_clarifications). This is the source the /clarify endpoint
+        # and the frontend popup read first; populating it makes planner-issued
+        # clarifications answerable (and dismissible) just like tool-issued ones.
+        if clarifications_payload:
+            payload["clarifications"] = clarifications_payload
 
         if should_spawn_work_handoff(plan_dict, plan_behavior=_plan_behavior(runtime), plan_status=plan_status):
             payload = self._finalize_plan_handoff(

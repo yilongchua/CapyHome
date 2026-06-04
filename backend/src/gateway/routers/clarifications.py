@@ -63,6 +63,53 @@ class ClarifyBatchResponse(BaseModel):
     resumed_run_id: str | None = None
 
 
+_PLAN_MODE_ASSISTANT_ID = "plan_agent"
+
+
+def _build_replan_human_message(objective: str, answered: list[dict[str, Any]]) -> dict[str, Any]:
+    """A fresh, NON-synthetic user message that re-triggers the planner.
+
+    The planner regenerates a plan from a single user prompt (it does not see
+    the prior plan), so this message carries both the objective and the
+    answers. It deliberately has no `name` so `original_user_prompt` treats it
+    as the current user intent and the planner re-plans against it.
+    """
+    lines = "\n".join(
+        f"- {(a.get('question') or 'Question').strip()} → {(a.get('answer') or '').strip()}"
+        for a in answered
+    )
+    head = f'Please revise the plan for "{objective}" using my answers:' if objective else "Please revise the plan using my answers:"
+    return {"type": "human", "content": f"{head}\n{lines}"}
+
+
+def _resolve_plan_clarifications(plan: dict[str, Any], answered_by_id: dict[str, str], now: str) -> dict[str, Any]:
+    """Fold batch answers into the nested plan and clear its clarification flag.
+
+    The planner's `before_model` only re-plans (vs. resolving) when
+    `plan.clarification_pending` is False, so we must mirror the top-level
+    resolution into the plan. Matches by clarification id (planner-issued
+    clarifications now carry ids).
+    """
+    updated = dict(plan)
+    answers_record = [a for a in (updated.get("clarification_answers") or []) if isinstance(a, dict)]
+    clars = updated.get("clarifications")
+    if isinstance(clars, list):
+        new_clars: list[Any] = []
+        for entry in clars:
+            cid = str(entry.get("id") or "").strip() if isinstance(entry, dict) else ""
+            if cid and cid in answered_by_id:
+                answer = answered_by_id[cid]
+                entry = {**entry, "status": "answered", "answer": answer}
+                answers_record.append({"question": str(entry.get("question") or "").strip(), "selected_label": answer, "answered_at": now})
+            new_clars.append(entry)
+        updated["clarifications"] = new_clars
+    updated["clarification_answers"] = answers_record
+    updated["clarification_pending"] = False
+    updated["clarification_resolved"] = True
+    updated["clarification_question"] = None
+    return updated
+
+
 def _build_operational_reminder(applied_entries: list[dict[str, Any]]) -> HumanMessage:
     lines = ["<clarifications_resolved>"]
     for entry in applied_entries:
@@ -171,13 +218,30 @@ async def clarify_batch(thread_id: str, request: ClarifyBatchRequest) -> Clarify
     still_pending = [e for e in projected if str(e.get("status") or "pending") == "pending"]
     clarification_pending = bool(still_pending)
 
+    # A draft plan whose clarifications are now fully resolved is revised in
+    # place: clear the plan's own clarification flag + fold in the answers, then
+    # (below) start a Plan-Mode run so the planner re-plans — reusing plan_id,
+    # bumping `revision`, and re-emitting `plan_created`. Work-mode / non-draft
+    # clarifications keep the existing "inject a reminder, next tick picks it up"
+    # behaviour.
+    plan = values.get("plan") if isinstance(values.get("plan"), dict) else None
+    plan_status = str(plan.get("status") or "").strip().lower() if isinstance(plan, dict) else ""
+    should_replan = isinstance(plan, dict) and plan_status == "draft" and not clarification_pending
+
+    answered_summary = [{"id": e["id"], "question": by_id[e["id"]].get("question"), "answer": e["answer"]} for e in answered_entries]
+
     # Recompute effective ready_ids so the next agent turn doesn't see stale
     # gating.
     update_payload: dict[str, Any] = {
         "clarifications": answered_entries,  # reducer merges by id
         "clarification_pending": clarification_pending,
-        "messages": [_build_operational_reminder([{"id": e["id"], "question": by_id[e["id"]].get("question"), "answer": e["answer"]} for e in answered_entries])],
     }
+    if should_replan:
+        update_payload["plan"] = _resolve_plan_clarifications(plan, {e["id"]: e["answer"] for e in answered_entries}, now)
+    else:
+        # The re-plan trigger message (run input below) replaces the reminder
+        # in the plan case; here, the reminder steers the next work-mode tick.
+        update_payload["messages"] = [_build_operational_reminder(answered_summary)]
 
     todo_graph = values.get("todo_graph")
     if isinstance(todo_graph, dict):
@@ -199,7 +263,36 @@ async def clarify_batch(thread_id: str, request: ClarifyBatchRequest) -> Clarify
         raise HTTPException(status_code=502, detail=f"Failed to apply clarification answers: {exc}") from exc
 
     resumed_run_id: str | None = None
-    if request.run_id:
+    if should_replan:
+        # Re-enter Plan Mode so the planner revises the draft in place. The
+        # planner sees clarification_pending=False (set above) and the fresh
+        # answer message, so `_should_plan` triggers an in-place re-plan.
+        try:
+            objective = str(plan.get("objective") or plan.get("title") or "").strip()
+            context: dict[str, Any] = {
+                "thread_id": thread_id,
+                "current_mode": "plan",
+                "mode": "plan",
+                "is_plan_mode": True,
+                "plan_behavior": "plan_foreground",
+                "subagent_enabled": True,
+                "thinking_enabled": True,
+                "auto_mode": bool(values.get("auto_mode")),
+            }
+            model_name = values.get("model_name")
+            if isinstance(model_name, str) and model_name.strip():
+                context["model_name"] = model_name.strip()
+            created = await client.runs.create(
+                thread_id,
+                _PLAN_MODE_ASSISTANT_ID,
+                input={"messages": [_build_replan_human_message(objective, answered_summary)]},
+                context=context,
+                metadata={"trigger": "clarification_replan"},
+            )
+            resumed_run_id = created.get("run_id") if isinstance(created, dict) else str(created)
+        except Exception:
+            logger.exception("Failed to start plan re-plan run after clarifications; state was still updated")
+    elif request.run_id:
         try:
             run = await client.runs.get(thread_id, request.run_id)
             assistant_id = run.get("assistant_id") if isinstance(run, dict) else None

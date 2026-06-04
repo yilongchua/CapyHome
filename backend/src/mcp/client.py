@@ -1,6 +1,7 @@
 """MCP client using langchain-mcp-adapters."""
 
 import logging
+from datetime import timedelta
 from typing import Any
 
 from src.config.extensions_config import ExtensionsConfig, McpServerConfig
@@ -36,6 +37,19 @@ def build_server_params(server_name: str, config: McpServerConfig) -> dict[str, 
         # Add headers if present
         if config.headers:
             params["headers"] = config.headers
+        # Per-server timeout: bound both the HTTP request and the SSE read wait
+        # so a hung server (e.g. websearch.search) can't block a tool call past
+        # this many seconds. Without this the langchain-mcp-adapters defaults
+        # apply (HTTP 5-30s but sse_read_timeout 300s), which is what let a
+        # 231s websearch.search call slip past. langchain-mcp-adapters expects
+        # timedelta for streamable-HTTP ("http") and float seconds for "sse".
+        if config.timeout_seconds is not None:
+            if transport_type == "http":
+                params["timeout"] = timedelta(seconds=config.timeout_seconds)
+                params["sse_read_timeout"] = timedelta(seconds=config.timeout_seconds)
+            else:  # sse
+                params["timeout"] = float(config.timeout_seconds)
+                params["sse_read_timeout"] = float(config.timeout_seconds)
     else:
         raise ValueError(f"MCP server '{server_name}' has unsupported transport type: {transport_type}")
 

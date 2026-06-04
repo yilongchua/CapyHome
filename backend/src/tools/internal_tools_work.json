@@ -1,7 +1,7 @@
 [
   {
     "name": "ask_user_for_clarification",
-    "description": "While executing the plan (or running in Work/Auto mode without a plan), surface a question to the user when their input is needed. Questions are queued into a side panel as tabs; the user reads them and answers in a batch. BY DEFAULT this call is non-blocking: the run continues on any todos that are not gated by an unanswered clarification. Call this tool multiple times in one turn (one question per call) to surface several questions at once — the user prefers a batch over one-at-a-time popups. Use `blocks` to declare which todo ids depend on each answer; TodoDagMiddleware keeps those todos out of `ready_ids` until the user answers. Use `urgency: \"blocking\"` only when no useful progress is possible without the answer (run halts via `Command(goto=END)`). Use for: (1) missing information that cannot be inferred; (2) ambiguous requirements producing materially different output; (3) approach choices that genuinely depend on user preference; (4) risk confirmation for any destructive action (required, never assume); (5) suggestion when you have a recommendation. Do NOT use for: questions you can answer by reading code, calling `recall`, or making a reasonable judgement call. One focused question per call.",
+    "description": "While executing the plan (or running in Work/Auto mode without a plan), surface a question to the user when their input is needed. Questions are queued into a side panel as tabs; the user reads them and answers in a batch. BY DEFAULT this call is non-blocking: the run continues on any todos that are not gated by an unanswered clarification. Call this tool multiple times in one turn (one question per call) to surface several questions at once — the user prefers a batch over one-at-a-time popups. Use `blocks` to declare which todo ids depend on each answer; TodoDagMiddleware keeps those todos out of `ready_ids` until the user answers. Use `urgency: \"blocking\"` only when no useful progress is possible without the answer (run halts via `Command(goto=END)`). Use for: (1) missing information that cannot be inferred; (2) ambiguous requirements producing materially different output; (3) approach choices that genuinely depend on user preference; (4) risk confirmation for any destructive action (required, never assume); (5) suggestion when you have a recommendation. Do NOT use for: questions you can answer by reading code, calling `recall`, or making a reasonable judgement call. CHOICE-ONLY UI: the user answers by clicking one of your `options` — there is NO free-text box, so always supply `options` and make every option a concrete, directly-selectable answer. NEVER offer placeholder options like \"Provide stats\", \"Enter manually\", \"Skip\", or \"Other\"; the user cannot type a value. Decompose any open-ended quantity (weight, height, age, budget, dates, available time) into discrete labelled ranges that span the realistic range — e.g. height → \"150–160 cm\", \"160–170 cm\", \"170–180 cm\", \"180 cm+\". Ask one attribute per question: split \"weight and height\" into two separate questions, each with its own range options. One focused question per call.",
     "handler": "src.tools.builtins.clarification_tool:ask_user_for_clarification_tool",
     "mode": ["work", "auto"],
     "phase": ["draft", "approved"],
@@ -13,7 +13,7 @@
     "examples": [
       "ask_user_for_clarification(question=\"How much do you intend to invest?\", clarification_type=\"missing_info\", context=\"The recommendation step needs a budget range.\", blocks=[\"todo-sizing\", \"todo-recommend\"], options=[{\"label\": \"Under SGD 50k\"}, {\"label\": \"SGD 50k–200k\"}, {\"label\": \"Above SGD 200k\"}])",
       "ask_user_for_clarification(question=\"Which region of Indonesia is in scope?\", clarification_type=\"approach_choice\", blocks=[\"todo-region-deepdive\", \"todo-recommend\"], options=[{\"label\": \"Java\", \"recommended\": true}, {\"label\": \"Sumatra\"}, {\"label\": \"Eastern Indonesia\"}])",
-      "ask_user_for_clarification(question=\"Which sectors should the screen include?\", clarification_type=\"approach_choice\", blocks=[\"todo-sector-screen\", \"todo-recommend\"])",
+      "ask_user_for_clarification(question=\"What is your current weight?\", clarification_type=\"missing_info\", context=\"Needed to set a calorie target and a safe weight-loss goal.\", blocks=[\"todo-baseline\"], options=[{\"label\": \"60–70 kg\"}, {\"label\": \"70–80 kg\", \"recommended\": true}, {\"label\": \"80–90 kg\"}, {\"label\": \"90 kg+\"}])",
       "ask_user_for_clarification(question=\"This will delete 3,200 records in `orders`. Proceed?\", clarification_type=\"risk_confirmation\", context=\"Effect is irreversible.\", urgency=\"blocking\")",
       "ask_user_for_clarification(question=\"Should I update the README to reflect this rename?\", clarification_type=\"suggestion\", context=\"The README still references the old module name in three places.\", blocks=[])"
     ],
@@ -36,7 +36,7 @@
         },
         "options": {
           "type": "array",
-          "description": "Optional structured choices for `approach_choice` or `suggestion`. The UI renders each as a clickable option with `label` as the title and `description` as helper text. Provide at most one entry with `recommended: true` — the UI highlights it.",
+          "description": "Structured choices the user picks from — each renders as a clickable button (`label` = title, `description` = helper text); mark at most one entry `recommended: true` and the UI highlights it (it is also the choice applied if the user dismisses the question). There is NO free-text input, so options must be exhaustive and directly selectable: for numeric or open-ended attributes give labelled ranges covering the realistic span (e.g. \"60–70 kg\", \"70–80 kg\", \"80–90 kg\", \"90 kg+\") instead of a prompt to type a value, and never include placeholder options like \"Provide stats\", \"Enter manually\", \"Skip\", or \"Other\".",
           "items": {
             "type": "object",
             "required": ["label"],
@@ -405,7 +405,7 @@
   },
   {
     "name": "write_file",
-    "description": "Write or append text content to a file. By default this OVERWRITES the existing file at `path` — set `append=true` to add to the end without clobbering. Creates parent directories as needed; you do not need to mkdir first. Use this for creating new files or doing full rewrites; for targeted edits to an existing file, prefer `str_replace` so you only send the diff. Do NOT use to write binary content — only UTF-8 text is supported. After a successful call you can trust the file is on disk; do not re-read it to verify.",
+    "description": "Write or append text content to a file. By default this OVERWRITES the existing file at `path` — set `append=true` to add to the end without clobbering. Creates parent directories as needed; you do not need to mkdir first. Use this for creating new files or doing full rewrites; for targeted edits to an existing file, prefer `str_replace` so you only send the diff. Do NOT use to write binary content — only UTF-8 text is supported. After a successful call you can trust the file is on disk; do not re-read it to verify. NEVER name a deliverable `plan.md` — that filename is reserved exclusively for Plan Mode's plan state and is overwritten by the system. Write deliverables under `/mnt/user-data/workspace/` with a descriptive, content-specific filename (e.g. `weight-loss-plan.md`, `invoice-2026-Q2.csv`), then surface them with `present_files`.",
     "handler": "src.sandbox.tools:write_file_tool",
     "mode": ["work", "auto"],
     "phase": ["approved"],
@@ -415,19 +415,15 @@
     "requires_subagent_enabled": false,
     "returns": "The literal string `OK` on success. Returns `Error: Permission denied writing to file: <path>` if unwritable, `Error: Path is a directory, not a file: <path>` if you target a directory, `Error: Failed to write file '<path>': <reason>` on OS-level failure, or `Error: ...` on other failures.",
     "examples": [
-      "write_file(description=\"Generate invoice CSV\", path=\"/mnt/user-data/workspace/invoice-2026-Q2-acme.csv\", content=\"Item,Quantity,Unit Price,Total\\nConsulting hours,40,250,10000\\nReimbursable expenses,1,1250,1250\\n\")",
-      "write_file(description=\"Save case summary\", path=\"/mnt/user-data/workspace/case-acme-v-beta-summary.md\", content=\"# Case summary\\n\\n## Parties\\n- Plaintiff: ...\\n- Defendant: ...\\n\\n## Key dates\\n...\\n\")",
-      "write_file(description=\"Append log entry\", path=\"/mnt/user-data/workspace/run.log\", content=\"\\n[done] step 3 complete\\n\", append=true)",
-      "write_file(description=\"Save research report\", path=\"/mnt/user-data/workspace/report.md\", content=\"# Findings\\n...\")"
+      "write_file(path=\"/mnt/user-data/workspace/invoice-2026-Q2-acme.csv\", content=\"Item,Quantity,Unit Price,Total\\nConsulting hours,40,250,10000\\nReimbursable expenses,1,1250,1250\\n\")",
+      "write_file(path=\"/mnt/user-data/workspace/case-acme-v-beta-summary.md\", content=\"# Case summary\\n\\n## Parties\\n- Plaintiff: ...\\n- Defendant: ...\\n\\n## Key dates\\n...\\n\")",
+      "write_file(path=\"/mnt/user-data/workspace/run.log\", content=\"\\n[done] step 3 complete\\n\", append=true)",
+      "write_file(path=\"/mnt/user-data/workspace/weight-loss-plan.md\", content=\"# Findings\\n...\")"
     ],
     "parameters": {
       "type": "object",
-      "required": ["description", "path", "content"],
+      "required": ["path", "content"],
       "properties": {
-        "description": {
-          "type": "string",
-          "description": "Short one-line explanation of why you're writing this file. Shown in the activity timeline. Pass FIRST in the call."
-        },
         "path": {
           "type": "string",
           "description": "Absolute path to the file. Parent directories are created automatically. Virtual `/mnt/user-data/...` paths are translated."

@@ -45,7 +45,7 @@ class McpServerConfig(BaseModel):
     description: str = Field(default="", description="Human-readable description of what this MCP server provides")
     excluded_tools: list[str] = Field(default_factory=list, description="Tool names to exclude from this server's tool list")
     health_url: str | None = Field(default=None, description="Optional health-check URL (GET). Used by the settings panel to verify the server is reachable.")
-    timeout_seconds: int | None = Field(default=None, description="Optional per-server HTTP timeout override (seconds). Null falls back to routing.timeouts.tools defaults.")
+    timeout_seconds: int | None = Field(default=None, description="Per-server timeout (seconds) for sse/http; bounds the HTTP request and the SSE read wait so a hung server can't block a tool call. Null = adapter defaults (SSE read 300s).")
     model_config = ConfigDict(extra="allow")
 
 

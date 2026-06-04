@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import shutil
 from time import time
@@ -12,7 +14,17 @@ from pydantic import BaseModel, Field
 
 from src.config.paths import get_paths
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api", tags=["threads"])
+
+# A thread delete can transiently fail with a 5xx when the LangGraph checkpointer
+# can't immediately get the SQLite write lock (WAL checkpoint / concurrent access).
+# Retry a few times with backoff so a momentary lock doesn't surface as a failed
+# "delete chat" in the UI. The durable fix is the checkpointer busy_timeout
+# (see ExtendedAsyncSqliteSaver); this is belt-and-suspenders for the gateway.
+_DELETE_MAX_ATTEMPTS = 4
+_DELETE_RETRY_BASE_DELAY = 0.5
 
 
 def _langgraph_url() -> str:
@@ -51,6 +63,12 @@ def _delete_thread_directory(thread_id: str) -> bool:
     return files_deleted
 
 
+def _is_retryable_delete_error(exc: Exception) -> bool:
+    """A 5xx (or no status, i.e. transport error) is likely a transient lock."""
+    status = _extract_status_code(exc)
+    return status is None or status >= 500
+
+
 async def _delete_langgraph_thread(thread_id: str) -> bool:
     from langgraph_sdk import get_client
 
@@ -59,16 +77,22 @@ async def _delete_langgraph_thread(thread_id: str) -> bool:
     saw_not_found = False
 
     for candidate in _thread_id_candidates(thread_id):
-        try:
-            await client.threads.delete(candidate)
-            return True
-        except Exception as exc:
-            if _extract_status_code(exc) == 404:
-                saw_not_found = True
-                continue
-            if first_error is None:
-                first_error = exc
-            continue
+        for attempt in range(_DELETE_MAX_ATTEMPTS):
+            try:
+                await client.threads.delete(candidate)
+                return True
+            except Exception as exc:
+                if _extract_status_code(exc) == 404:
+                    saw_not_found = True
+                    break  # try the next candidate id
+                if _is_retryable_delete_error(exc) and attempt < _DELETE_MAX_ATTEMPTS - 1:
+                    delay = _DELETE_RETRY_BASE_DELAY * (attempt + 1)
+                    logger.warning("Transient error deleting thread %s (attempt %d/%d): %s; retrying in %.1fs", candidate, attempt + 1, _DELETE_MAX_ATTEMPTS, exc, delay)
+                    await asyncio.sleep(delay)
+                    continue
+                if first_error is None:
+                    first_error = exc
+                break  # non-retryable or out of attempts; try next candidate
 
     if first_error is not None:
         raise first_error
@@ -272,18 +296,31 @@ async def hard_stop_thread(thread_id: str) -> HardStopThreadResponse:
     description="Delete a thread's LangGraph history and remove its local thread directory.",
 )
 async def delete_thread(thread_id: str) -> DeleteThreadResponse:
+    # Attempt the LangGraph delete, but don't let its failure prevent local file
+    # cleanup — otherwise a flaky checkpointer delete would leave orphaned thread
+    # directories that can never be removed.
+    lg_error: Exception | None = None
+    deleted = False
     try:
         deleted = await _delete_langgraph_thread(thread_id)
-        files_deleted = _delete_thread_directory(thread_id)
-        return DeleteThreadResponse(
-            thread_id=thread_id,
-            deleted=deleted,
-            files_deleted=files_deleted,
-        )
-    except HTTPException:
-        raise
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to delete thread: {exc}") from exc
+        lg_error = exc
+
+    try:
+        files_deleted = _delete_thread_directory(thread_id)
+    except Exception as exc:
+        # File cleanup failed too; surface whichever error we hit.
+        raise HTTPException(status_code=502, detail=f"Failed to delete thread files: {exc}") from exc
+
+    if lg_error is not None:
+        location = "local files removed" if files_deleted else "no local files found"
+        raise HTTPException(status_code=502, detail=f"Failed to delete thread from LangGraph ({location}): {lg_error}") from lg_error
+
+    return DeleteThreadResponse(
+        thread_id=thread_id,
+        deleted=deleted,
+        files_deleted=files_deleted,
+    )
 
 
 @router.delete(
