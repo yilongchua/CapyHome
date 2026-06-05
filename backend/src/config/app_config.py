@@ -55,6 +55,8 @@ from src.config.web_search_summary_config import WebSearchSummaryConfig, load_we
 
 load_dotenv()
 
+DEFAULT_RECURSION_LIMIT = 1000
+
 
 class AppConfig(BaseModel):
     """Config for the CapyHome application"""
@@ -359,6 +361,27 @@ class AppConfig(BaseModel):
             The tool group config if found, otherwise None.
         """
         return next((group for group in self.tool_groups if group.name == name), None)
+
+    def get_default_run_config(self) -> dict[str, Any]:
+        """Return the shared LangGraph run config from ``channels.session.config``."""
+        channels = (self.model_extra or {}).get("channels")
+        session_config: dict[str, Any] = {}
+        if isinstance(channels, dict):
+            session = channels.get("session")
+            if isinstance(session, dict) and isinstance(session.get("config"), dict):
+                session_config = dict(session["config"])
+
+        run_config = {"recursion_limit": DEFAULT_RECURSION_LIMIT}
+        run_config.update(session_config)
+        return run_config
+
+    def get_default_recursion_limit(self) -> int:
+        """Return the shared LangGraph recursion limit for top-level runs."""
+        value = self.get_default_run_config().get("recursion_limit", DEFAULT_RECURSION_LIMIT)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return DEFAULT_RECURSION_LIMIT
 
 
 _app_config: AppConfig | None = None

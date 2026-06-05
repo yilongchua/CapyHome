@@ -1,5 +1,7 @@
 import csv
 
+import pytest
+
 from src.config.paths import Paths
 from src.gateway.routers import workflow as workflow_router
 
@@ -134,3 +136,48 @@ def test_child_result_parsing():
     assert status == "failed"
     assert result is None
     assert error and error.startswith("invalid_json")
+
+
+@pytest.mark.anyio
+async def test_child_row_run_uses_shared_config_recursion_limit(monkeypatch):
+    class _AppConfig:
+        def get_default_run_config(self):
+            return {"recursion_limit": 1000}
+
+    class _Threads:
+        async def create(self):
+            return {"thread_id": "child-thread"}
+
+        async def get_state(self, thread_id):
+            assert thread_id == "child-thread"
+            return {"values": {"messages": [{"type": "ai", "content": '{"full_address": "1 Full Street"}'}]}}
+
+    class _Runs:
+        def __init__(self):
+            self.create_kwargs = None
+
+        async def create(self, *args, **kwargs):
+            self.create_kwargs = kwargs
+            return {"run_id": "child-run"}
+
+        async def join(self, thread_id, run_id):
+            assert (thread_id, run_id) == ("child-thread", "child-run")
+
+    class _Client:
+        def __init__(self):
+            self.threads = _Threads()
+            self.runs = _Runs()
+
+    client = _Client()
+    active = workflow_router._ActiveWorkflowRun()
+    monkeypatch.setattr(workflow_router, "get_app_config", lambda: _AppConfig())
+    row = {
+        "row_index": 0,
+        "row_number": "1",
+        "source": {"name": "Example A", "country": "SG", "address": "Raffles"},
+    }
+
+    result = await workflow_router._execute_child_row(client, "parent-thread", _workflow_payload(), row, active)
+
+    assert result[:3] == (0, "success", {"full_address": "1 Full Street"})
+    assert client.runs.create_kwargs["config"] == {"recursion_limit": 1000}

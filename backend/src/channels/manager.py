@@ -10,6 +10,7 @@ from typing import Any
 
 from src.channels.message_bus import InboundMessage, InboundMessageType, MessageBus, OutboundMessage, ResolvedAttachment
 from src.channels.store import ChannelStore
+from src.config.app_config import DEFAULT_RECURSION_LIMIT
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ DEFAULT_LANGGRAPH_URL = "http://localhost:2024"
 DEFAULT_GATEWAY_URL = "http://localhost:8001"
 DEFAULT_ASSISTANT_ID = "work_agent"
 
-DEFAULT_RUN_CONFIG: dict[str, Any] = {"recursion_limit": 100}
+DEFAULT_RUN_CONFIG: dict[str, Any] = {"recursion_limit": DEFAULT_RECURSION_LIMIT}
 DEFAULT_RUN_CONTEXT: dict[str, Any] = {
     "thinking_enabled": True,
     "current_mode": "work",

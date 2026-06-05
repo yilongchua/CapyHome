@@ -260,7 +260,6 @@ def _run_work_mode_handoff(
         spawn_title_handoff_if_missing(thread_id=thread_id, thread_name_suffix="-pre-work")
         handoff_cfg = get_handoffs_config()
         max_attempts = 1 + int(handoff_cfg.work_handoff_retry_attempts)
-        recursion_limit = int(handoff_cfg.work_handoff_recursion_limit)
         last_error: Exception | None = None
 
         for attempt in range(1, max_attempts + 1):
@@ -288,7 +287,6 @@ def _run_work_mode_handoff(
                     current_turn_text=original_user_request or "",
                     original_user_request=original_user_request or "",
                 )
-                config["recursion_limit"] = recursion_limit
                 config["configurable"].update(
                     {
                         "current_mode": "work",

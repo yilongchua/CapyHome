@@ -129,7 +129,7 @@ channels:
   session:
     assistant_id: work_agent
     config:
-      recursion_limit: 100
+      recursion_limit: 1000
     context:
       thinking_enabled: true
       subagent_enabled: true

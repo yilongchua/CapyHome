@@ -21,6 +21,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from src.config.app_config import get_app_config
 from src.config.paths import get_paths
 
 router = APIRouter(prefix="/api", tags=["workflow"])
@@ -479,6 +480,7 @@ async def _execute_child_row(client: Any, thread_id: str, workflow: dict[str, An
         child_thread_id,
         _ASSISTANT_ID,
         input={"messages": [{"type": "human", "content": prompt}]},
+        config=get_app_config().get_default_run_config(),
         context=context,
         metadata={"trigger": "workflow_row", "parent_thread_id": thread_id, "row_number": row["row_number"]},
     )

@@ -217,7 +217,7 @@ class CapyHomeClient:
         configurable["plan_behavior"] = overrides.get("plan_behavior") or ("plan_foreground" if current_mode == "plan" else "work_interactive")
         return RunnableConfig(
             configurable=configurable,
-            recursion_limit=overrides.get("recursion_limit", 100),
+            recursion_limit=overrides.get("recursion_limit", self._app_config.get_default_recursion_limit()),
         )
 
     def _ensure_agent(self, config: RunnableConfig):

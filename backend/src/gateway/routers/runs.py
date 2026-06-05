@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
+from src.config.app_config import get_app_config
 from src.config.resume_config import get_resume_config
 
 router = APIRouter(prefix="/api", tags=["runs"])
@@ -45,6 +46,22 @@ class ResumeRunStatusResponse(BaseModel):
     assistant_id: str | None = None
 
 
+class RunConfigResponse(BaseModel):
+    """Shared LangGraph run config used by default for top-level runs."""
+
+    config: dict[str, Any]
+
+
+@router.get(
+    "/runs/config",
+    response_model=RunConfigResponse,
+    summary="Get Default Run Config",
+    description="Return the shared LangGraph run config from config.yaml.",
+)
+async def get_default_run_config() -> RunConfigResponse:
+    return RunConfigResponse(config=get_app_config().get_default_run_config())
+
+
 @router.post(
     "/threads/{thread_id}/runs/{run_id}/resume",
     status_code=status.HTTP_202_ACCEPTED,
@@ -79,7 +96,7 @@ async def resume_run(
             thread_id,
             assistant_id,
             command=command,
-            config=request.config,
+            config=request.config or get_app_config().get_default_run_config(),
             context=request.context,
             metadata=metadata,
         )

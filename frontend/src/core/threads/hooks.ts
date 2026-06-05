@@ -51,6 +51,26 @@ import {
 } from "./thread-message-cache";
 import type { AgentThread, AgentThreadState, PlanState } from "./types";
 
+const FALLBACK_RUN_CONFIG: Record<string, unknown> = { recursion_limit: 1000 };
+let cachedDefaultRunConfig: Record<string, unknown> | null = null;
+
+async function getDefaultRunConfig(): Promise<Record<string, unknown>> {
+  if (cachedDefaultRunConfig) {
+    return cachedDefaultRunConfig;
+  }
+  try {
+    const response = await fetch(`${getBackendBaseURL()}/api/runs/config`);
+    if (!response.ok) {
+      return FALLBACK_RUN_CONFIG;
+    }
+    const data = (await response.json()) as { config?: Record<string, unknown> };
+    cachedDefaultRunConfig = data.config ?? FALLBACK_RUN_CONFIG;
+    return cachedDefaultRunConfig;
+  } catch {
+    return FALLBACK_RUN_CONFIG;
+  }
+}
+
 export type ToolEndEvent = {
   name: string;
   data: unknown;
@@ -1363,6 +1383,7 @@ export function useThreadStream({
           current_turn_text: text,
           original_user_request: text,
         };
+        const runConfig = await getDefaultRunConfig();
 
         await thread.submit(
           {
@@ -1373,9 +1394,7 @@ export function useThreadStream({
             streamSubgraphs: false,
             streamResumable: true,
             checkpoint: options?.checkpoint,
-            config: {
-              recursion_limit: 1000,
-            },
+            config: runConfig,
             context: {
               ...runConfigurable,
               ...extraContext,
