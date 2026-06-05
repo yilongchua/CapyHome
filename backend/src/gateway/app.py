@@ -35,6 +35,7 @@ from src.gateway.routers import (
     triggers,
     uploads,
     vault,
+    workflow,
     workspace_io,
 )
 
@@ -378,6 +379,7 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
     app.include_router(clarifications.router)
     app.include_router(threads.router)
     app.include_router(vault.router)
+    app.include_router(workflow.router)
     app.include_router(workspace_io.router)
 
     @app.get("/health", tags=["health"])

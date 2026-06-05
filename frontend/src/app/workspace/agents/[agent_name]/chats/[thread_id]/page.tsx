@@ -15,6 +15,7 @@ import {
 } from "@/components/workspace/input-box";
 import { MessageList } from "@/components/workspace/messages";
 import { ThreadContext } from "@/components/workspace/messages/context";
+import { WorkflowApprovalOverlay } from "@/components/workspace/plan-approval-overlay";
 import { QueuedMessageList } from "@/components/workspace/queued-message-list";
 import { ThreadTitle } from "@/components/workspace/thread-title";
 import { Tooltip } from "@/components/workspace/tooltip";
@@ -56,6 +57,43 @@ type ExecutePlanResponse = {
   run_id?: string | null;
   assistant_id?: string | null;
 };
+
+type WorkflowJson = {
+  source?: { row_count?: number };
+  runtime?: { workflow_json?: string };
+  execution?: { status?: string; completed_rows?: number };
+};
+
+type WorkflowStatusResponse = {
+  exists: boolean;
+  initialized?: boolean;
+  workflow?: WorkflowJson | null;
+};
+
+type WorkflowExecuteResponse = {
+  status: "accepted" | "done" | "stopped" | "stopped_failed_threshold" | "conflict" | "failed";
+  completed_rows?: number;
+  workflow?: WorkflowJson | null;
+};
+
+function parseErrorDetail(rawBody: string): string {
+  const trimmed = rawBody.trim();
+  if (!trimmed) {
+    return "Unknown error";
+  }
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (typeof parsed === "object" && parsed !== null && "detail" in parsed) {
+      const detail = (parsed as { detail?: unknown }).detail;
+      if (typeof detail === "string" && detail.trim()) {
+        return detail.trim();
+      }
+    }
+  } catch {
+    // fall through
+  }
+  return trimmed;
+}
 
 function getExecutePlanFailureMessage(result: ExecutePlanResponse): string | null {
   if (result.acknowledged && result.status !== "conflict" && result.status !== "failed") {
@@ -112,6 +150,9 @@ function AgentChatPageContent({
   const [forkDraft, setForkDraft] = useState<ForkDraft | null>(null);
   const [uiNotices, setUiNotices] = useState<LiveGenerationNotice[]>([]);
   const [runPollBump, setRunPollBump] = useState(0);
+  const [workflowStatus, setWorkflowStatus] = useState<WorkflowStatusResponse | null>(null);
+  const [isExecutingWorkflow, setIsExecutingWorkflow] = useState(false);
+  const [hiddenWorkflowPath, setHiddenWorkflowPath] = useState<string | null>(null);
   const { notices: generationNotices, artifactPaths: generationArtifacts } =
     useGenerationCompletions(threadId, { enabled: !isNewThread });
   const { showNotification } = useNotification();
@@ -146,6 +187,42 @@ function AgentChatPageContent({
   const { runningRun } = useRejoinRunningRun(isNewThread ? null : threadId, thread, {
     pollBump: runPollBump,
   });
+
+  const refreshWorkflowStatus = useCallback(async () => {
+    if (isNewThread) {
+      setWorkflowStatus(null);
+      return null;
+    }
+    try {
+      const response = await fetch(`${getBackendBaseURL()}${api.threads.workflowStatus(threadId)}`);
+      if (!response.ok) {
+        setWorkflowStatus(null);
+        return null;
+      }
+      const payload = (await response.json()) as WorkflowStatusResponse;
+      setWorkflowStatus(payload);
+      return payload;
+    } catch {
+      setWorkflowStatus(null);
+      return null;
+    }
+  }, [isNewThread, threadId]);
+
+  useEffect(() => {
+    void refreshWorkflowStatus();
+  }, [refreshWorkflowStatus, thread.isLoading, thread.messages.length]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const custom = event as CustomEvent<{ threadId?: string }>;
+      if (custom.detail?.threadId !== threadId) {
+        return;
+      }
+      setHiddenWorkflowPath(workflowStatus?.workflow?.runtime?.workflow_json ?? "/mnt/user-data/workspace/runtime/workflow.json");
+    };
+    window.addEventListener("workflow-exit", handler as EventListener);
+    return () => window.removeEventListener("workflow-exit", handler as EventListener);
+  }, [threadId, workflowStatus?.workflow?.runtime?.workflow_json]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -232,8 +309,105 @@ function AgentChatPageContent({
   );
 
   const handleStop = useCallback(async () => {
+    if (isExecutingWorkflow) {
+      try {
+        await fetch(`${getBackendBaseURL()}${api.threads.workflowStop(threadId)}`, {
+          method: "POST",
+        });
+        await refreshWorkflowStatus();
+      } catch (error) {
+        console.error("Failed to stop workflow:", error);
+      }
+    }
     await queueControls.stop();
-  }, [queueControls]);
+  }, [isExecutingWorkflow, queueControls, refreshWorkflowStatus, threadId]);
+
+  const workflow = workflowStatus?.workflow ?? null;
+  const workflowStatusValue = String(workflow?.execution?.status ?? "").toLowerCase();
+  const workflowPath = workflow?.runtime?.workflow_json ?? "/mnt/user-data/workspace/runtime/workflow.json";
+  const workflowCanExecute = Boolean(
+    workflowStatus?.exists &&
+    workflow &&
+    !["done", "stopped_failed_threshold"].includes(workflowStatusValue),
+  );
+
+  const handleExecuteWorkflow = useCallback(() => {
+    const run = async () => {
+      if (isExecutingWorkflow) {
+        return;
+      }
+      setIsExecutingWorkflow(true);
+      try {
+        const response = await fetch(`${getBackendBaseURL()}${api.threads.workflowExecuteNext(threadId)}`, {
+          method: "POST",
+        });
+        if (!response.ok) {
+          throw new Error(parseErrorDetail(await response.text()));
+        }
+        const result = (await response.json()) as WorkflowExecuteResponse;
+        if (result.workflow) {
+          setWorkflowStatus({ exists: true, initialized: true, workflow: result.workflow });
+        } else {
+          await refreshWorkflowStatus();
+        }
+        if (result.status === "done") {
+          toast.success("Workflow complete.");
+        } else if (result.status === "stopped_failed_threshold") {
+          toast.error("Workflow stopped after 5 consecutive failures.");
+        } else {
+          toast.success(`Workflow batch complete. Rows completed: ${result.completed_rows ?? 0}.`);
+        }
+        publishWorkspaceRefresh(["threads", `thread:${threadId}`], {
+          source: "workflow-execute",
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unknown error";
+        toast.error(`Failed to execute workflow. ${detail}`);
+      } finally {
+        setIsExecutingWorkflow(false);
+      }
+    };
+    void run();
+  }, [isExecutingWorkflow, refreshWorkflowStatus, threadId]);
+
+  useEffect(() => {
+    if (!settings.context.auto_mode || isExecutingWorkflow || !workflowCanExecute || thread.isLoading || workflowStatusValue === "stopped") {
+      return;
+    }
+    if (workflowPath === hiddenWorkflowPath) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      handleExecuteWorkflow();
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [handleExecuteWorkflow, hiddenWorkflowPath, isExecutingWorkflow, settings.context.auto_mode, thread.isLoading, workflowCanExecute, workflowPath, workflow?.execution?.completed_rows, workflowStatusValue]);
+
+  const handleEditWorkflowSuggestion = useCallback(
+    async (suggestion: string) => {
+      const trimmed = suggestion.trim();
+      if (!trimmed) {
+        return;
+      }
+      await sendMessage(
+        threadId,
+        {
+          text: [
+            "Apply the following user edits to /mnt/user-data/workspace/runtime/workflow.json:",
+            "",
+            trimmed,
+            "",
+            "Keep the workflow execution status ready unless the user explicitly asks otherwise.",
+            "Do not execute workflow rows.",
+          ].join("\n"),
+          files: [],
+        },
+        { agent_name: agentName },
+        { mode: "work" },
+      );
+    },
+    [agentName, sendMessage, threadId],
+  );
 
   const handleSubmitPlanRevision = useCallback(async (markdown: string) => {
     const currentPlanTitle = String(thread.values.plan?.title ?? "Draft Plan");
@@ -348,12 +522,27 @@ function AgentChatPageContent({
                   threadId={threadId}
                   newChatHref={`/workspace/agents/${agentName}/chats/new`}
                   autoFocus={isNewThread}
-                  status={thread.isLoading ? "streaming" : "ready"}
+                  status={thread.isLoading || isExecutingWorkflow ? "streaming" : "ready"}
                   context={settings.context}
                   extraHeader={
                     isNewThread && (
                       <AgentWelcome agent={agent} agentName={agentName} />
                     )
+                  }
+                  overlay={
+                    workflowCanExecute &&
+                    !isNewThread &&
+                    workflowPath !== hiddenWorkflowPath ? (
+                      <WorkflowApprovalOverlay
+                        workflowPath={workflowPath}
+                        onExecute={handleExecuteWorkflow}
+                        onCancel={() => setHiddenWorkflowPath(workflowPath)}
+                        onSubmitEdit={handleEditWorkflowSuggestion}
+                        isExecuting={isExecutingWorkflow}
+                        completedRows={Number(workflow?.execution?.completed_rows ?? 0)}
+                        totalRows={Number(workflow?.source?.row_count ?? 0)}
+                      />
+                    ) : null
                   }
                   disabled={env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true"}
                   onContextChange={(context) => setSettings("context", context)}

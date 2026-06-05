@@ -157,7 +157,87 @@ const SLASH_COMMANDS: SlashCommandOption[] = [
     usage: "<new title>",
     description: "Rename current chat title.",
   },
+  {
+    name: "workflow",
+    title: "Create workflow",
+    usage: "<repeatable row task>",
+    description: "Create `/mnt/user-data/workspace/runtime/workflow.json` for a repeatable CSV workflow.",
+  },
+  {
+    name: "workflow-exit",
+    title: "Exit workflow",
+    usage: "Dismiss workflow review",
+    description: "Dismiss the workflow execution prompt for this thread.",
+  },
 ];
+
+function buildWorkflowPlanningPrompt(request: string): string {
+  const trimmed = request.trim();
+  return [
+    "This is a workflow planning step.",
+    "",
+    "Your sole objective is to create /mnt/user-data/workspace/runtime/workflow.json.",
+    "",
+    "Based on the user request:",
+    "- Identify the attached source file.",
+    "- Inspect columns and sample rows.",
+    "- Define the per-row task.",
+    "- Define required output schema.",
+    "- Resolve blockers that would make later row execution ambiguous.",
+    "- Do not process the full file now.",
+    "- If no source file is attached, ask the user to attach one and resend.",
+    "- Once the workflow file is complete, tell the user to review it before execution.",
+    "",
+    "The workflow.json must use this shape:",
+    JSON.stringify(
+      {
+        version: "1",
+        source: {
+          path: "/mnt/user-data/workspace/uploads/<source>.csv",
+          type: "csv",
+          columns: [],
+          row_count: 0,
+        },
+        runtime: {
+          workflow_json: "/mnt/user-data/workspace/runtime/workflow.json",
+          sqlite: "/mnt/user-data/workspace/runtime/workflow.sqlite",
+          output_csv: "/mnt/user-data/workspace/uploads/<source>_output.csv",
+        },
+        row_task: {
+          instruction: "",
+          input_fields: [],
+          output_schema: {},
+          failure_value: "failed run",
+          no_result_value: "",
+        },
+        execution: {
+          status: "ready",
+          max_parallel: 1,
+          flush_every_completed_rows: 20,
+          current_row_index: 0,
+          completed_rows: 0,
+          consecutive_failures: 0,
+          failure_rows: [],
+        },
+      },
+      null,
+      2,
+    ),
+    "",
+    "User workflow request:",
+    trimmed || "(No workflow request provided. Ask the user to describe the per-row task.)",
+  ].join("\n");
+}
+
+function extractInlineWorkflowRequest(text: string): string | null {
+  const match = text.match(/(^|\s)\/workflow(?:\s+|$)/i);
+  if (!match || match.index === undefined) {
+    return null;
+  }
+  const prefix = text.slice(0, match.index).trim();
+  const suffix = text.slice(match.index + match[0].length).trim();
+  return [prefix, suffix].filter(Boolean).join(" ").trim();
+}
 
 function dedupeTodoLines(lines: string[]): string[] {
   const seen = new Set<string>();
@@ -988,6 +1068,35 @@ export function InputBox({
         return;
       }
 
+      if (commandName === "workflow") {
+        onSubmit?.(
+          {
+            text: buildWorkflowPlanningPrompt(args),
+            files: [],
+          },
+          {
+            queued: true,
+            extraContext: {
+              workflow_planning: true,
+              workflow_path: "/mnt/user-data/workspace/runtime/workflow.json",
+            },
+          },
+        );
+        textInput.setInput("");
+        return;
+      }
+
+      if (commandName === "workflow-exit") {
+        window.dispatchEvent(
+          new CustomEvent("workflow-exit", {
+            detail: { threadId },
+          }),
+        );
+        toast.message("Workflow prompt dismissed.");
+        textInput.setInput("");
+        return;
+      }
+
       if (commandName === "handoff") {
         try {
           const response = await fetch(
@@ -1052,7 +1161,40 @@ export function InputBox({
       }
       const slash = parseLeadingSlashCommand(message.text);
       if (slash.isSlash && slash.commandName && isSupportedSlashCommand(slash.commandName)) {
+        if (slash.commandName === "workflow") {
+          onSubmit?.(
+            {
+              text: buildWorkflowPlanningPrompt(slash.args),
+              files: message.files ?? [],
+            },
+            {
+              queued: true,
+              extraContext: {
+                workflow_planning: true,
+                workflow_path: "/mnt/user-data/workspace/runtime/workflow.json",
+              },
+            },
+          );
+          return;
+        }
         await executeSlashCommand(slash.commandName, slash.args);
+        return;
+      }
+      const inlineWorkflowRequest = extractInlineWorkflowRequest(message.text);
+      if (inlineWorkflowRequest !== null) {
+        onSubmit?.(
+          {
+            text: buildWorkflowPlanningPrompt(inlineWorkflowRequest),
+            files: message.files ?? [],
+          },
+          {
+            queued: true,
+            extraContext: {
+              workflow_planning: true,
+              workflow_path: "/mnt/user-data/workspace/runtime/workflow.json",
+            },
+          },
+        );
         return;
       }
       const messageWithoutForkAttachments = forkDraft

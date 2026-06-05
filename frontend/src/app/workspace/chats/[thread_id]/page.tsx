@@ -22,6 +22,7 @@ import { ThreadContext } from "@/components/workspace/messages/context";
 import {
   PlanApprovalOverlay,
   PlanClarificationPopup,
+  WorkflowApprovalOverlay,
 } from "@/components/workspace/plan-approval-overlay";
 import { QueuedMessageList } from "@/components/workspace/queued-message-list";
 import { ThreadTitle } from "@/components/workspace/thread-title";
@@ -141,6 +142,35 @@ type ExecutePlanResponse = {
   assistant_id?: string | null;
 };
 
+type WorkflowStatusResponse = {
+  exists: boolean;
+  initialized?: boolean;
+  workflow?: WorkflowJson | null;
+};
+
+type WorkflowJson = {
+  source?: {
+    row_count?: number;
+  };
+  runtime?: {
+    workflow_json?: string;
+    output_csv?: string;
+  };
+  execution?: {
+    status?: string;
+    completed_rows?: number;
+    max_parallel?: number;
+    failure_rows?: string[];
+  };
+};
+
+type WorkflowExecuteResponse = {
+  status: "accepted" | "done" | "stopped" | "stopped_failed_threshold" | "conflict" | "failed";
+  completed_rows?: number;
+  output_csv?: string | null;
+  workflow?: WorkflowJson | null;
+};
+
 function getExecutePlanFailureMessage(result: ExecutePlanResponse): string | null {
   if (result.acknowledged && result.status !== "conflict" && result.status !== "failed") {
     return null;
@@ -228,6 +258,9 @@ function ChatPageContent({
   const [uiNotices, setUiNotices] = useState<LiveGenerationNotice[]>([]);
   const [pendingExecutePlan, setPendingExecutePlan] = useState(false);
   const [isExecutingPlan, setIsExecutingPlan] = useState(false);
+  const [workflowStatus, setWorkflowStatus] = useState<WorkflowStatusResponse | null>(null);
+  const [isExecutingWorkflow, setIsExecutingWorkflow] = useState(false);
+  const [hiddenWorkflowPath, setHiddenWorkflowPath] = useState<string | null>(null);
   const [isClarifyingPlan, setIsClarifyingPlan] = useState(false);
   const [clarificationPendingOverride, setClarificationPendingOverride] = useState<boolean | null>(null);
   const [runPollBump, setRunPollBump] = useState(0);
@@ -254,6 +287,26 @@ function ChatPageContent({
     const normalized = rawBody.toLowerCase();
     return normalized.includes("in-flight runs") || normalized.includes("temporarily locked");
   }, []);
+
+  const refreshWorkflowStatus = useCallback(async () => {
+    if (isNewThread) {
+      setWorkflowStatus(null);
+      return null;
+    }
+    try {
+      const response = await fetch(`${getBackendBaseURL()}${api.threads.workflowStatus(threadId)}`);
+      if (!response.ok) {
+        setWorkflowStatus(null);
+        return null;
+      }
+      const payload = (await response.json()) as WorkflowStatusResponse;
+      setWorkflowStatus(payload);
+      return payload;
+    } catch {
+      setWorkflowStatus(null);
+      return null;
+    }
+  }, [isNewThread, threadId]);
 
   const planEventKey = useCallback((event: PlanCreatedEvent | null) => {
     if (!event) {
@@ -293,8 +346,18 @@ function ChatPageContent({
   );
 
   const handleStop = useCallback(async () => {
+    if (isExecutingWorkflow) {
+      try {
+        await fetch(`${getBackendBaseURL()}${api.threads.workflowStop(threadId)}`, {
+          method: "POST",
+        });
+        await refreshWorkflowStatus();
+      } catch (error) {
+        console.error("Failed to stop workflow:", error);
+      }
+    }
     await queueControls.stop();
-  }, [queueControls]);
+  }, [isExecutingWorkflow, queueControls, refreshWorkflowStatus, threadId]);
   const handleContextChange = useCallback(
     (nextContext: Parameters<typeof setSettings>[1]) => {
       setSettings("context", nextContext);
@@ -307,6 +370,22 @@ function ChatPageContent({
       planCreatedEvent?.clarification_pending === true ||
       thread.values.plan?.clarification_pending === true
     );
+
+  useEffect(() => {
+    void refreshWorkflowStatus();
+  }, [refreshWorkflowStatus, thread.isLoading, thread.messages.length]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const custom = event as CustomEvent<{ threadId?: string }>;
+      if (custom.detail?.threadId !== threadId) {
+        return;
+      }
+      setHiddenWorkflowPath(workflowStatus?.workflow?.runtime?.workflow_json ?? "/mnt/user-data/workspace/runtime/workflow.json");
+    };
+    window.addEventListener("workflow-exit", handler as EventListener);
+    return () => window.removeEventListener("workflow-exit", handler as EventListener);
+  }, [threadId, workflowStatus?.workflow?.runtime?.workflow_json]);
 
   // NOTE: activeClarificationIndex was used by the legacy per-index submit
   // flow (POST /plan/clarify with clarification_index). The new batch flow
@@ -514,6 +593,90 @@ function ChatPageContent({
     threadId,
     thread.isLoading,
   ]);
+
+  const workflow = workflowStatus?.workflow ?? null;
+  const workflowExecution = workflow?.execution;
+  const workflowRuntime = workflow?.runtime;
+  const workflowStatusValue = String(workflowExecution?.status ?? "").toLowerCase();
+  const workflowPath = workflowRuntime?.workflow_json ?? "/mnt/user-data/workspace/runtime/workflow.json";
+  const workflowCanExecute = Boolean(
+    workflowStatus?.exists &&
+    workflow &&
+    !["done", "stopped_failed_threshold"].includes(workflowStatusValue),
+  );
+  const workflowRowsCompleted = Number(workflowExecution?.completed_rows ?? 0);
+  const workflowRowsTotal = Number(workflow?.source?.row_count ?? 0);
+
+  const handleExecuteWorkflow = useCallback(() => {
+    const run = async () => {
+      if (isExecutingWorkflow) {
+        return;
+      }
+      setIsExecutingWorkflow(true);
+      try {
+        const response = await fetch(`${getBackendBaseURL()}${api.threads.workflowExecuteNext(threadId)}`, {
+          method: "POST",
+        });
+        if (!response.ok) {
+          throw new Error(parseErrorDetail(await response.text()));
+        }
+        const result = (await response.json()) as WorkflowExecuteResponse;
+        if (result.workflow) {
+          setWorkflowStatus({ exists: true, initialized: true, workflow: result.workflow });
+        } else {
+          await refreshWorkflowStatus();
+        }
+        if (result.status === "done") {
+          toast.success("Workflow complete.");
+        } else if (result.status === "stopped_failed_threshold") {
+          toast.error("Workflow stopped after 5 consecutive failures.");
+        } else if (result.status === "stopped") {
+          toast.message("Workflow stopped.");
+        } else {
+          toast.success(`Workflow batch complete. Rows completed: ${result.completed_rows ?? 0}.`);
+        }
+        publishWorkspaceRefresh(["threads", `thread:${threadId}`], {
+          source: "workflow-execute",
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unknown error";
+        toast.error(`Failed to execute workflow. ${detail}`);
+      } finally {
+        setIsExecutingWorkflow(false);
+      }
+    };
+    void run();
+  }, [isExecutingWorkflow, refreshWorkflowStatus, threadId]);
+
+  const handleKeepEditingWorkflow = useCallback(() => {
+    setHiddenWorkflowPath(workflowPath);
+  }, [workflowPath]);
+
+  const handleEditWorkflowSuggestion = useCallback(
+    async (suggestion: string) => {
+      const trimmed = suggestion.trim();
+      if (!trimmed) {
+        return;
+      }
+      await sendMessage(
+        threadId,
+        {
+          text: [
+            "Apply the following user edits to /mnt/user-data/workspace/runtime/workflow.json:",
+            "",
+            trimmed,
+            "",
+            "Keep the workflow execution status ready unless the user explicitly asks otherwise.",
+            "Do not execute workflow rows.",
+          ].join("\n"),
+          files: [],
+        },
+        undefined,
+        { mode: "work" },
+      );
+    },
+    [sendMessage, threadId],
+  );
 
   const handleSubmitClarifications = useCallback(
     (answers: { clarification_id: string; answer: string }[]) => {
@@ -748,6 +911,29 @@ function ChatPageContent({
     }, delayMs);
     return () => window.clearTimeout(timer);
   }, [handleExecutePlan, pendingExecutePlan, planCreatedEvent, thread.isLoading]);
+
+  useEffect(() => {
+    if (!settings.context.auto_mode || isExecutingWorkflow || !workflowCanExecute || thread.isLoading || workflowStatusValue === "stopped") {
+      return;
+    }
+    if (workflowPath === hiddenWorkflowPath) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      handleExecuteWorkflow();
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [
+    handleExecuteWorkflow,
+    hiddenWorkflowPath,
+    isExecutingWorkflow,
+    settings.context.auto_mode,
+    thread.isLoading,
+    workflowCanExecute,
+    workflowPath,
+    workflowRowsCompleted,
+    workflowStatusValue,
+  ]);
 
   const handleKeepEditingPlan = useCallback(() => {
     const eventKey = planEventKey(effectivePlanCreatedEvent);
@@ -1051,7 +1237,7 @@ function ChatPageContent({
                     threadId={threadId}
                     newChatHref="/workspace/chats/new"
                     autoFocus={isNewThread}
-                    status={thread.isLoading || hasPendingToolResults ? "streaming" : "ready"}
+                    status={thread.isLoading || hasPendingToolResults || isExecutingWorkflow ? "streaming" : "ready"}
                     context={settings.context}
                     extraHeader={
                       isNewThread && (
@@ -1072,6 +1258,18 @@ function ChatPageContent({
                           onCancel={handleKeepEditingPlan}
                           onSubmitEdit={handleEditPlanSuggestion}
                           isExecuting={isExecutingPlan}
+                        />
+                      ) : workflowCanExecute &&
+                        !isNewThread &&
+                        workflowPath !== hiddenWorkflowPath ? (
+                        <WorkflowApprovalOverlay
+                          workflowPath={workflowPath}
+                          onExecute={handleExecuteWorkflow}
+                          onCancel={handleKeepEditingWorkflow}
+                          onSubmitEdit={handleEditWorkflowSuggestion}
+                          isExecuting={isExecutingWorkflow}
+                          completedRows={workflowRowsCompleted}
+                          totalRows={workflowRowsTotal}
                         />
                       ) : null
                     }

@@ -191,6 +191,165 @@ export function PlanApprovalOverlay({
   );
 }
 
+export function WorkflowApprovalOverlay({
+  workflowPath = "/mnt/user-data/workspace/runtime/workflow.json",
+  onExecute,
+  onCancel,
+  onSubmitEdit,
+  isExecuting = false,
+  isSubmittingEdit = false,
+  completedRows = 0,
+  totalRows = 0,
+  className,
+}: {
+  workflowPath?: string;
+  onExecute: () => void;
+  onCancel: () => void;
+  onSubmitEdit: (suggestion: string) => Promise<void> | void;
+  isExecuting?: boolean;
+  isSubmittingEdit?: boolean;
+  completedRows?: number;
+  totalRows?: number;
+  className?: string;
+}) {
+  const { select, setOpen } = useDirectory();
+  const [mode, setMode] = useState<Mode>("choose");
+  const [editText, setEditText] = useState("");
+  const editRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const handleOpenWorkflow = useCallback(() => {
+    select(workflowPath);
+    setOpen(true);
+  }, [select, setOpen, workflowPath]);
+
+  useEffect(() => {
+    if (mode === "edit") {
+      editRef.current?.focus();
+    }
+  }, [mode]);
+
+  const handleSend = useCallback(async () => {
+    const text = editText.trim();
+    if (!text || isSubmittingEdit) {
+      return;
+    }
+    await onSubmitEdit(text);
+    setEditText("");
+    setMode("choose");
+  }, [editText, isSubmittingEdit, onSubmitEdit]);
+
+  const handleEditKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMode("choose");
+        setEditText("");
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        void handleSend();
+      }
+    },
+    [handleSend],
+  );
+
+  const progressLabel = totalRows > 0 ? `${completedRows}/${totalRows}` : `${completedRows}`;
+
+  return (
+    <div
+      className={cn(
+        "bg-background/95 absolute inset-0 z-20 flex -translate-y-0.5 flex-col rounded-2xl border border-dashed backdrop-blur-sm",
+        className,
+      )}
+      role="dialog"
+      aria-label="Workflow approval"
+    >
+      <div className="flex h-8 items-center justify-between gap-2 border-b px-2">
+        <p className="text-[14.4px] font-medium leading-none text-muted-foreground tracking-wide">
+          Review{" "}
+          <button
+            type="button"
+            onClick={handleOpenWorkflow}
+            className="cursor-pointer text-foreground underline underline-offset-4"
+          >
+            workflow.json
+          </button>
+          <span className="ml-2 text-xs text-muted-foreground">{progressLabel} rows</span>
+        </p>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          className="text-muted-foreground shrink-0"
+          onClick={onCancel}
+          aria-label="Dismiss workflow"
+          disabled={isExecuting || isSubmittingEdit}
+        >
+          <XIcon className="size-3.5" />
+        </Button>
+      </div>
+
+      {mode === "choose" ? (
+        <div className="flex flex-1 flex-col">
+          <Button
+            size="lg"
+            className="h-auto w-full flex-1 justify-start gap-2 rounded-none border-0 text-[16.8px]"
+            onClick={onExecute}
+            disabled={isExecuting}
+          >
+            <PlayIcon className="size-5" />
+            {isExecuting ? "Executing..." : "Execute Workflow"}
+          </Button>
+          <Button
+            size="lg"
+            variant="outline"
+            className="h-auto w-full flex-1 justify-start gap-2 rounded-t-none rounded-b-2xl border-0 text-[16.8px]"
+            onClick={() => setMode("edit")}
+            disabled={isExecuting}
+          >
+            <PencilIcon className="size-5" />
+            Edit Workflow
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-stretch gap-2 px-4 pb-3">
+          <textarea
+            ref={editRef}
+            value={editText}
+            onChange={(event) => setEditText(event.target.value)}
+            onKeyDown={handleEditKeyDown}
+            placeholder="Edit workflow - describe what should change"
+            className="bg-background placeholder:text-muted-foreground flex-1 resize-none rounded-md border px-3 py-2 text-sm outline-none focus:ring-1"
+            disabled={isSubmittingEdit}
+          />
+          <div className="flex flex-col justify-between gap-1">
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => {
+                setMode("choose");
+                setEditText("");
+              }}
+              aria-label="Cancel edit"
+              disabled={isSubmittingEdit}
+            >
+              <XIcon className="size-3.5" />
+            </Button>
+            <Button
+              size="icon-sm"
+              onClick={() => void handleSend()}
+              aria-label="Send workflow edit"
+              disabled={isSubmittingEdit || !editText.trim()}
+            >
+              <SendIcon className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PlanClarificationPopup({
   clarifications,
   onSubmit,
