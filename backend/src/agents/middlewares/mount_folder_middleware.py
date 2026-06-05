@@ -54,6 +54,25 @@ class MountFolderMiddleware(AgentMiddleware[MountFolderState]):
         ]
         return "\n".join(lines)
 
+    @staticmethod
+    def _clear_mounted_path(state: MountFolderState) -> dict | None:
+        """Drop a stale ``mounted_path`` from checkpointed ``thread_data``.
+
+        ``thread_data`` is part of the persisted ``ThreadState``, so once a path
+        is written it survives across turns. After an unmount (config file gone),
+        simply returning ``None`` would leave the old ``mounted_path`` in state —
+        the path-translation layer would keep resolving /mnt/user-data/mounted/*
+        and ``wrap_model_call`` would keep injecting the <mounted_folder> block.
+        Returning a state update that removes the key tears the mount down.
+        Returns ``None`` (no-op) when there is nothing to clear.
+        """
+        existing_thread_data: ThreadDataState = state.get("thread_data") or {}
+        if "mounted_path" not in existing_thread_data:
+            return None
+        cleared: ThreadDataState = {**existing_thread_data}
+        cleared.pop("mounted_path", None)
+        return {"thread_data": cleared}
+
     @override
     def before_agent(self, state: MountFolderState, runtime: Runtime) -> dict | None:
         context = runtime.context if isinstance(runtime.context, dict) else {}
@@ -64,22 +83,22 @@ class MountFolderMiddleware(AgentMiddleware[MountFolderState]):
         paths = get_paths()
         mount_config = paths.sandbox_user_data_dir(thread_id) / "dreamy_mount.json"
         if not mount_config.exists():
-            return None
+            return self._clear_mounted_path(state)
 
         try:
             data = json.loads(mount_config.read_text(encoding="utf-8"))
             mounted_path_str = data.get("path")
         except Exception as exc:
             logger.warning("Failed to read mount config for thread %s: %s", thread_id, exc)
-            return None
+            return self._clear_mounted_path(state)
 
         if not mounted_path_str:
-            return None
+            return self._clear_mounted_path(state)
 
         folder = Path(mounted_path_str)
         if not folder.exists() or not folder.is_dir():
             logger.debug("Mounted folder does not exist or is not a directory: %s", mounted_path_str)
-            return None
+            return self._clear_mounted_path(state)
 
         # Update thread_data so the sandbox path-translation layer can resolve
         # /mnt/user-data/mounted/* → <real folder path>/*

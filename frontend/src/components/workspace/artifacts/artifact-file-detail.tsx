@@ -10,6 +10,7 @@ import {
   PencilIcon,
   SaveIcon,
   SquareArrowOutUpRightIcon,
+  TableIcon,
   Undo2Icon,
   XIcon,
 } from "lucide-react";
@@ -47,8 +48,16 @@ import { CitationLink } from "../citations/citation-link";
 import { useThread } from "../messages/context";
 import { Tooltip } from "../tooltip";
 
+import { ArtifactCsvTable } from "./artifact-csv-table";
 import { useDirectory } from "./context";
 import { PlanViewer } from "./plan-viewer";
+
+/**
+ * Max characters rendered into the code editor / parsed for the CSV table.
+ * Large files (e.g. multi-MB CSVs) freeze the editor and lock the main thread,
+ * so we render a truncated head and point the user at Download for the rest.
+ */
+const MAX_PREVIEW_CHARS = 200_000;
 
 function truncateFilename(name: string): string {
   if (name.length <= 12) return name;
@@ -88,8 +97,12 @@ export function ArtifactFileDetail({
   const isPlanFile = useMemo(() => {
     return (
       (filepath.endsWith("plan.md") &&
-        (filepath.includes("/workspace/") || filepath.includes("/.handoff/") || filepath.includes("/.handoffs/"))) ||
-      (filepath.includes("/workspace/plans/") && filepath.endsWith(".md") && filepath.includes("/plan-"))
+        (filepath.includes("/workspace/") ||
+          filepath.includes("/.handoff/") ||
+          filepath.includes("/.handoffs/"))) ||
+      (filepath.includes("/workspace/plans/") &&
+        filepath.endsWith(".md") &&
+        filepath.includes("/plan-"))
     );
   }, [filepath]);
   const { isCodeFile, language } = useMemo(() => {
@@ -107,13 +120,18 @@ export function ArtifactFileDetail({
   const isSupportPreview = useMemo(() => {
     return language === "html" || language === "markdown";
   }, [language]);
+  const isCsv = useMemo(() => language === "csv", [language]);
   const { content } = useArtifactContent({
     threadId,
     filepath: filepathFromProps,
     enabled: !isWriteFile && (isCodeFile || isPlanFile),
   });
 
-  const displayContent = content ?? "";
+  const fullContent = content ?? "";
+  const isTruncated = fullContent.length > MAX_PREVIEW_CHARS;
+  const displayContent = isTruncated
+    ? fullContent.slice(0, MAX_PREVIEW_CHARS)
+    : fullContent;
   const isPlanByFrontmatter = useMemo(() => {
     const trimmed = displayContent.trimStart();
     if (!trimmed.startsWith("---")) {
@@ -123,21 +141,26 @@ export function ArtifactFileDetail({
   }, [displayContent]);
   const shouldRenderPlan = isPlanFile || isPlanByFrontmatter;
 
-  const [viewMode, setViewMode] = useState<"code" | "preview">("code");
+  const [viewMode, setViewMode] = useState<"code" | "preview" | "table">(
+    "code",
+  );
   const [isInstalling, setIsInstalling] = useState(false);
   const [planDraft, setPlanDraft] = useState("");
   const [isPlanEditing, setIsPlanEditing] = useState(false);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
-  const [isSubmittingPlanRevision, setIsSubmittingPlanRevision] = useState(false);
+  const [isSubmittingPlanRevision, setIsSubmittingPlanRevision] =
+    useState(false);
   const { isMock } = useThread();
   const queryClient = useQueryClient();
   useEffect(() => {
-    if (isSupportPreview) {
+    if (isCsv) {
+      setViewMode("table");
+    } else if (isSupportPreview) {
       setViewMode("preview");
     } else {
       setViewMode("code");
     }
-  }, [isSupportPreview]);
+  }, [isCsv, isSupportPreview]);
 
   useEffect(() => {
     if (shouldRenderPlan) {
@@ -192,26 +215,46 @@ export function ArtifactFileDetail({
       toast.success("Plan markdown saved.");
       setIsPlanEditing(false);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to save plan markdown.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to save plan markdown.";
       toast.error(message);
     } finally {
       setIsSavingPlan(false);
     }
-  }, [filepath, isMock, isSavingPlan, planDraft, queryClient, shouldRenderPlan, threadId]);
+  }, [
+    filepath,
+    isMock,
+    isSavingPlan,
+    planDraft,
+    queryClient,
+    shouldRenderPlan,
+    threadId,
+  ]);
 
   const handleSubmitPlanRevision = useCallback(async () => {
-    if (!onSubmitPlanRevision || isSubmittingPlanRevision || !shouldRenderPlan) return;
+    if (!onSubmitPlanRevision || isSubmittingPlanRevision || !shouldRenderPlan)
+      return;
     setIsSubmittingPlanRevision(true);
     try {
       await onSubmitPlanRevision(planDraft);
       toast.success("Sent plan revision request.");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to submit plan revision request.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to submit plan revision request.";
       toast.error(message);
     } finally {
       setIsSubmittingPlanRevision(false);
     }
-  }, [isSubmittingPlanRevision, onSubmitPlanRevision, planDraft, shouldRenderPlan]);
+  }, [
+    isSubmittingPlanRevision,
+    onSubmitPlanRevision,
+    planDraft,
+    shouldRenderPlan,
+  ]);
 
   const hasPlanChanges = shouldRenderPlan && planDraft !== displayContent;
   return (
@@ -245,7 +288,7 @@ export function ArtifactFileDetail({
           </ArtifactTitle>
         </div>
         <div className="flex min-w-0 grow items-center justify-center">
-          {isSupportPreview && (
+          {(isSupportPreview || isCsv) && (
             <ToggleGroup
               className="mx-auto"
               type="single"
@@ -254,16 +297,23 @@ export function ArtifactFileDetail({
               value={viewMode}
               onValueChange={(value) => {
                 if (value) {
-                  setViewMode(value as "code" | "preview");
+                  setViewMode(value as "code" | "preview" | "table");
                 }
               }}
             >
+              {isCsv && (
+                <ToggleGroupItem value="table">
+                  <TableIcon />
+                </ToggleGroupItem>
+              )}
               <ToggleGroupItem value="code">
                 <Code2Icon />
               </ToggleGroupItem>
-              <ToggleGroupItem value="preview">
-                <EyeIcon />
-              </ToggleGroupItem>
+              {isSupportPreview && (
+                <ToggleGroupItem value="preview">
+                  <EyeIcon />
+                </ToggleGroupItem>
+              )}
             </ToggleGroup>
           )}
         </div>
@@ -344,7 +394,7 @@ export function ArtifactFileDetail({
                 disabled={!content}
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(displayContent ?? "");
+                    await navigator.clipboard.writeText(fullContent ?? "");
                     toast.success(t.clipboard.copiedToClipboard);
                   } catch (error) {
                     toast.error("Failed to copy to clipboard");
@@ -375,47 +425,74 @@ export function ArtifactFileDetail({
           </ArtifactActions>
         </div>
       </ArtifactHeader>
-      <ArtifactContent className="p-0">
-        {shouldRenderPlan && displayContent && (
-          <>
-            {isPlanEditing ? (
-              <div className="grid h-full min-h-0 grid-cols-2">
-                <CodeEditor
-                  className="h-full min-h-0 resize-none border-r"
-                  value={planDraft}
-                  onChange={setPlanDraft}
-                />
-                <div className="h-full min-h-0 overflow-auto border-l p-4">
-                  <ArtifactFilePreview content={planDraft} language="markdown" />
-                </div>
-              </div>
-            ) : (
-              <PlanViewer content={displayContent} />
-            )}
-          </>
+      <ArtifactContent className="flex flex-col overflow-hidden p-0">
+        {!shouldRenderPlan && isTruncated && viewMode !== "table" && (
+          <div className="text-muted-foreground bg-muted/40 flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1.5 text-xs">
+            <span>
+              Large file truncated to the first{" "}
+              {Math.round(MAX_PREVIEW_CHARS / 1000)}KB for preview.
+            </span>
+            <a
+              className="text-primary shrink-0 underline"
+              href={urlOfArtifact({ filepath, threadId, download: true })}
+              target="_blank"
+            >
+              {t.common.download}
+            </a>
+          </div>
         )}
-        {!shouldRenderPlan && isSupportPreview &&
-          viewMode === "preview" &&
-          (language === "markdown" || language === "html") && (
-            <ArtifactFilePreview
+        <div className="relative min-h-0 flex-1">
+          {shouldRenderPlan && displayContent && (
+            <>
+              {isPlanEditing ? (
+                <div className="grid h-full min-h-0 grid-cols-2">
+                  <CodeEditor
+                    className="h-full min-h-0 resize-none border-r"
+                    value={planDraft}
+                    onChange={setPlanDraft}
+                  />
+                  <div className="h-full min-h-0 overflow-auto border-l p-4">
+                    <ArtifactFilePreview
+                      content={planDraft}
+                      language="markdown"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <PlanViewer content={displayContent} />
+              )}
+            </>
+          )}
+          {!shouldRenderPlan &&
+            isSupportPreview &&
+            viewMode === "preview" &&
+            (language === "markdown" || language === "html") && (
+              <ArtifactFilePreview
+                content={displayContent}
+                language={language ?? "text"}
+              />
+            )}
+          {!shouldRenderPlan && isCsv && viewMode === "table" && (
+            <ArtifactCsvTable
               content={displayContent}
-              language={language ?? "text"}
+              truncated={isTruncated}
             />
           )}
-        {!shouldRenderPlan && isCodeFile && viewMode === "code" && (
-          <CodeEditor
-            className="size-full resize-none rounded-none border-none"
-            value={displayContent ?? ""}
-            readonly
-            wrapLines
-          />
-        )}
-        {!shouldRenderPlan && !isCodeFile && (
-          <iframe
-            className="size-full"
-            src={urlOfArtifact({ filepath, threadId, isMock })}
-          />
-        )}
+          {!shouldRenderPlan && isCodeFile && viewMode === "code" && (
+            <CodeEditor
+              className="size-full resize-none rounded-none border-none"
+              value={displayContent ?? ""}
+              readonly
+              wrapLines
+            />
+          )}
+          {!shouldRenderPlan && !isCodeFile && (
+            <iframe
+              className="size-full"
+              src={urlOfArtifact({ filepath, threadId, isMock })}
+            />
+          )}
+        </div>
       </ArtifactContent>
     </Artifact>
   );
