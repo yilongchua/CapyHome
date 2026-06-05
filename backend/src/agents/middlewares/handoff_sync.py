@@ -302,6 +302,7 @@ def render_plan_md(
     file_changes: list[str] | None = None,
     runtime_artifacts: list[str] | None = None,
     evaluator_findings: list[str] | None = None,
+    execution_notes: list[str] | None = None,
     clarifications: list[dict[str, Any]] | None = None,
     clarification_answers: list[dict[str, str]] | None = None,
     last_synced_at: str | None = None,
@@ -404,6 +405,8 @@ def render_plan_md(
     file_changes_block = "\n".join(f"- `{item}`" for item in (file_changes or [])) or "- No tracked workspace file changes yet."
     runtime_artifacts_block = "\n".join(f"- `{item}`" for item in (runtime_artifacts or [])) or "- No runtime artifacts recorded."
     evaluator_block = "\n".join(f"- {item}" for item in (evaluator_findings or [])) or "- No evaluator findings recorded."
+    execution_note_lines = [f"- {note}" for note in (execution_notes or []) if str(note).strip()]
+    execution_notes_block = "\n".join(execution_note_lines) if execution_note_lines else "- No execution notes recorded."
     clarification_lines = []
     for clarification in (clarifications or []):
         if not isinstance(clarification, dict):
@@ -435,6 +438,8 @@ def render_plan_md(
         f"{objective_text}\n\n"
         "## Current Status\n"
         f"{current_status_text}\n\n"
+        "## Execution Notes\n"
+        f"{execution_notes_block}\n\n"
         "## Summary\n"
         f"{(summary or objective_text).strip()}\n\n"
         "## Assumptions\n"
@@ -573,6 +578,7 @@ def sync_handoff_files_from_state(state: dict[str, Any]) -> list[str]:
             file_changes=file_changes,
             runtime_artifacts=runtime_artifacts,
             evaluator_findings=evaluator_findings,
+            execution_notes=_collect_execution_notes(state),
             clarifications=clarifications_raw,
             clarification_answers=clarification_answers_raw,
             last_synced_at=last_synced,

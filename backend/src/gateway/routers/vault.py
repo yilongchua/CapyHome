@@ -116,6 +116,7 @@ class VaultIngestStatusResponse(BaseModel):
     total: int = 0
     processed: int = 0
     updated: int = 0
+    skipped_unchanged: int = 0
     skipped_no_raw: int = 0
     failed: int = 0
     current_index: int = 0

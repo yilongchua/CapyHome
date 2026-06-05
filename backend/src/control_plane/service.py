@@ -1750,6 +1750,7 @@ class ControlPlaneService:
             "total": 0,
             "processed": 0,
             "updated": 0,
+            "skipped_unchanged": 0,
             "skipped_no_raw": 0,
             "failed": 0,
             "current_index": 0,
@@ -1976,10 +1977,14 @@ class ControlPlaneService:
                     raise
 
                 ingested = int(queue_report.get("ingested_count") or 0)
+                skipped = int(queue_report.get("skipped_unchanged_count") or 0)
                 with self._vault_ingest_lock:
                     self._vault_ingest_job["updated"] = int(
                         self._vault_ingest_job.get("updated", 0)
                     ) + ingested
+                    self._vault_ingest_job["skipped_unchanged"] = int(
+                        self._vault_ingest_job.get("skipped_unchanged", 0)
+                    ) + skipped
                 logger_obj.info(
                     "vault_ingest_queue_drain_chunk_done job_id=%s worker=%d ingested=%d skipped=%d",
                     job_id,

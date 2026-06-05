@@ -14,7 +14,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from src.agents.middlewares.handoff_sync import ensure_plan_state, render_plan_md
+from src.agents.middlewares.handoff_sync import _collect_execution_notes, ensure_plan_state, render_plan_md
 from src.config.paths import get_paths
 from src.sandbox.path_mapping import replace_virtual_path, to_virtual_path
 
@@ -302,7 +302,7 @@ def _render_plan_for_handoff(state: dict[str, Any], thread_data: dict[str, str])
         file_changes=artifacts,
         runtime_artifacts=runtime_artifacts,
         evaluator_findings=evaluator_findings,
-        execution_notes=[],
+        execution_notes=_collect_execution_notes(state),
         last_synced_at=_utc_now_iso(),
     )
 

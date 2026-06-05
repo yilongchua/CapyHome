@@ -513,6 +513,7 @@ export interface VaultIngestStatusResponse {
   total: number;
   processed: number;
   updated: number;
+  skipped_unchanged: number;
   skipped_no_raw: number;
   failed: number;
   current_index: number;

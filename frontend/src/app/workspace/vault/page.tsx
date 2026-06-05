@@ -382,7 +382,16 @@ export default function VaultPage() {
       return ingestEtaLabel ? `${base} · ~${ingestEtaLabel} remaining` : base;
     }
     if (ingestStatus.status === "success" && ingestStatus.processed > 0) {
-      return `Last ingest: updated ${ingestStatus.updated} / ${ingestStatus.processed}`;
+      const updated = ingestStatus.updated ?? 0;
+      const skipped = ingestStatus.skipped_unchanged ?? 0;
+      const processed = ingestStatus.processed;
+      if (updated === 0 && skipped > 0) {
+        return `Last ingest: ${skipped} source${skipped === 1 ? "" : "s"} already up to date`;
+      }
+      if (skipped > 0) {
+        return `Last ingest: ${updated} new · ${skipped} unchanged / ${processed} total`;
+      }
+      return `Last ingest: updated ${updated} / ${processed}`;
     }
     if (ingestStatus.status === "cancelled") {
       return `Ingest stopped at ${ingestStatus.current_index}/${ingestStatus.total}`;
