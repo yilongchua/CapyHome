@@ -43,6 +43,7 @@ dependencies = [
     "pytesseract>=0.3.13",
     "pandas>=2.2.2",
     "crawl4ai>=0.8.6",
+    "msgpack>=1.1.2",
 ]
 
 [dependency-groups]
