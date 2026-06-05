@@ -245,6 +245,38 @@ def _stopped_work_mode(values: dict) -> dict | None:
     }
 
 
+_ACTIVE_RUN_STATUSES = {"running", "pending"}
+
+
+async def _cancel_active_runs(client: object, thread_id: str) -> int:
+    """Cancel any in-flight LangGraph runs for the thread.
+
+    Patching state and flagging subagents (cooperative) does not stop the
+    lead-agent run itself, so without this the run finishes normally after the
+    user hits Stop. We interrupt active runs so the graph actually halts.
+    """
+    cancelled = 0
+    try:
+        runs = await client.runs.list(thread_id)
+    except Exception as exc:  # listing is best-effort; don't fail the hard-stop
+        logger.warning("hard-stop: failed to list runs for thread %s: %s", thread_id, exc)
+        return 0
+
+    for run in runs:
+        status = run.get("status") if isinstance(run, dict) else getattr(run, "status", None)
+        run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
+        if status not in _ACTIVE_RUN_STATUSES or not run_id:
+            continue
+        try:
+            await client.runs.cancel(thread_id, str(run_id), wait=False, action="interrupt")
+            cancelled += 1
+        except Exception as exc:  # one bad run shouldn't block cancelling the rest
+            logger.warning("hard-stop: failed to cancel run %s on thread %s: %s", run_id, thread_id, exc)
+    if cancelled:
+        logger.info("hard-stop: cancelled %d active run(s) for thread %s", cancelled, thread_id)
+    return cancelled
+
+
 @router.post(
     "/threads/{thread_id}/hard-stop",
     response_model=HardStopThreadResponse,
@@ -258,6 +290,9 @@ async def hard_stop_thread(thread_id: str) -> HardStopThreadResponse:
         from src.subagents.executor import cancel_background_tasks_for_thread
 
         client = get_client(url=_langgraph_url())
+        # Interrupt the in-flight lead-agent run first so the graph stops issuing
+        # new model/tool calls; then flag subagents and repair state.
+        await _cancel_active_runs(client, thread_id)
         state = await client.threads.get_state(thread_id)
         values = _extract_state_values(state)
         messages = values.get("messages")
