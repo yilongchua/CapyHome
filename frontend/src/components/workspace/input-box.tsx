@@ -98,6 +98,21 @@ export type InputBoxSubmitOptions = {
   extraContext?: Record<string, unknown>;
 };
 
+function isAbortLikeError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return true;
+  }
+
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : JSON.stringify(error);
+
+  return message.toLowerCase().includes("abort");
+}
+
 function getResolvedMode(
   mode: InputMode | undefined,
   _supportsThinking: boolean,
@@ -162,6 +177,12 @@ const SLASH_COMMANDS: SlashCommandOption[] = [
     title: "Create workflow",
     usage: "<repeatable row task>",
     description: "Create `/mnt/user-data/workspace/runtime/workflow.json` for a repeatable CSV workflow.",
+  },
+  {
+    name: "workflow-recover",
+    title: "Recover workflow",
+    usage: "Restore workflow prompt",
+    description: "Requeue failed workflow rows and reopen the Execute Workflow prompt for this thread.",
   },
   {
     name: "workflow-exit",
@@ -230,8 +251,8 @@ function buildWorkflowPlanningPrompt(request: string): string {
 }
 
 function extractInlineWorkflowRequest(text: string): string | null {
-  const match = text.match(/(^|\s)\/workflow(?:\s+|$)/i);
-  if (!match || match.index === undefined) {
+  const match = /(^|\s)\/workflow(?:\s+|$)/i.exec(text);
+  if (match?.index === undefined) {
     return null;
   }
   const prefix = text.slice(0, match.index).trim();
@@ -364,6 +385,7 @@ export function InputBox({
   const [followupsHidden, setFollowupsHidden] = useState(false);
   const [followupsLoading, setFollowupsLoading] = useState(false);
   const lastGeneratedForAiIdRef = useRef<string | null>(null);
+  const followupRequestIdRef = useRef(0);
   const wasStreamingRef = useRef(false);
   const contextRef = useRef(context);
   const onContextChangeRef = useRef(onContextChange);
@@ -1086,6 +1108,16 @@ export function InputBox({
         return;
       }
 
+      if (commandName === "workflow-recover") {
+        window.dispatchEvent(
+          new CustomEvent("workflow-recover", {
+            detail: { threadId },
+          }),
+        );
+        textInput.setInput("");
+        return;
+      }
+
       if (commandName === "workflow-exit") {
         window.dispatchEvent(
           new CustomEvent("workflow-exit", {
@@ -1357,12 +1389,13 @@ export function InputBox({
       return;
     }
 
-    const controller = new AbortController();
+    const requestId = followupRequestIdRef.current + 1;
+    followupRequestIdRef.current = requestId;
     setFollowupsHidden(false);
     setFollowupsLoading(true);
     setFollowups([]);
 
-    fetch(`${getBackendBaseURL()}${api.threads.suggestions(threadId)}`, {
+    void fetch(`${getBackendBaseURL()}${api.threads.suggestions(threadId)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1370,7 +1403,6 @@ export function InputBox({
         n: 3,
         model_name: context.model_name ?? undefined,
       }),
-      signal: controller.signal,
     })
       .then(async (res) => {
         if (!res.ok) {
@@ -1379,20 +1411,29 @@ export function InputBox({
         return (await res.json()) as { suggestions?: string[] };
       })
       .then((data) => {
+        if (followupRequestIdRef.current !== requestId) {
+          return;
+        }
         const suggestions = (data.suggestions ?? [])
           .map((s) => (typeof s === "string" ? s.trim() : ""))
           .filter((s) => s.length > 0)
           .slice(0, 5);
         setFollowups(suggestions);
       })
-      .catch(() => {
+      .catch((error) => {
+        if (followupRequestIdRef.current !== requestId || isAbortLikeError(error)) {
+          return;
+        }
         setFollowups([]);
       })
       .finally(() => {
+        if (followupRequestIdRef.current !== requestId) {
+          return;
+        }
         setFollowupsLoading(false);
       });
 
-    return () => controller.abort();
+    return undefined;
   }, [context.model_name, disabled, isMock, status, threadId, lastMessageId]);
 
   return (

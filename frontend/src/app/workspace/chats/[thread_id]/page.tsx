@@ -260,6 +260,7 @@ function ChatPageContent({
   const [isExecutingPlan, setIsExecutingPlan] = useState(false);
   const [workflowStatus, setWorkflowStatus] = useState<WorkflowStatusResponse | null>(null);
   const [isExecutingWorkflow, setIsExecutingWorkflow] = useState(false);
+  const [isSavingWorkflow, setIsSavingWorkflow] = useState(false);
   const [hiddenWorkflowPath, setHiddenWorkflowPath] = useState<string | null>(null);
   const [isClarifyingPlan, setIsClarifyingPlan] = useState(false);
   const [clarificationPendingOverride, setClarificationPendingOverride] = useState<boolean | null>(null);
@@ -386,6 +387,35 @@ function ChatPageContent({
     window.addEventListener("workflow-exit", handler as EventListener);
     return () => window.removeEventListener("workflow-exit", handler as EventListener);
   }, [threadId, workflowStatus?.workflow?.runtime?.workflow_json]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const custom = event as CustomEvent<{ threadId?: string }>;
+      if (custom.detail?.threadId !== threadId) {
+        return;
+      }
+      const run = async () => {
+        try {
+          const response = await fetch(`${getBackendBaseURL()}${api.threads.workflowRecover(threadId)}`, {
+            method: "POST",
+          });
+          if (!response.ok) {
+            throw new Error(parseErrorDetail(await response.text()));
+          }
+          const payload = (await response.json()) as WorkflowStatusResponse;
+          setWorkflowStatus(payload);
+          setHiddenWorkflowPath(null);
+          toast.success("Workflow recovery ready. Review workflow.json and execute when ready.");
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "Unknown error";
+          toast.error(`Failed to recover workflow. ${detail}`);
+        }
+      };
+      void run();
+    };
+    window.addEventListener("workflow-recover", handler as EventListener);
+    return () => window.removeEventListener("workflow-recover", handler as EventListener);
+  }, [threadId]);
 
   // NOTE: activeClarificationIndex was used by the legacy per-index submit
   // flow (POST /plan/clarify with clarification_index). The new batch flow
@@ -606,6 +636,10 @@ function ChatPageContent({
   );
   const workflowRowsCompleted = Number(workflowExecution?.completed_rows ?? 0);
   const workflowRowsTotal = Number(workflow?.source?.row_count ?? 0);
+  const workflowJsonText = useMemo(
+    () => (workflow ? `${JSON.stringify(workflow, null, 2)}\n` : ""),
+    [workflow],
+  );
 
   const handleExecuteWorkflow = useCallback(() => {
     const run = async () => {
@@ -652,30 +686,46 @@ function ChatPageContent({
     setHiddenWorkflowPath(workflowPath);
   }, [workflowPath]);
 
-  const handleEditWorkflowSuggestion = useCallback(
-    async (suggestion: string) => {
-      const trimmed = suggestion.trim();
-      if (!trimmed) {
+  const handleSaveWorkflow = useCallback(
+    async (nextWorkflowText: string) => {
+      const trimmed = nextWorkflowText.trim();
+      if (!trimmed || isSavingWorkflow) {
         return;
       }
-      await sendMessage(
-        threadId,
-        {
-          text: [
-            "Apply the following user edits to /mnt/user-data/workspace/runtime/workflow.json:",
-            "",
-            trimmed,
-            "",
-            "Keep the workflow execution status ready unless the user explicitly asks otherwise.",
-            "Do not execute workflow rows.",
-          ].join("\n"),
-          files: [],
-        },
-        undefined,
-        { mode: "work" },
-      );
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Invalid JSON";
+        toast.error(`workflow.json is invalid. ${detail}`);
+        return;
+      }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        toast.error("workflow.json must be a JSON object.");
+        return;
+      }
+      setIsSavingWorkflow(true);
+      try {
+        const response = await fetch(`${getBackendBaseURL()}${api.threads.workflow(threadId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workflow: parsed }),
+        });
+        if (!response.ok) {
+          throw new Error(parseErrorDetail(await response.text()));
+        }
+        const payload = (await response.json()) as WorkflowStatusResponse;
+        setWorkflowStatus(payload);
+        setHiddenWorkflowPath(null);
+        toast.success("workflow.json saved.");
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unknown error";
+        toast.error(`Failed to save workflow.json. ${detail}`);
+      } finally {
+        setIsSavingWorkflow(false);
+      }
     },
-    [sendMessage, threadId],
+    [isSavingWorkflow, threadId],
   );
 
   const handleSubmitClarifications = useCallback(
@@ -1264,10 +1314,12 @@ function ChatPageContent({
                         workflowPath !== hiddenWorkflowPath ? (
                         <WorkflowApprovalOverlay
                           workflowPath={workflowPath}
+                          workflowText={workflowJsonText}
                           onExecute={handleExecuteWorkflow}
                           onCancel={handleKeepEditingWorkflow}
-                          onSubmitEdit={handleEditWorkflowSuggestion}
+                          onSaveWorkflow={handleSaveWorkflow}
                           isExecuting={isExecutingWorkflow}
+                          isSavingWorkflow={isSavingWorkflow}
                           completedRows={workflowRowsCompleted}
                           totalRows={workflowRowsTotal}
                         />

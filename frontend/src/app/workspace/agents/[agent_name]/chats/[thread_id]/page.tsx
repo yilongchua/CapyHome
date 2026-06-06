@@ -2,7 +2,7 @@
 
 import { BotIcon, PlusSquare } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
@@ -152,6 +152,7 @@ function AgentChatPageContent({
   const [runPollBump, setRunPollBump] = useState(0);
   const [workflowStatus, setWorkflowStatus] = useState<WorkflowStatusResponse | null>(null);
   const [isExecutingWorkflow, setIsExecutingWorkflow] = useState(false);
+  const [isSavingWorkflow, setIsSavingWorkflow] = useState(false);
   const [hiddenWorkflowPath, setHiddenWorkflowPath] = useState<string | null>(null);
   const { notices: generationNotices, artifactPaths: generationArtifacts } =
     useGenerationCompletions(threadId, { enabled: !isNewThread });
@@ -223,6 +224,35 @@ function AgentChatPageContent({
     window.addEventListener("workflow-exit", handler as EventListener);
     return () => window.removeEventListener("workflow-exit", handler as EventListener);
   }, [threadId, workflowStatus?.workflow?.runtime?.workflow_json]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const custom = event as CustomEvent<{ threadId?: string }>;
+      if (custom.detail?.threadId !== threadId) {
+        return;
+      }
+      const run = async () => {
+        try {
+          const response = await fetch(`${getBackendBaseURL()}${api.threads.workflowRecover(threadId)}`, {
+            method: "POST",
+          });
+          if (!response.ok) {
+            throw new Error(parseErrorDetail(await response.text()));
+          }
+          const payload = (await response.json()) as WorkflowStatusResponse;
+          setWorkflowStatus(payload);
+          setHiddenWorkflowPath(null);
+          toast.success("Workflow recovery ready. Review workflow.json and execute when ready.");
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "Unknown error";
+          toast.error(`Failed to recover workflow. ${detail}`);
+        }
+      };
+      void run();
+    };
+    window.addEventListener("workflow-recover", handler as EventListener);
+    return () => window.removeEventListener("workflow-recover", handler as EventListener);
+  }, [threadId]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -330,6 +360,10 @@ function AgentChatPageContent({
     workflow &&
     !["done", "stopped_failed_threshold"].includes(workflowStatusValue),
   );
+  const workflowJsonText = useMemo(
+    () => (workflow ? `${JSON.stringify(workflow, null, 2)}\n` : ""),
+    [workflow],
+  );
 
   const handleExecuteWorkflow = useCallback(() => {
     const run = async () => {
@@ -383,30 +417,46 @@ function AgentChatPageContent({
     return () => window.clearTimeout(timer);
   }, [handleExecuteWorkflow, hiddenWorkflowPath, isExecutingWorkflow, settings.context.auto_mode, thread.isLoading, workflowCanExecute, workflowPath, workflow?.execution?.completed_rows, workflowStatusValue]);
 
-  const handleEditWorkflowSuggestion = useCallback(
-    async (suggestion: string) => {
-      const trimmed = suggestion.trim();
-      if (!trimmed) {
+  const handleSaveWorkflow = useCallback(
+    async (nextWorkflowText: string) => {
+      const trimmed = nextWorkflowText.trim();
+      if (!trimmed || isSavingWorkflow) {
         return;
       }
-      await sendMessage(
-        threadId,
-        {
-          text: [
-            "Apply the following user edits to /mnt/user-data/workspace/runtime/workflow.json:",
-            "",
-            trimmed,
-            "",
-            "Keep the workflow execution status ready unless the user explicitly asks otherwise.",
-            "Do not execute workflow rows.",
-          ].join("\n"),
-          files: [],
-        },
-        { agent_name: agentName },
-        { mode: "work" },
-      );
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Invalid JSON";
+        toast.error(`workflow.json is invalid. ${detail}`);
+        return;
+      }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        toast.error("workflow.json must be a JSON object.");
+        return;
+      }
+      setIsSavingWorkflow(true);
+      try {
+        const response = await fetch(`${getBackendBaseURL()}${api.threads.workflow(threadId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workflow: parsed }),
+        });
+        if (!response.ok) {
+          throw new Error(parseErrorDetail(await response.text()));
+        }
+        const payload = (await response.json()) as WorkflowStatusResponse;
+        setWorkflowStatus(payload);
+        setHiddenWorkflowPath(null);
+        toast.success("workflow.json saved.");
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unknown error";
+        toast.error(`Failed to save workflow.json. ${detail}`);
+      } finally {
+        setIsSavingWorkflow(false);
+      }
     },
-    [agentName, sendMessage, threadId],
+    [isSavingWorkflow, threadId],
   );
 
   const handleSubmitPlanRevision = useCallback(async (markdown: string) => {
@@ -535,10 +585,12 @@ function AgentChatPageContent({
                     workflowPath !== hiddenWorkflowPath ? (
                       <WorkflowApprovalOverlay
                         workflowPath={workflowPath}
+                        workflowText={workflowJsonText}
                         onExecute={handleExecuteWorkflow}
                         onCancel={() => setHiddenWorkflowPath(workflowPath)}
-                        onSubmitEdit={handleEditWorkflowSuggestion}
+                        onSaveWorkflow={handleSaveWorkflow}
                         isExecuting={isExecutingWorkflow}
+                        isSavingWorkflow={isSavingWorkflow}
                         completedRows={Number(workflow?.execution?.completed_rows ?? 0)}
                         totalRows={Number(workflow?.source?.row_count ?? 0)}
                       />

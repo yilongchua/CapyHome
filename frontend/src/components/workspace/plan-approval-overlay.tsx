@@ -193,21 +193,23 @@ export function PlanApprovalOverlay({
 
 export function WorkflowApprovalOverlay({
   workflowPath = "/mnt/user-data/workspace/runtime/workflow.json",
+  workflowText = "",
   onExecute,
   onCancel,
-  onSubmitEdit,
+  onSaveWorkflow,
   isExecuting = false,
-  isSubmittingEdit = false,
+  isSavingWorkflow = false,
   completedRows = 0,
   totalRows = 0,
   className,
 }: {
   workflowPath?: string;
+  workflowText?: string;
   onExecute: () => void;
   onCancel: () => void;
-  onSubmitEdit: (suggestion: string) => Promise<void> | void;
+  onSaveWorkflow: (workflowText: string) => Promise<void> | void;
   isExecuting?: boolean;
-  isSubmittingEdit?: boolean;
+  isSavingWorkflow?: boolean;
   completedRows?: number;
   totalRows?: number;
   className?: string;
@@ -228,15 +230,22 @@ export function WorkflowApprovalOverlay({
     }
   }, [mode]);
 
-  const handleSend = useCallback(async () => {
-    const text = editText.trim();
-    if (!text || isSubmittingEdit) {
+  useEffect(() => {
+    if (mode !== "edit") {
+      setEditText("");
       return;
     }
-    await onSubmitEdit(text);
+    setEditText(workflowText);
+  }, [mode, workflowText]);
+
+  const handleSend = useCallback(async () => {
+    if (!editText.trim() || isSavingWorkflow) {
+      return;
+    }
+    await onSaveWorkflow(editText);
     setEditText("");
     setMode("choose");
-  }, [editText, isSubmittingEdit, onSubmitEdit]);
+  }, [editText, isSavingWorkflow, onSaveWorkflow]);
 
   const handleEditKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -259,14 +268,14 @@ export function WorkflowApprovalOverlay({
   return (
     <div
       className={cn(
-        "bg-background/95 absolute inset-0 z-20 flex -translate-y-0.5 flex-col rounded-2xl border border-dashed backdrop-blur-sm",
+        "bg-background/95 absolute inset-x-0 top-0 bottom-10 z-20 flex -translate-y-0.5 flex-col rounded-t-2xl border border-dashed backdrop-blur-sm",
         className,
       )}
       role="dialog"
       aria-label="Workflow approval"
     >
-      <div className="flex h-8 items-center justify-between gap-2 border-b px-2">
-        <p className="text-[14.4px] font-medium leading-none text-muted-foreground tracking-wide">
+      <div className="flex h-6 items-center justify-between gap-2 border-b px-2">
+        <p className="text-xs font-medium leading-none text-muted-foreground tracking-wide">
           Review{" "}
           <button
             type="button"
@@ -275,7 +284,7 @@ export function WorkflowApprovalOverlay({
           >
             workflow.json
           </button>
-          <span className="ml-2 text-xs text-muted-foreground">{progressLabel} rows</span>
+          <span className="ml-1.5 text-[11px] text-muted-foreground">{progressLabel} rows</span>
         </p>
         <Button
           size="icon-sm"
@@ -283,7 +292,7 @@ export function WorkflowApprovalOverlay({
           className="text-muted-foreground shrink-0"
           onClick={onCancel}
           aria-label="Dismiss workflow"
-          disabled={isExecuting || isSubmittingEdit}
+          disabled={isExecuting || isSavingWorkflow}
         >
           <XIcon className="size-3.5" />
         </Button>
@@ -292,35 +301,36 @@ export function WorkflowApprovalOverlay({
       {mode === "choose" ? (
         <div className="flex flex-1 flex-col">
           <Button
-            size="lg"
-            className="h-auto w-full flex-1 justify-start gap-2 rounded-none border-0 text-[16.8px]"
+            size="sm"
+            className="h-auto min-h-7 w-full flex-1 justify-start gap-2 rounded-none border-0 text-sm"
             onClick={onExecute}
             disabled={isExecuting}
           >
-            <PlayIcon className="size-5" />
+            <PlayIcon className="size-4" />
             {isExecuting ? "Executing..." : "Execute Workflow"}
           </Button>
           <Button
-            size="lg"
+            size="sm"
             variant="outline"
-            className="h-auto w-full flex-1 justify-start gap-2 rounded-t-none rounded-b-2xl border-0 text-[16.8px]"
+            className="h-auto min-h-7 w-full flex-1 justify-start gap-2 rounded-none border-0 text-sm"
             onClick={() => setMode("edit")}
-            disabled={isExecuting}
+            disabled={isExecuting || isSavingWorkflow}
           >
-            <PencilIcon className="size-5" />
-            Edit Workflow
+            <PencilIcon className="size-4" />
+            Edit workflow.json
           </Button>
         </div>
       ) : (
-        <div className="flex items-stretch gap-2 px-4 pb-3">
+        <div className="flex min-h-0 flex-1 items-stretch gap-2 px-3 pb-2">
           <textarea
             ref={editRef}
             value={editText}
             onChange={(event) => setEditText(event.target.value)}
             onKeyDown={handleEditKeyDown}
-            placeholder="Edit workflow - describe what should change"
-            className="bg-background placeholder:text-muted-foreground flex-1 resize-none rounded-md border px-3 py-2 text-sm outline-none focus:ring-1"
-            disabled={isSubmittingEdit}
+            spellCheck={false}
+            placeholder="Edit workflow.json"
+            className="bg-background placeholder:text-muted-foreground min-h-0 flex-1 resize-none rounded-md border px-2 py-1.5 font-mono text-xs outline-none focus:ring-1"
+            disabled={isSavingWorkflow}
           />
           <div className="flex flex-col justify-between gap-1">
             <Button
@@ -331,15 +341,15 @@ export function WorkflowApprovalOverlay({
                 setEditText("");
               }}
               aria-label="Cancel edit"
-              disabled={isSubmittingEdit}
+              disabled={isSavingWorkflow}
             >
               <XIcon className="size-3.5" />
             </Button>
             <Button
               size="icon-sm"
               onClick={() => void handleSend()}
-              aria-label="Send workflow edit"
-              disabled={isSubmittingEdit || !editText.trim()}
+              aria-label="Save workflow.json"
+              disabled={isSavingWorkflow || !editText.trim()}
             >
               <SendIcon className="size-3.5" />
             </Button>

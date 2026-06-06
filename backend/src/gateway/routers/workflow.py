@@ -41,6 +41,19 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _parse_utc_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _round_seconds(value: float) -> float:
+    return round(max(0.0, value), 2)
+
+
 class WorkflowPatchRequest(BaseModel):
     workflow: dict[str, Any] = Field(..., description="Full workflow.json payload to persist.")
 
@@ -238,6 +251,49 @@ def _lowest_pending_index(db_path: Path) -> int:
         return int(row["idx"]) if row and row["idx"] is not None else 0
 
 
+def update_execution_timing(thread_id: str, workflow: dict[str, Any]) -> dict[str, Any]:
+    db_path = workflow_sqlite_path(thread_id)
+    if not db_path.exists():
+        return workflow
+
+    durations: list[float] = []
+    last_duration: float | None = None
+    with _connect(db_path) as conn:
+        ensure_schema(conn)
+        rows = conn.execute(
+            """
+            SELECT started_at, completed_at
+            FROM workflow_rows
+            WHERE started_at IS NOT NULL
+              AND completed_at IS NOT NULL
+              AND status IN ('success', 'failed')
+            ORDER BY completed_at
+            """
+        ).fetchall()
+        pending_count = conn.execute("SELECT COUNT(*) FROM workflow_rows WHERE status = 'pending'").fetchone()[0]
+
+    for row in rows:
+        started = _parse_utc_iso(row["started_at"])
+        completed_at = _parse_utc_iso(row["completed_at"])
+        if not started or not completed_at:
+            continue
+        duration = (completed_at - started).total_seconds()
+        if duration >= 0:
+            durations.append(duration)
+            last_duration = duration
+
+    execution = dict(workflow["execution"])
+    if last_duration is not None:
+        execution["last_run_seconds"] = _round_seconds(last_duration)
+    if durations:
+        average = sum(durations) / len(durations)
+        execution["average_run_seconds"] = _round_seconds(average)
+        max_parallel = max(1, int(execution.get("max_parallel") or 1))
+        execution["estimated_remaining_seconds"] = _round_seconds((int(pending_count) * average) / max_parallel)
+    workflow["execution"] = execution
+    return workflow
+
+
 def claim_rows(thread_id: str, workflow: dict[str, Any]) -> list[dict[str, Any]]:
     db_path = workflow_sqlite_path(thread_id)
     limit = max(1, int(workflow["execution"].get("max_parallel") or 1))
@@ -385,6 +441,7 @@ def record_row_result(
     else:
         execution["status"] = "ready"
     workflow["execution"] = execution
+    workflow = update_execution_timing(thread_id, workflow)
     return write_workflow(thread_id, workflow)
 
 
@@ -399,6 +456,42 @@ def reset_running_rows(thread_id: str) -> None:
             (_utc_now_iso(),),
         )
         conn.commit()
+
+
+def recover_workflow(thread_id: str) -> dict[str, Any]:
+    workflow = read_workflow(thread_id)
+    db_path = workflow_sqlite_path(thread_id)
+    if db_path.exists():
+        with _connect(db_path) as conn:
+            ensure_schema(conn)
+            conn.execute(
+                """
+                UPDATE workflow_rows
+                SET status = 'pending',
+                    result_json = NULL,
+                    child_thread_id = NULL,
+                    child_run_id = NULL,
+                    started_at = NULL,
+                    completed_at = NULL,
+                    error = NULL
+                WHERE status IN ('failed', 'running')
+                """
+            )
+            completed = conn.execute("SELECT COUNT(*) FROM workflow_rows WHERE status = 'success'").fetchone()[0]
+            pending = conn.execute("SELECT MIN(row_index) AS idx FROM workflow_rows WHERE status = 'pending'").fetchone()
+            conn.commit()
+        workflow["execution"]["completed_rows"] = int(completed)
+        workflow["execution"]["current_row_index"] = (
+            int(pending["idx"])
+            if pending and pending["idx"] is not None
+            else int(workflow["source"].get("row_count") or completed)
+        )
+
+    workflow["execution"]["consecutive_failures"] = 0
+    workflow["execution"]["failure_rows"] = []
+    workflow["execution"]["status"] = "ready"
+    workflow = update_execution_timing(thread_id, workflow)
+    return write_workflow(thread_id, workflow)
 
 
 def export_output_csv(thread_id: str, workflow: dict[str, Any]) -> str:
@@ -598,6 +691,12 @@ async def stop_workflow(thread_id: str) -> WorkflowExecuteResponse:
 @router.get("/threads/{thread_id}/workflow/status", response_model=WorkflowStatusResponse)
 async def workflow_status(thread_id: str) -> WorkflowStatusResponse:
     return await get_workflow(thread_id)
+
+
+@router.post("/threads/{thread_id}/workflow/recover", response_model=WorkflowStatusResponse)
+async def recover_workflow_route(thread_id: str) -> WorkflowStatusResponse:
+    workflow = recover_workflow(thread_id)
+    return WorkflowStatusResponse(exists=True, initialized=workflow_sqlite_path(thread_id).exists(), workflow=workflow)
 
 
 @router.post("/threads/{thread_id}/workflow/execute-next", response_model=WorkflowExecuteResponse)

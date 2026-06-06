@@ -8,6 +8,7 @@ export const api = {
     workflow: (threadId: string) => `/api/threads/${threadId}/workflow`,
     workflowStatus: (threadId: string) => `/api/threads/${threadId}/workflow/status`,
     workflowInitialize: (threadId: string) => `/api/threads/${threadId}/workflow/initialize`,
+    workflowRecover: (threadId: string) => `/api/threads/${threadId}/workflow/recover`,
     workflowExecuteNext: (threadId: string) => `/api/threads/${threadId}/workflow/execute-next`,
     workflowStop: (threadId: string) => `/api/threads/${threadId}/workflow/stop`,
     workflowExport: (threadId: string) => `/api/threads/${threadId}/workflow/export`,

@@ -8,6 +8,7 @@ export type SlashCommandName =
   | "publishdocs"
   | "rename"
   | "workflow"
+  | "workflow-recover"
   | "workflow-exit";
 
 export type SlashCommandParseResult = {
@@ -29,6 +30,7 @@ const SUPPORTED_COMMANDS: SlashCommandName[] = [
   "publishdocs",
   "rename",
   "workflow",
+  "workflow-recover",
   "workflow-exit",
 ];
 

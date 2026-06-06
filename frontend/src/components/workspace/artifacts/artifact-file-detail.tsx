@@ -94,6 +94,9 @@ export function ArtifactFileDetail({
   const isSkillFile = useMemo(() => {
     return filepath.endsWith(".skill");
   }, [filepath]);
+  const isJsonFile = useMemo(() => {
+    return filepath.toLowerCase().endsWith(".json");
+  }, [filepath]);
   const isPlanFile = useMemo(() => {
     return (
       (filepath.endsWith("plan.md") &&
@@ -150,6 +153,9 @@ export function ArtifactFileDetail({
   const [isSavingPlan, setIsSavingPlan] = useState(false);
   const [isSubmittingPlanRevision, setIsSubmittingPlanRevision] =
     useState(false);
+  const [jsonDraft, setJsonDraft] = useState("");
+  const [isJsonEditing, setIsJsonEditing] = useState(false);
+  const [isSavingJson, setIsSavingJson] = useState(false);
   const { isMock } = useThread();
   const queryClient = useQueryClient();
   useEffect(() => {
@@ -170,6 +176,17 @@ export function ArtifactFileDetail({
       setIsPlanEditing(false);
     }
   }, [displayContent, shouldRenderPlan]);
+
+  const isEditableJson = !shouldRenderPlan && !isWriteFile && isJsonFile && isCodeFile && !isTruncated;
+
+  useEffect(() => {
+    if (isEditableJson) {
+      setJsonDraft(displayContent);
+    } else {
+      setJsonDraft("");
+      setIsJsonEditing(false);
+    }
+  }, [displayContent, isEditableJson]);
 
   const handleInstallSkill = useCallback(async () => {
     if (isInstalling) return;
@@ -256,7 +273,54 @@ export function ArtifactFileDetail({
     shouldRenderPlan,
   ]);
 
+  const handleSaveJson = useCallback(async () => {
+    if (isSavingJson || !isEditableJson) return;
+    try {
+      JSON.parse(jsonDraft);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid JSON.";
+      toast.error(`Invalid JSON. ${message}`);
+      return;
+    }
+
+    setIsSavingJson(true);
+    try {
+      const response = await fetch(
+        `${getBackendBaseURL()}/api/threads/${threadId}/artifacts/${filepath}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: jsonDraft }),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      await queryClient.invalidateQueries({
+        queryKey: ["artifact", filepath, threadId, isMock],
+        exact: false,
+      });
+      toast.success("JSON file saved.");
+      setIsJsonEditing(false);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to save JSON file.";
+      toast.error(message);
+    } finally {
+      setIsSavingJson(false);
+    }
+  }, [
+    filepath,
+    isEditableJson,
+    isMock,
+    isSavingJson,
+    jsonDraft,
+    queryClient,
+    threadId,
+  ]);
+
   const hasPlanChanges = shouldRenderPlan && planDraft !== displayContent;
+  const hasJsonChanges = isEditableJson && jsonDraft !== displayContent;
   return (
     <Artifact className={cn(className)}>
       <ArtifactHeader className={cn("px-2", headerClassName)}>
@@ -378,6 +442,39 @@ export function ArtifactFileDetail({
                 )}
               </>
             )}
+            {isEditableJson && (
+              <>
+                {!isJsonEditing ? (
+                  <ArtifactAction
+                    icon={PencilIcon}
+                    label="Edit JSON"
+                    tooltip="Edit JSON"
+                    disabled={env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true"}
+                    onClick={() => setIsJsonEditing(true)}
+                  />
+                ) : (
+                  <>
+                    <ArtifactAction
+                      icon={Undo2Icon}
+                      label="Discard JSON edits"
+                      tooltip="Discard JSON edits"
+                      disabled={isSavingJson}
+                      onClick={() => {
+                        setJsonDraft(displayContent);
+                        setIsJsonEditing(false);
+                      }}
+                    />
+                    <ArtifactAction
+                      icon={isSavingJson ? LoaderIcon : SaveIcon}
+                      label="Save JSON"
+                      tooltip="Save JSON"
+                      disabled={isSavingJson || !hasJsonChanges}
+                      onClick={() => void handleSaveJson()}
+                    />
+                  </>
+                )}
+              </>
+            )}
             {!isWriteFile && (
               <a href={urlOfArtifact({ filepath, threadId })} target="_blank">
                 <ArtifactAction
@@ -481,8 +578,9 @@ export function ArtifactFileDetail({
           {!shouldRenderPlan && isCodeFile && viewMode === "code" && (
             <CodeEditor
               className="size-full resize-none rounded-none border-none"
-              value={displayContent ?? ""}
-              readonly
+              value={isJsonEditing ? jsonDraft : (displayContent ?? "")}
+              onChange={isJsonEditing ? setJsonDraft : undefined}
+              readonly={!isJsonEditing}
               wrapLines
             />
           )}

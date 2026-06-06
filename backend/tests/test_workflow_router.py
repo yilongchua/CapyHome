@@ -138,6 +138,41 @@ def test_child_result_parsing():
     assert error and error.startswith("invalid_json")
 
 
+def test_recover_workflow_requeues_failed_rows(monkeypatch, tmp_path):
+    thread_id = "thread-1"
+    paths = _patch_paths(monkeypatch, tmp_path)
+    _write_source(paths, thread_id)
+    workflow_router.write_workflow(thread_id, _workflow_payload())
+    data = workflow_router.initialize_runtime(thread_id, workflow_router.read_workflow(thread_id))
+
+    data = workflow_router.record_row_result(
+        thread_id,
+        data,
+        0,
+        status="failed",
+        result=None,
+        child_thread_id="child-1",
+        child_run_id="run-1",
+        error="invalid_json",
+    )
+    recovered = workflow_router.recover_workflow(thread_id)
+
+    assert recovered["execution"]["status"] == "ready"
+    assert recovered["execution"]["consecutive_failures"] == 0
+    assert recovered["execution"]["failure_rows"] == []
+    assert recovered["execution"]["current_row_index"] == 0
+
+    with workflow_router._connect(workflow_router.workflow_sqlite_path(thread_id)) as conn:
+        row = conn.execute(
+            "SELECT status, result_json, child_thread_id, child_run_id, error FROM workflow_rows WHERE row_index = 0"
+        ).fetchone()
+    assert row["status"] == "pending"
+    assert row["result_json"] is None
+    assert row["child_thread_id"] is None
+    assert row["child_run_id"] is None
+    assert row["error"] is None
+
+
 @pytest.mark.anyio
 async def test_child_row_run_uses_shared_config_recursion_limit(monkeypatch):
     class _AppConfig:
