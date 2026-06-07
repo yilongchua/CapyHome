@@ -1,0 +1,79 @@
+<h1>Every Web Search My AI Runs Quietly Builds a Library</h1>
+<blockquote>
+<p><strong>LinkedIn hook (use as the post's first line):</strong> &quot;Most agent web search is a black box — query in, answer out, knowledge gone. Ours writes clean markdown to disk every time, then quietly files it into a self-pruning library. Research stops being throwaway.&quot;
+<strong>Audience:</strong> LinkedIn → Medium. RAG/search engineers, researchers, knowledge-management nerds, privacy-conscious builders.</p>
+</blockquote>
+<hr />
+<p>The throwaway nature of normal agent search is a hidden tax: every session re-discovers the same things. CapyHome treats each search as a small, permanent contribution to a growing library — and the unglamorous plumbing that makes that possible is one decision: <strong>every search writes markdown.</strong></p>
+<blockquote>
+<p>🖼️ <strong>[User add: image containing — a file tree showing timestamped websearch packages (result.md + result.json) on disk, next to a rendered result.md. Capture from the workspace files after a search.]</strong></p>
+</blockquote>
+<h2>A search stack that runs on your machine</h2>
+<p>CapyHome's web search combines three open-source pieces behind one FastAPI door (port 9000, speaks JSON and MCP):</p>
+<ul>
+<li><strong>SearXNG</strong> — privacy-respecting metasearch, no tracking.</li>
+<li><strong>Crawl4AI</strong> — fetches and extracts the actual <em>content</em> of result pages.</li>
+<li><strong>FastAPI</strong> — ties them together.</li>
+</ul>
+<p>Run it all locally (<code>make local-stack-start</code>) and your queries never touch a commercial search API.</p>
+<h3>Diagram 1 — The search stack</h3>
+<figure>
+  <img src="./diagrams/06-websearch-markdown-d1.png" alt="The search stack" />
+  <figcaption>The search stack</figcaption>
+</figure>
+<h2>The markdown-always design</h2>
+<p>When the agent searches, the service doesn't just return snippets — CapyHome forces <code>write_markdown_package = True</code>, so a markdown package is <strong>always</strong> written, alongside raw JSON, in a timestamped directory. One search yields three things: structured data for the agent, a human-readable file, and an artifact <em>already</em> in the format the next step wants.</p>
+<p>Why markdown specifically? Because it's the <strong>lingua franca of CapyHome's pipeline</strong> — the <a href="./01-knowledge-vault.html">vault</a> ingests markdown, the agent reasons in markdown, reports are written in markdown. No lossy conversion between &quot;found it&quot; and &quot;filed it.&quot;</p>
+<h2>A continuous, self-pruning cache of the web</h2>
+<p>Follow one search all the way through and you can see a small machine running:</p>
+<h3>Diagram 2 — Search → queue → ingest → lint</h3>
+<figure>
+  <img src="./diagrams/06-websearch-markdown-d2.png" alt="Search → queue → ingest → lint" />
+  <figcaption>Search → queue → ingest → lint</figcaption>
+</figure>
+<ol>
+<li><strong>Search → markdown.</strong> Always produced. ✅</li>
+<li><strong>Markdown → queue</strong>, guarded so the queue stays clean: a <strong>72-hour dedup window</strong> and a <strong>must-have-extracted-content</strong> rule (no cookie-banner junk).</li>
+<li><strong>Queue → auto-ingestion, on idle.</strong> No button. When the vault sits idle for a stretch <em>you choose</em> — <strong>Off, 15, or 30 minutes</strong> — a passive auto-run drains the queue into compiled, entity/concept-tagged pages. A trust-score gate filters weak sources here.</li>
+<li><strong>Ingestion → auto-lint.</strong> After a ~60s settle, an automatic lint pass (up to two passes, LLM-judged) <strong>prunes</strong> orphaned or low-value pages so the library stays dense.</li>
+</ol>
+<blockquote>
+<p>Both the idle auto-ingest and the auto-lint are yours to control — set the timer or switch them off entirely. Convenient by default, never running behind your back without an off switch.</p>
+</blockquote>
+<h3>Diagram 3 — Why it's a &quot;cache for in-depth analysis&quot;</h3>
+<figure>
+  <img src="./diagrams/06-websearch-markdown-d3.png" alt="Why it's a &quot;cache for in-depth analysis&quot;" />
+  <figcaption>Why it's a &quot;cache for in-depth analysis&quot;</figcaption>
+</figure>
+<blockquote>
+<p>🖼️ <strong>[User add: image containing — the vault idle auto-run clock control in the top banner (Off / 15 / 30 min selector). Capture from the running app's vault view.]</strong></p>
+</blockquote>
+<h2>Under the hood: how it's built</h2>
+<ul>
+<li><strong>Always-markdown is enforced client-side.</strong> <code>backend/src/community/web_search/tools.py</code> sets <code>write_markdown_package: True</code> in the payload, so from CapyHome's side it's never optional. The standalone websearch service (<code>/Users/.../websearch</code>) treats it as a flag for other callers.</li>
+<li><strong>Queue guards live before ingest.</strong> Items append only if the vault is enabled, <code>search_results_queue_enabled</code> is on, and there's readable extracted content; a 72h content-hash dedup window prevents pile-ups.</li>
+<li><strong>The idle auto-run is frontend-driven</strong> (<code>frontend/.../vault/use-idle-auto-run.ts</code>): a 15-second poll fires <code>onAutoIngest()</code> once you've been idle past your configured threshold, then <code>onAutoLint()</code> after a settle period. (The 15-minute value <em>inside the backend</em> is something different — a worker <strong>lease timeout</strong> for rescuing crashed ingest jobs, not the trigger.)</li>
+<li><strong>Resilience:</strong> a circuit breaker backs off after repeated failed searches; a semaphore bounds concurrency (default 3) so a fan-out of sub-agents doesn't stampede the service; old packages auto-prune (markdown after a day, logs after a week).</li>
+</ul>
+<h2>What we considered (and the trade-offs we made)</h2>
+<ul>
+<li><strong>Why markdown by default instead of on request?</strong> Because &quot;remember to save it&quot; never happens. Making capture the default — not an extra step — is what turns a search tool into a library that fills itself.</li>
+<li><strong>Why an <em>idle</em> trigger instead of ingesting immediately?</strong> Ingestion is LLM-heavy. Running it the instant a result lands would fight the agent for compute mid-task. Waiting for idle means the expensive work happens when you've stepped away — and you can turn it off if you'd rather control it manually.</li>
+<li><strong>Why let auto-lint <em>delete</em>?</strong> A cache that only grows becomes noise that slows search. Aggressive pruning keeps it dense. It's destructive by design — so it ships with kill switches and a configurable cadence.</li>
+<li><strong>Why a local search stack at all?</strong> So the privacy story is real. Pair the local stack with a <a href="./10-local-first-byob.html">local model</a> and the entire research loop runs without anything leaving your machine.</li>
+</ul>
+<h2>🎬 Video script (60–75s screen recording)</h2>
+<blockquote>
+<p><strong>Title card:</strong> &quot;Every search my AI runs builds a library.&quot;</p>
+<p><strong>[0:00–0:10] Hook:</strong> &quot;Most AI web search throws the knowledge away the second you get your answer. Watch what happens here instead.&quot;</p>
+<p><strong>[0:10–0:25] Screen — run a search:</strong> &quot;I ask it to research something. Normal answer. But look in the files — it wrote a clean markdown package of every result. On disk. Forever, if I want.&quot;</p>
+<p><strong>[0:25–0:50] Screen — show the vault filling, idle clock:</strong> &quot;And it doesn't stop there. When I step away, it quietly ingests those results into a knowledge vault — then <em>prunes</em> the junk. This clock controls when. I can set it to 15 minutes, 30, or off.&quot;</p>
+<p><strong>[0:50–1:05] Screen — search the vault:</strong> &quot;Now next week's research starts from what I already found, not from zero.&quot;</p>
+<p><strong>[1:05–1:15] Close:</strong> &quot;Throwaway search is a tax. This is a library that fills itself. Open source, link below.&quot;</p>
+</blockquote>
+<h2>Try it</h2>
+<blockquote>
+<p><strong>Ask CapyHome to research something, then open the workspace files — the markdown packages are sitting there. Leave it idle and watch them flow into the vault.</strong></p>
+</blockquote>
+<hr />
+<p><em>Next: <a href="./07-autoresearch-loop.html">The Autoresearch Loop →</a> — what happens when research drives itself.</em></p>

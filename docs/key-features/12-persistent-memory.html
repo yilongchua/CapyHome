@@ -1,0 +1,70 @@
+<h1>An AI That Remembers You — Not Your Chat History, But You.</h1>
+<blockquote>
+<p><strong>LinkedIn hook (use as the post's first line):</strong> &quot;Every fresh chat with a normal assistant starts from amnesia — you re-explain your stack, your preferences, your project, again. We built memory that learns <em>you</em> and carries it across every session.&quot;
+<strong>Audience:</strong> LinkedIn → Medium. Power users, developers, anyone tired of re-briefing their AI every morning.</p>
+</blockquote>
+<hr />
+<p>The <a href="./01-knowledge-vault.html">Knowledge Vault</a> remembers the <strong>world</strong> — the things you research. <strong>Persistent Memory</strong> remembers <strong>you</strong> — how you work, what you prefer, what you're focused on this month. It's the difference between an assistant you re-brief every morning and one that already knows the drill.</p>
+<blockquote>
+<p>🖼️ <strong>[User add: image containing — a real screenshot of the memory panel in the UI showing extracted facts with categories + confidence scores, and a behavior rule. Capture from the running app's memory view.]</strong></p>
+</blockquote>
+<h2>It learns by itself</h2>
+<p>You don't fill out a profile. After a conversation, an LLM <strong>extracts facts</strong> — preferences, expertise, goals, working patterns — each with a category and an explicit <strong>confidence score</strong>. Only facts above a threshold (default <strong>0.7</strong>) are kept.</p>
+<h3>Diagram 1 — How a conversation becomes durable memory</h3>
+<figure>
+  <img src="./diagrams/12-persistent-memory-d1.png" alt="How a conversation becomes durable memory" />
+  <figcaption>How a conversation becomes durable memory</figcaption>
+</figure>
+<h3>Diagram 2 — What memory holds</h3>
+<figure>
+  <img src="./diagrams/12-persistent-memory-d2.png" alt="What memory holds" />
+  <figcaption>What memory holds</figcaption>
+</figure>
+<h2>Only the <em>relevant</em> memories show up</h2>
+<p>A naïve system dumps everything into the prompt and drowns the model. CapyHome retrieves by relevance to <em>your current message</em> — and respects <strong>recency</strong>.</p>
+<h3>Diagram 3 — Relevance-filtered, recency-decayed, token-capped injection</h3>
+<figure>
+  <img src="./diagrams/12-persistent-memory-d3.png" alt="Relevance-filtered, recency-decayed, token-capped injection" />
+  <figcaption>Relevance-filtered, recency-decayed, token-capped injection</figcaption>
+</figure>
+<p>The agent surfaces the three things that matter for what you just asked — not the eighty things it knows in total. Last quarter's priorities fade behind this week's.</p>
+<h2>Privacy you can actually exercise</h2>
+<p>Memory you can't inspect or delete is a liability. CapyHome's memory is a <strong>local JSON file you own</strong>, and every control is real.</p>
+<h3>Diagram 4 — Forgetting is real, not hidden</h3>
+<figure>
+  <img src="./diagrams/12-persistent-memory-d4.png" alt="Forgetting is real, not hidden" />
+  <figcaption>Forgetting is real, not hidden</figcaption>
+</figure>
+<p>A forgotten fact is genuinely gone — not just hidden — and optional <strong>append-only versioning</strong> records each change with a reason and a hash chain for audit-grade accountability.</p>
+<blockquote>
+<p>🖼️ <strong>[User add: image containing — the redact/forget controls in the memory UI, or a snippet of memory.json on disk showing facts + confidence. Capture from the running app or the file.]</strong></p>
+</blockquote>
+<h2>Under the hood: how it's built</h2>
+<ul>
+<li><strong>Storage:</strong> <code>.capyhome/memory.json</code>, in two scopes — <strong>global</strong> (you everywhere) and <strong>workspace</strong> (per-project) — merged at injection time with workspace taking precedence.</li>
+<li><strong>Extraction:</strong> <code>MemoryMiddleware</code> captures user inputs + final responses (no tool calls), a <code>MemoryUpdateQueue</code> debounces (~30s, configurable), and <code>MemoryUpdater</code> calls an extraction LLM that emits <code>newFacts</code> / <code>factsToRemove</code> with confidence scores.</li>
+<li><strong>Retrieval:</strong> a SQLite-backed index scores <code>0.65·lexical + 0.35·(confidence × decay)</code> with a configurable half-life (default 60 days); injection is capped (default 2000 tokens, measured with tiktoken).</li>
+<li><strong>Controls + API:</strong> <code>recall</code> tool for explicit fetch; <code>/api/memory/{redact,forget-thread,clear,facts,rules,versions}</code>; PII masking on redaction; optional optimistic-concurrency via <code>expected_sha</code>.</li>
+<li><strong>Tunables:</strong> <code>fact_confidence_threshold</code> (0.7), <code>max_facts</code> (100), <code>decay_half_life_days</code> (60), <code>max_injection_tokens</code> (2000), <code>injection_relevance_threshold</code> (0.5).</li>
+</ul>
+<h2>What we considered (and the trade-offs we made)</h2>
+<ul>
+<li><strong>Why automatic extraction instead of a profile you fill in?</strong> Profiles go stale the day you write them. Learning from actual conversations keeps memory current — at the cost of needing a confidence gate so it doesn't store noise.</li>
+<li><strong>Why relevance-filter injection instead of injecting everything?</strong> Dumping all memory into context drowns the task and burns tokens. Filtering by relevance + recency keeps the prompt sharp; the trade-off is occasionally missing a fact the scorer ranked low (mitigated by the explicit <code>recall</code> tool).</li>
+<li><strong>Why a separate system from the Knowledge Vault?</strong> The vault is about the <em>world</em>; memory is about <em>you</em>. Different lifecycles, different privacy controls, different injection rules — conflating them would muddy both.</li>
+<li><strong>Why local JSON + append-only versioning?</strong> A memory you can't read, edit, or audit is a trust problem. A local file you own, with a hash-chained change log, makes &quot;forget that&quot; a real, verifiable operation — important for anyone with compliance needs.</li>
+</ul>
+<h2>🎬 Video script (45–60s screen recording)</h2>
+<blockquote>
+<p><strong>Title card:</strong> &quot;An AI that remembers <em>you</em>, not your chat history.&quot;</p>
+<p><strong>[0:00–0:10] Hook:</strong> &quot;Every new chat, I re-explain who I am, what I use, what I'm working on. Exhausting. So I gave my AI a real memory.&quot;</p>
+<p><strong>[0:10–0:25] Screen — chat 1, state a preference:</strong> &quot;In one chat I just mention: I like concise answers, no preamble, and I work in TypeScript. That's it — no form to fill.&quot;</p>
+<p><strong>[0:25–0:45] Screen — brand new chat next 'day':</strong> &quot;New chat, next day. I ask something — and it answers concisely, in my stack, <em>without being reminded.</em> Here's the memory panel: it extracted those facts on its own, with confidence scores.&quot;</p>
+<p><strong>[0:45–1:00] Screen — redact a fact:</strong> &quot;And it's all a local file I control. Don't like what it learned? Redact it — gone from the file <em>and</em> the index. Open source, link below.&quot;</p>
+</blockquote>
+<h2>Try it</h2>
+<blockquote>
+<p><strong>Tell CapyHome a preference in one chat. Start a brand-new chat the next day and watch it honor that unprompted. Then open the memory panel and delete anything you don't like.</strong></p>
+</blockquote>
+<hr />
+<p><em>Back to the <a href="./00-index.html">series index</a>.</em></p>

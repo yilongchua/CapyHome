@@ -5,9 +5,9 @@
 
 ---
 
-Most AI tools perform websearch, remebers bits and pieces. Impressive for an afternoon, generate a report, gone by morning. Ask the same question next week and the tool does the same work twice and the webpage may be gone.
+Most AI tools perform web search, remember bits and pieces, and maybe generate an impressive report for the afternoon. By morning, the work is gone. Ask the same question next week and the tool does the same research twice — and the webpage it relied on may already have changed or disappeared.
 
-CapyHome's **Knowledge Vault** is built on the opposite bet: that the value of an agent grows with what it remembers — and that memory should be organized the way *you* think, around **things** (entities) and **ideas** (concepts), not around transcripts of who said what.
+CapyHome's **Knowledge Vault** is built on the opposite bet: that the value of an agent grows with what it can preserve from useful sources — and that durable knowledge should be organized the way *you* think, around **things** (entities) and **ideas** (concepts), not around transcripts of who said what.
 
 > 🖼️ **[User add: image containing — a split "before/after" graphic. Left: a messy chat history list labelled "what everyone else stores." Right: a clean grid of entity/concept cards labelled "what CapyHome stores." Make it screenshot-able for the LinkedIn carousel.]**
 
@@ -20,6 +20,8 @@ Here's the core design decision. The vault doesn't file knowledge under "the cha
 
 Every source the agent reads gets tagged with the entities and concepts it touches, and those tags roll *up* into pages that aggregate everything known about that thing — across every session. The result looks less like a chat app and more like a personal Wikipedia that writes itself.
 
+Important distinction: the vault is not a dump of memory files or chat logs. Normal conversation memory lives elsewhere. The vault learns from web results, browser clips, and explicitly saved research artifacts — the material you would actually want to search later.
+
 ### Diagram 1 — How a single source becomes structured knowledge
 
 ![How a single source becomes structured knowledge](./diagrams/01-knowledge-vault-d1.png)
@@ -30,7 +32,7 @@ Every source the agent reads gets tagged with the entities and concepts it touch
 
 ## It plugs straight into web search
 
-Turn on the search-to-vault pipeline and **every web search the agent runs auto-queues its results for ingestion.** Research deposits into the vault as a side effect of doing the work — the library grows while you're busy with something else, and the next related question starts from what you already found.
+Turn on the search-to-vault pipeline and **eligible enriched web results are auto-queued for ingestion.** In practice, that means results with a URL and extracted markdown content. Empty rows are skipped, duplicates are deduped by URL/content hash, and trusted sources become durable vault pages. Research deposits into the vault as a side effect of doing the work — the library grows while you're busy with something else, and the next related question starts from what you already found.
 
 ### Diagram 3 — Knowledge flows in from three on-ramps
 
@@ -42,9 +44,11 @@ Turn on the search-to-vault pipeline and **every web search the agent runs auto-
 
 The implementation is where the durability comes from. A few decisions worth calling out:
 
-- **Two LLM passes per source.** `_analyze_source` (prompt: `ANALYZE_SOURCE_PROMPT`) extracts entities, concepts, topic tags, a summary and key claims; `_generate_source_sections` (prompt: `GENERATE_PAGE_PROMPT`) writes the clean compiled page. A heuristic fallback runs if chain-of-thought ingest is disabled or the content is too short.
+- **Two LLM passes per source.** `_analyze_source` (prompt: `ANALYZE_SOURCE_PROMPT`) extracts entities, concepts, topic tags, a summary, key claims, open questions, gap queries, and synthesis references; `_generate_source_sections` (prompt: `GENERATE_PAGE_PROMPT`) writes the clean compiled page. A heuristic fallback runs if chain-of-thought ingest is disabled or the content is too short.
+- **Entity and concept extraction is source-grounded.** Entities are proper-noun-like things the source is substantively about: people, organizations, products, places, named techniques, events, or artifacts. Concepts are recurring ideas, frameworks, or themes. The extractor is strict because noisy entities poison retrieval; when uncertain, the prompt tells the model to use concepts or omit the item.
+- **Autoresearch is the deeper question loop.** Normal vault ingest analyzes each source and records open questions/gap queries. The separate autoresearch loop uses a 12-cluster question taxonomy to anticipate what a curious human might ask next, dispatches focused researchers, and saves those answers back into the vault.
 - **Crash-safe, parallel ingestion.** Ingestion runs in phases. *Phase 0* rescues orphaned work — `requeue_all_claimed_items()` returns items whose 15-minute worker **lease** expired (i.e. a crashed worker), and `cleanup_orphan_compiled_files()` prunes pages unreachable from the manifest. *Phase 1* drains the queue with parallel workers that claim items in batches of 100 (work-stealing). *Phase 2* reprocesses any source missing reference pages. The manifest is saved periodically so a mid-run crash loses almost nothing.
-- **Embeddings are deferred to query time.** `VaultVectorIndex.build()` runs lazily on the first vector search — so a crashed ingest never wastes embedding spend.
+- **Hybrid search, not vector-only search.** The query tool searches compiled vault pages with keyword/BM25 matching, then fuses those results with vector hits when vector indexing is enabled and embeddings are available. `VaultVectorIndex` chunks compiled markdown pages, calls an OpenAI-compatible `/embeddings` endpoint, and stores a local file-backed index in `.vault_state/vector_index.json` + `.vault_state/vector_index.npz` — not a remote vector database.
 - **A trust gate** (`min_trust_score`, default 0.55) keeps weak sources out, and **lint/prune** garbage-collects orphaned or low-value pages, with a dry-run mode that shows what it *would* remove first.
 - **Entity dismissal + aliasing** collapse duplicates (`JPM` → `jp-morgan`) into one canonical page; an **entity browser** surfaces your most-covered entities and your coverage gaps.
 
@@ -53,7 +57,7 @@ Key files: `backend/src/control_plane/vault_learning/_ingest.py`, `_lint.py`, `_
 ## What was considered (and the trade-offs we made)
 
 - **Why a knowledge graph, but stored as markdown files?** We wanted the structure of a graph (entities, concepts, links) without locking knowledge inside a database you can't read or grep. Plain markdown on disk means the vault is inspectable, portable, diff-able, and yours. The trade-off: we maintain a manifest + sidecar index to keep lookups fast, instead of getting that for free from a DB.
-- **Why defer embeddings instead of embedding at ingest?** Embedding during ingest is simpler but punishing if a run dies halfway — you've paid for embeddings on a half-built library. Deferring to query time makes ingest cheap and idempotent. The cost is a one-time build on first search.
+- **Why hybrid keyword + vector search?** Keyword search is precise when you remember the words. Vector search helps when you remember the meaning. Fusing both makes the vault useful as a cached web-search backbone: exact terms still matter, but recall does not collapse when you ask the question differently.
 - **Why let lint *delete* pages?** A library that only grows eventually becomes noise. We chose aggressive, LLM-judged pruning (with a dry-run safety net and kill switches) over a tidy-but-useless archive. Destructive by design, reversible by choice.
 - **Why entity *and* concept layers, not just tags?** Flat tags don't aggregate. Two first-class page types let "everything about JP Morgan" and "everything about employee autonomy" each have a home that updates itself.
 

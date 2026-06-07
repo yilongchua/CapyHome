@@ -1,4 +1,4 @@
-"""LangChain tool that exposes BM25 search over the local knowledge vault."""
+"""LangChain tool that exposes hybrid search over the local knowledge vault."""
 
 from __future__ import annotations
 
@@ -39,11 +39,15 @@ def query_knowledge_vault_tool(
     researched and stored in the knowledge vault. Prefer this over web_search
     when looking for information the user has deliberately collected.
 
+    The search backend combines keyword/BM25 matching with vector search when
+    vault vector indexing is enabled and embeddings are available.
+
     Returns a JSON object with an ``ok`` flag and a ``results`` list. Each
     result contains:
     - ``title``: page title
     - ``category``: vault section (sources/entities/concepts/syntheses/queries)
-    - ``score``: BM25 relevance score
+    - ``score``: hybrid relevance score, or keyword relevance when vector
+      search is unavailable
     - ``excerpt``: short excerpt centred on the best matching passage
     - ``tags``: frontmatter tags list
     - ``source_url``: original source URL (may be empty for synthesised pages)

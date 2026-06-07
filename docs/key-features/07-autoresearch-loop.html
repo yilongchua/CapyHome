@@ -1,0 +1,72 @@
+<h1>I Pointed an AI at a Topic and Let It Research Itself. It Knew When to Stop.</h1>
+<blockquote>
+<p><strong>LinkedIn hook (use as the post's first line):</strong> &quot;What if you could point an AI at a topic and just… let it learn? Not one query and done — a self-driving loop that keeps asking smarter questions, knows what it already covered, and stops when it stops learning.&quot;
+<strong>Audience:</strong> LinkedIn → Medium. Researchers, analysts, anyone who's run an agent loop that spun forever and burned the bill.</p>
+</blockquote>
+<hr />
+<p>Deep research is mostly about asking the <em>right sequence</em> of questions and remembering which ones you've already answered. Tedious for a human; chaotic for an LLM left unsupervised. CapyHome's <strong>Autoresearch Loop</strong> turns it into a disciplined, self-terminating, fully-auditable process — and the thing that keeps it from spinning in circles is a <strong>question ledger</strong>.</p>
+<blockquote>
+<p>🖼️ <strong>[User add: image containing — a rendered ledger.md showing a tree of questions with statuses (answered / duplicate / pending). Capture from a real autoresearch objective's ledger, or mock it as a carousel slide.]</strong></p>
+</blockquote>
+<h2>The idea</h2>
+<p>Pick an objective — an entity, a concept, a domain you want CapyHome to master. The loop runs in iterations, each a small cycle of <em>ask → check → research → reflect</em>.</p>
+<h3>Diagram 1 — One iteration of the loop</h3>
+<figure>
+  <img src="./diagrams/07-autoresearch-loop-d1.png" alt="One iteration of the loop" />
+  <figcaption>One iteration of the loop</figcaption>
+</figure>
+<p>Each survivor question goes to a dedicated <code>vault-source-researcher</code> <a href="./08-baby-capy-subagents.html">sub-agent</a> that finds the answer, writes it into the <a href="./01-knowledge-vault.html">Knowledge Vault</a>, and reports back. Over many iterations the vault fills with structured, cited knowledge — without you typing a single follow-up.</p>
+<h2>The question ledger: memory for the <em>questions</em></h2>
+<p>The ledger is a persistent record (JSON + a human-readable markdown mirror) of every question the system has ever considered for an objective. Each question is a node with rich state.</p>
+<h3>Diagram 2 — A question node's lifecycle</h3>
+<figure>
+  <img src="./diagrams/07-autoresearch-loop-d2.png" alt="A question node's lifecycle" />
+  <figcaption>A question node's lifecycle</figcaption>
+</figure>
+<p>Before researching anything, new questions are checked — by token-similarity <strong>and</strong> by searching the vault — against everything already in the ledger. Duplicates collapse instead of triggering redundant work. <strong>The loop never researches the same thing twice.</strong></p>
+<h2>Asking <em>good</em> questions, systematically</h2>
+<p>Left alone, an LLM asks lopsided questions — ten flavors of &quot;what is X&quot; and nothing about risks or alternatives. The loop forces breadth with a <strong>12-cluster question taxonomy</strong>, working breadth-first across three depth levels and deliberately targeting empty or shallow clusters.</p>
+<h3>Diagram 3 — The 12-cluster taxonomy forces coverage</h3>
+<figure>
+  <img src="./diagrams/07-autoresearch-loop-d3.png" alt="The 12-cluster taxonomy forces coverage" />
+  <figcaption>The 12-cluster taxonomy forces coverage</figcaption>
+</figure>
+<p>The taxonomy lives in the vault as an <strong>editable file</strong> — reshape what &quot;thorough&quot; means for your domain.</p>
+<h3>Diagram 4 — Knowing when to stop</h3>
+<figure>
+  <img src="./diagrams/07-autoresearch-loop-d4.png" alt="Knowing when to stop" />
+  <figcaption>Knowing when to stop</figcaption>
+</figure>
+<p>It stops when it stops <em>learning</em>, not when it runs out of money.</p>
+<blockquote>
+<p>🖼️ <strong>[User add: image containing — the entity-browser or autoresearch trigger UI (e.g. an entity page with an &quot;autoresearch&quot; action). Capture from the running app's vault.]</strong></p>
+</blockquote>
+<h2>Under the hood: how it's built</h2>
+<ul>
+<li><strong>Composable stages</strong> (<code>backend/src/control_plane/autoresearch_loop/</code>): <code>generator.py</code> (proposes across the taxonomy), <code>dedup.py</code> (token-Jaccard + vault search), <code>researcher.py</code> (fans out <code>vault-source-researcher</code> subagents), <code>reflector.py</code> (emits follow-ups), <code>stop_criteria.py</code> (novelty decay), <code>ledger.py</code> (thread-safe JSON + markdown persistence).</li>
+<li><strong>The question node schema</strong> carries: content, status, <code>depends_on</code>, cluster (1–12), level (1–3), <code>asked_by</code>, a novelty score, <code>loop_iteration</code>, the <code>vault_entries</code> where the answer lives, <code>duplicate_of</code>, a researcher summary, sources used, and timestamps.</li>
+<li><strong>Scheduled, self-terminating.</strong> Kicking off an objective runs an immediate bootstrap iteration, then schedules a daily run (≈02:00 UTC). When <code>iteration_summary.stop == True</code>, the objective flips to <code>completed_endpoint</code> and the scheduled job is disabled.</li>
+<li><strong>Tunables:</strong> <code>autoresearch_max_questions_per_iteration</code> (8), <code>autoresearch_max_researcher_fanout</code> (3), <code>autoresearch_novelty_decay_threshold</code> (0.7), <code>autoresearch_dedup_similarity_threshold</code> (0.85).</li>
+</ul>
+<h2>What we considered (and the trade-offs we made)</h2>
+<ul>
+<li><strong>Why a ledger instead of just letting the LLM remember?</strong> Context windows forget, and an agent that forgets its own questions asks them again forever. A durable ledger is the difference between research and a hamster wheel.</li>
+<li><strong>Why a fixed 12-cluster taxonomy?</strong> Pure LLM-driven question generation is lopsided and shallow. A taxonomy enforces breadth (history <em>and</em> risks <em>and</em> alternatives), but we made it an editable file so it doesn't become a straitjacket.</li>
+<li><strong>Why novelty-decay as the stop signal?</strong> A fixed iteration count either stops too early (shallow) or too late (wasteful). Watching the duplicate rate lets the <em>topic</em> decide when it's exhausted — short for narrow topics, long for deep ones.</li>
+<li><strong>Why dedup by similarity <em>and</em> vault search, not just one?</strong> Token-similarity catches near-identical phrasings cheaply; a vault search catches questions already <em>answered</em> even if phrased very differently. Belt and suspenders, because redundant research is the most expensive failure here.</li>
+</ul>
+<h2>🎬 Video script (75–90s screen recording)</h2>
+<blockquote>
+<p><strong>Title card:</strong> &quot;I let an AI research a topic by itself. It knew when to stop.&quot;</p>
+<p><strong>[0:00–0:12] Hook:</strong> &quot;Everyone's afraid of agent loops that run forever and burn the bill. So I built one that knows when it's done.&quot;</p>
+<p><strong>[0:12–0:30] Screen — start autoresearch on a topic:</strong> &quot;I point it at a topic and walk away. Behind the scenes it's generating questions across twelve angles — definition, history, risks, alternatives — not just 'what is it' ten times.&quot;</p>
+<p><strong>[0:30–0:55] Screen — open the ledger next 'day':</strong> &quot;Here's the question ledger. Every question it asked, its status — answered, or <em>duplicate</em> and skipped. It checks each new question against everything it's already done, so it never repeats itself.&quot;</p>
+<p><strong>[0:55–1:15] Screen — show the stop:</strong> &quot;And when most new questions start coming back as duplicates — when it stops learning — it declares the topic covered and shuts itself off. No runaway bill.&quot;</p>
+<p><strong>[1:15–1:25] Close:</strong> &quot;A research analyst that works the night shift and files everything. Open source, link below.&quot;</p>
+</blockquote>
+<h2>Try it</h2>
+<blockquote>
+<p><strong>Start autoresearch on a topic you care about. Come back the next day and read the ledger markdown — the question tree it grew, what it answered, where the knowledge landed.</strong></p>
+</blockquote>
+<hr />
+<p><em>Next: <a href="./08-baby-capy-subagents.html">Baby Capy Sub-agents →</a> — the team that does the work in parallel.</em></p>

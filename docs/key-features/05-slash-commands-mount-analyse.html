@@ -1,0 +1,67 @@
+<h1>Stop Uploading Files to the Cloud. Point Your AI at a Real Folder.</h1>
+<blockquote>
+<p><strong>LinkedIn hook (use as the post's first line):</strong> &quot;Cloud AI tools make you upload your files into their sandbox, one at a time. We flipped it: point the AI at a real folder on your machine — and it never touches your files until you say so.&quot;
+<strong>Audience:</strong> LinkedIn → Medium. Developers, consultants, lawyers, analysts — anyone whose real work lives in local folders they can't upload.</p>
+</blockquote>
+<hr />
+<p>The chat box is a command line. Type <code>/</code> in the workspace and the verbs you need are one slash away — no buttons to hunt for, no settings panes.</p>
+<pre><code>/mount         Pick a local folder → mounted into the sandbox
+/analyse       Mirror the folder to markdown + build analysis artifacts (read-only)
+/publishdocs   Publish reviewed docs back to the mounted folder
+/handoff       Package a structured handoff and fork into a new thread
+/compact       Force deterministic context compaction
+/recover       Clear a stuck run and resume
+/new           Fresh chat in this workspace
+/rename        Rename the thread
+</code></pre>
+<blockquote>
+<p>🖼️ <strong>[User add: image containing — the <code>/</code> command menu open in the input box, showing the command list. Capture from the running app by typing &quot;/&quot;.]</strong></p>
+</blockquote>
+<h2>The safety contract, in one diagram</h2>
+<h3>Diagram 1 — Stage → review → commit</h3>
+<figure>
+  <img src="./diagrams/05-slash-commands-mount-analyse-d1.png" alt="Stage → review → commit" />
+  <figcaption>Stage → review → commit</figcaption>
+</figure>
+<p>The agent <strong>cannot</strong> sneak changes into your folder. <code>/analyse</code> only stages into scratch dirs; the <em>only</em> command that writes back is <code>/publishdocs</code>, run deliberately by you.</p>
+<h3>Diagram 2 — How <code>/mount</code> makes your files look local to the sandbox</h3>
+<figure>
+  <img src="./diagrams/05-slash-commands-mount-analyse-d2.png" alt="How  makes your files look local to the sandbox" />
+  <figcaption>How  makes your files look local to the sandbox</figcaption>
+</figure>
+<h3>Diagram 3 — What <code>/analyse</code> produces (4-stage, read-only)</h3>
+<figure>
+  <img src="./diagrams/05-slash-commands-mount-analyse-d3.png" alt="What  produces (4-stage, read-only)" />
+  <figcaption>What  produces (4-stage, read-only)</figcaption>
+</figure>
+<blockquote>
+<p>🖼️ <strong>[User add: image containing — a real screenshot of a generated repo_overview.md open in the workspace, showing the architecture summary + critical files. Capture after running /analyse on a project.]</strong></p>
+</blockquote>
+<h2>Under the hood: how it's built</h2>
+<ul>
+<li><strong><code>/mount</code></strong> opens the <em>real</em> OS folder picker (osascript on macOS, zenity/kdialog on Linux), validates the directory, and persists its absolute path to <code>dreamy_mount.json</code>. <code>MountFolderMiddleware</code> then translates between the virtual <code>/mnt/user-data/mounted/*</code> path the agent sees and the real on-disk location, so <code>read_file</code>, <code>write_file</code>, and <code>bash</code> all just work on your actual files. (It injects a <code>&lt;mounted_folder&gt;</code> system note in Work Mode only — not Plan Mode.)</li>
+<li><strong><code>/analyse</code></strong> runs a four-stage pipeline (router: <code>backend/src/gateway/routers/workspace_io.py</code>): mirror-to-markdown → build <code>.analyse</code> artifacts → spawn an async LLM job that writes <code>repo_overview.md</code> (architecture, key features, execution flow, risks, recommended reading order) → hand the structured map to the agent. You can poll the async job for status.</li>
+<li><strong><code>/publishdocs</code></strong> is the single write-back path, gated behind the repo-overview refresh status so you don't publish over a stale analysis.</li>
+</ul>
+<h2>What we considered (and the trade-offs we made)</h2>
+<ul>
+<li><strong>Why mount a local folder instead of &quot;upload your files&quot;?</strong> Because the most valuable work — proprietary code, client docs, financials — is exactly what you can't paste into someone else's cloud. Mounting keeps the data on your machine (<a href="./10-local-first-byob.html">local-first</a>) while giving the agent full read/write <em>under your control</em>.</li>
+<li><strong>Why force a staging step instead of editing in place?</strong> An agent that can edit your real project is powerful and terrifying. The <code>/analyse → review → /publishdocs</code> contract gives you the power without the terror: nothing touches your files until you commit.</li>
+<li><strong>Why convert everything to markdown first?</strong> The agent reasons best over markdown, and a deterministic mirror means analysis is reproducible and reviewable — you can read exactly what the agent read.</li>
+<li><strong>Why a <em>native</em> folder picker?</strong> A browser file input can't grant access to a whole directory tree the way a real OS dialog can, and it's the interaction people already trust for &quot;pick a folder.&quot;</li>
+</ul>
+<h2>🎬 Video script (60–75s screen recording)</h2>
+<blockquote>
+<p><strong>Title card:</strong> &quot;Stop uploading files. Point your AI at a real folder.&quot;</p>
+<p><strong>[0:00–0:10] Hook:</strong> &quot;Every cloud AI tool wants me to upload my files into their box. My real work can't leave my machine. So I mount it instead.&quot;</p>
+<p><strong>[0:10–0:25] Screen — type /mount, OS picker opens, choose a project:</strong> &quot;Slash-mount. That's my actual OS folder picker. I pick a real project.&quot;</p>
+<p><strong>[0:25–0:45] Screen — type /analyse:</strong> &quot;Slash-analyse. It mirrors everything to markdown and writes an architecture overview — a real map of the codebase. And notice: it has <em>not</em> touched my files.&quot;</p>
+<p><strong>[0:45–1:00] Screen — ask a question, then /publishdocs:</strong> &quot;Now I can ask 'how does this fit together?' and get a grounded answer. When I'm happy, <em>only then</em> does /publishdocs write results back.&quot;</p>
+<p><strong>[1:00–1:10] Close:</strong> &quot;Your files, your machine, your call. Open source, link below.&quot;</p>
+</blockquote>
+<h2>Try it</h2>
+<blockquote>
+<p><strong><code>/mount</code> a project folder, <code>/analyse</code> it, read the generated <code>repo_overview.md</code>, then ask &quot;how does this codebase fit together?&quot;</strong></p>
+</blockquote>
+<hr />
+<p><em>Next: <a href="./06-websearch-markdown.html">Web Search That Writes Markdown →</a>.</em></p>

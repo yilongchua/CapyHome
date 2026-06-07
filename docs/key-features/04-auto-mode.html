@@ -1,0 +1,59 @@
+<h1>I Gave My AI a Goal and Walked Away. This Switch Made It Safe.</h1>
+<blockquote>
+<p><strong>LinkedIn hook (use as the post's first line):</strong> &quot;Planning gives you control. Sometimes you don't want control — you want to hand off a goal, close the laptop, and come back to finished work. Here's the switch that makes that safe.&quot;
+<strong>Audience:</strong> LinkedIn → Medium. Busy operators, founders, anyone who wants hands-off automation without losing the audit trail.</p>
+</blockquote>
+<hr />
+<p>Approval gates are a safety feature. They're also friction — and for tasks you trust, friction is just latency between you and the result. <strong>Auto Mode</strong> lets you choose, per task, where you sit on the trust-vs-control dial.</p>
+<blockquote>
+<p>🖼️ <strong>[User add: image containing — the Auto Mode toggle in the input toolbar's privacy/auto menu, switched ON. Capture from the running app.]</strong></p>
+</blockquote>
+<h2>What it is (and isn't)</h2>
+<p>Auto Mode isn't a third mode. It's a <strong>modifier on <a href="./03-plan-and-work-mode.html">Plan Mode</a></strong> — a toggle that removes two pauses:</p>
+<ol>
+<li><strong>Plan approval.</strong> Normally you click <strong>Execute Plan</strong>. With Auto Mode on, an approved plan hands off to Work Mode and starts immediately.</li>
+<li><strong>Clarification questions.</strong> Normally the agent asks you and waits. With Auto Mode on, if a question ships with a <strong>recommended</strong> option, it picks it and continues — leaving a <code>[Auto Mode] Selected: …</code> marker you can audit.</li>
+</ol>
+<p>What it does <strong>not</strong> do: make Work Mode reckless, auto-escalate simple tasks, or change execution itself. The phasing, the DAG, the evaluator, the retries — all identical. Auto Mode only removes the <em>waiting</em>.</p>
+<h3>Diagram 1 — Where Auto Mode removes the gates</h3>
+<figure>
+  <img src="./diagrams/04-auto-mode-d1.png" alt="Where Auto Mode removes the gates" />
+  <figcaption>Where Auto Mode removes the gates</figcaption>
+</figure>
+<h3>Diagram 2 — The guardrail: it only auto-answers safe forks</h3>
+<figure>
+  <img src="./diagrams/04-auto-mode-d2.png" alt="The guardrail: it only auto-answers safe forks" />
+  <figcaption>The guardrail: it only auto-answers safe forks</figcaption>
+</figure>
+<p>This is the thoughtful part: Auto Mode doesn't flip a coin on genuinely open questions. It only auto-answers forks where the agent already has a defensible default.</p>
+<blockquote>
+<p>🖼️ <strong>[User add: image containing — a transcript snippet showing a clarification auto-resolved, with the literal &quot;[Auto Mode] Selected: <option>&quot; marker visible. Capture from a real auto-mode run.]</strong></p>
+</blockquote>
+<h2>Under the hood: how it's built</h2>
+<ul>
+<li><strong>A single boolean, resolved with clear precedence.</strong> <code>auto_mode</code> lives on the thread state and the run payload. <code>resolve_auto_mode()</code> (REST path) and <code>_auto_mode_enabled()</code> (live agent loop) both follow the same order: explicit request override → thread state → <code>False</code>.</li>
+<li><strong>Auto-approval on creation.</strong> In <code>PlannerMiddleware</code>, <code>plan_status = &quot;approved&quot; if auto_mode and not clarification_pending else &quot;draft&quot;</code>, and the SSE event is tagged <code>plan_auto_approved</code> instead of <code>plan_created</code>.</li>
+<li><strong>Auto-selection of clarifications.</strong> <code>ClarificationMiddleware</code> caches the flag on the runtime context (so the async tool-call wrapper can read it) and, when a recommended option exists, returns a <code>Command</code> that records the answer with the <code>[Auto Mode] Selected:</code> prefix.</li>
+<li><strong>Daemon handoff.</strong> When the last clarification is answered under Auto Mode, <code>spawn_work_mode_handoff()</code> fires the Work Mode run on a daemon thread — re-reading <code>plan.md</code> from disk first so any edits are honored.</li>
+</ul>
+<p>Everything is fully auditable after the fact: every auto-decision is stamped in the transcript and the plan carries an <code>approved_at</code> timestamp.</p>
+<h2>What we considered (and the trade-offs we made)</h2>
+<ul>
+<li><strong>Why gate auto-answers on a &quot;recommended&quot; option?</strong> The naive version auto-answers <em>everything</em>, which means it guesses on questions that genuinely needed you. By only auto-selecting forks that ship a recommendation, we kept autonomy where it's safe and a pause where it isn't.</li>
+<li><strong>Why not a global &quot;always auto&quot; setting?</strong> Trust is per-task, not per-account. A toggle in the input box lets you decide fresh each time — hands-off for the overnight research run, hands-on for the irreversible thing.</li>
+<li><strong>Why leave such loud audit markers?</strong> Because &quot;the AI decided something on my behalf&quot; is exactly the moment you want a paper trail. <code>[Auto Mode] Selected:</code> and <code>plan_auto_approved</code> make every autonomous decision greppable.</li>
+<li><strong>Why keep a handoff step at all instead of one seamless run?</strong> Re-reading <code>plan.md</code> at handoff is the seam that lets your between-approval edits take effect. A little ceremony buys a lot of steerability.</li>
+</ul>
+<h2>🎬 Video script (45–60s screen recording)</h2>
+<blockquote>
+<p><strong>[0:00–0:10] Hook:</strong> &quot;I wanted to give my AI a research goal and just… walk away. But I didn't want it guessing on the important stuff. Here's how that works.&quot;</p>
+<p><strong>[0:10–0:25] Screen — enable Plan + Auto Mode, submit a goal:</strong> &quot;Plan Mode on, Auto Mode on. I submit, and I close the laptop.&quot;</p>
+<p><strong>[0:25–0:45] Screen — come back, scroll the transcript:</strong> &quot;It planned, approved itself, and ran. And here — it hit a fork, took the recommended option, and <em>logged exactly what it chose</em>. The genuinely open questions? It left those for me.&quot;</p>
+<p><strong>[0:45–0:55] Close:</strong> &quot;Autonomy where it's safe, a pause where it isn't. Fully auditable. Open source, link below.&quot;</p>
+</blockquote>
+<h2>Try it</h2>
+<blockquote>
+<p><strong>Enable both Plan Mode and Auto Mode, submit a research goal, and walk away. Come back to finished deliverables and a full record of every decision it made.</strong></p>
+</blockquote>
+<hr />
+<p><em>Next: <a href="./05-slash-commands-mount-analyse.html">Mount a Folder, Drive with Slash Commands →</a>.</em></p>

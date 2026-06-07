@@ -1,0 +1,59 @@
+<h1>Your Notes Are Useless If You Can't Find Them. This Search Reads Your Mind.</h1>
+<blockquote>
+<p><strong>LinkedIn hook (use as the post's first line):</strong> &quot;A knowledge base you can't search is just a graveyard. We combined keyword search and semantic search — and fused them — so recall doesn't depend on remembering the exact words.&quot;
+<strong>Audience:</strong> LinkedIn → Medium. Search/RAG engineers, researchers, anyone building a second brain.</p>
+</blockquote>
+<hr />
+<p>A library is only as good as your ability to find the right book six months later — when you've forgotten exactly how you phrased things. That's the moment most knowledge bases fail you. CapyHome's vault search is built for <em>that</em> moment.</p>
+<blockquote>
+<p>🖼️ <strong>[User add: image containing — a search bar with a fuzzy query like &quot;staff freedom&quot; returning a top result titled &quot;Employee Autonomy.&quot; Annotate it: &quot;different words, right answer.&quot; Good as a LinkedIn carousel slide.]</strong></p>
+</blockquote>
+<h2>Two kinds of search, and why you want both</h2>
+<ul>
+<li><strong>Keyword (lexical) search</strong> is fast and precise when you know the term — but brittle. Search &quot;staff freedom&quot; and it misses a page titled &quot;employee autonomy.&quot;</li>
+<li><strong>Semantic (vector) search</strong> understands meaning — but drifts toward vibes when you wanted an exact term.</li>
+</ul>
+<p>CapyHome runs <strong>both</strong> and merges them, so you get exact-term precision <em>and</em> meaning-based recall in one ranked list.</p>
+<h3>Diagram 1 — The two lanes, then fusion</h3>
+<figure>
+  <img src="./diagrams/02-hybrid-vault-search-d1.png" alt="The two lanes, then fusion" />
+  <figcaption>The two lanes, then fusion</figcaption>
+</figure>
+<h3>Diagram 2 — Why fuse by rank, not by score</h3>
+<figure>
+  <img src="./diagrams/02-hybrid-vault-search-d2.png" alt="Why fuse by rank, not by score" />
+  <figcaption>Why fuse by rank, not by score</figcaption>
+</figure>
+<h2>Under the hood: how it's built</h2>
+<p><strong>Lexical layer.</strong> Every compiled page is tokenized and scored with <strong>BM25</strong> — the battle-tested ranking function behind classic search engines. Always on, always fast, no model required.</p>
+<p><strong>Vector layer (optional).</strong> When enabled, pages are split into overlapping chunks (default <strong>1200 chars, 200 overlap</strong>) and embedded — via an OpenAI-compatible <code>/embeddings</code> endpoint, or a deterministic <strong>hash-based fallback</strong> if you'd rather make zero external calls. The query is embedded the same way and matched by similarity.</p>
+<p><strong>Fusion.</strong> Instead of forcing two incompatible score scales to agree, CapyHome uses <strong>Reciprocal Rank Fusion</strong> (<code>hybrid_rrf_k = 60</code>) — blending by <em>rank</em>, which is robust and needs no fragile normalization.</p>
+<p>Every result returns a fused score, its category (source / entity / concept / synthesis / query), a snippet centered on the best-matching token, and — in hybrid mode — the individual lexical and vector ranks so you can see <em>why</em> it surfaced. Implementation: <code>backend/src/control_plane/services/unified_vault_search.py</code>.</p>
+<h3>Diagram 3 — The agent searches before it reaches for the web</h3>
+<figure>
+  <img src="./diagrams/02-hybrid-vault-search-d3.png" alt="The agent searches before it reaches for the web" />
+  <figcaption>The agent searches before it reaches for the web</figcaption>
+</figure>
+<blockquote>
+<p>🖼️ <strong>[User add: image containing — a real screenshot of vault search results in the UI, showing the score, category chips, and snippet. Capture from the running app's vault search box.]</strong></p>
+</blockquote>
+<h2>What we considered (and the trade-offs we made)</h2>
+<ul>
+<li><strong>Why RRF over weighted score blending?</strong> Weighted blends require normalizing two unrelated score distributions — fragile, and it breaks the moment your corpus shifts. Rank fusion sidesteps the whole problem. The trade-off: we throw away some score <em>magnitude</em> information, but gain robustness we never have to tune.</li>
+<li><strong>Why is vector search OFF by default?</strong> Because BM25 alone is genuinely good for most libraries, and &quot;semantic search&quot; shouldn't mean &quot;mandatory embedding bill.&quot; We made the powerful option opt-in and gave it a no-network fallback.</li>
+<li><strong>Why a hash-based embedding fallback?</strong> Some users can't or won't call an embeddings API. A deterministic hash embedding gives semantic-<em>style</em> behavior with zero external calls — strictly worse than a real model, but strictly better than nothing, and fully private.</li>
+<li><strong>Why chunk at 1200/200?</strong> Small enough to keep a hit focused on the relevant passage, with enough overlap that meaning isn't severed at a boundary. Both are config knobs if your corpus wants otherwise.</li>
+</ul>
+<h2>🎬 Video script (45–60s screen recording)</h2>
+<blockquote>
+<p><strong>[0:00–0:08] Hook:</strong> &quot;Here's the test every knowledge base fails: can you find something when you've forgotten the exact words?&quot;</p>
+<p><strong>[0:08–0:25] Screen:</strong> &quot;I researched this topic months ago and called it 'employee autonomy.' Today I search for 'staff freedom' — totally different words.&quot; <em>(type it.)</em></p>
+<p><strong>[0:25–0:40] Screen — results appear:</strong> &quot;There it is, top result. That's keyword search and semantic search fused together. Keyword nails the exact terms; semantic catches the meaning.&quot;</p>
+<p><strong>[0:40–0:55] Close:</strong> &quot;It's all local — you can even run the semantic layer with zero external calls. Open source, link below.&quot;</p>
+</blockquote>
+<h2>Try it</h2>
+<blockquote>
+<p><strong>Search your vault using <em>different words</em> than you originally researched with. The right page still comes back.</strong></p>
+</blockquote>
+<hr />
+<p><em>Next: <a href="./03-plan-and-work-mode.html">Plan Mode &amp; Work Mode →</a> — how CapyHome decides to think before it acts.</em></p>

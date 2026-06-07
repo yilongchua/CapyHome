@@ -1,0 +1,67 @@
+<h1>Diagrams</h1>
+<p>Pre-rendered PNGs for the key-feature article series, in the warm &quot;friendly-tech&quot;
+capybara palette (cream background, honey/sage/tan nodes, soft shadows, rounded corners).</p>
+<ul>
+<li><strong><code>*.png</code></strong> — the rendered diagrams the articles embed (<code>&lt;article&gt;-d&lt;N&gt;.png</code>), at 3× scale.</li>
+<li><strong><code>src/*.mmd</code></strong> — the Mermaid source for each diagram (the single source of truth).</li>
+<li><strong><code>_build/</code></strong> — the render toolchain:
+<ul>
+<li><code>render.py</code> — extracts every ```mermaid block from the articles, renders it, and rewrites the block as an image link. (Already run; re-run only to regenerate.)</li>
+<li><code>mermaid-config.json</code> — theme + palette (themeVariables).</li>
+<li><code>diagram.css</code> — rounding, drop shadows, and the warm mindmap/flowchart overrides.</li>
+<li><code>puppeteer-config.json</code> — points mermaid-cli at the system Google Chrome.</li>
+</ul>
+</li>
+</ul>
+<h2>Regenerate everything</h2>
+<pre><code class="language-bash">cd docs/key-features
+python3 diagrams/_build/render.py
+</code></pre>
+<p>This re-renders all diagrams from <code>src/*.mmd</code> using the theme files and updates the
+image links in the articles. It uses <code>npx @mermaid-js/mermaid-cli</code> (downloaded on first
+run) driving the installed Google Chrome — no separate Chromium download.</p>
+<h2>Render a single diagram</h2>
+<pre><code class="language-bash">cd docs/key-features/diagrams/_build
+PUPPETEER_SKIP_DOWNLOAD=true npx -y -p @mermaid-js/mermaid-cli mmdc \
+  -i ../src/01-knowledge-vault-d1.mmd -o ../01-knowledge-vault-d1.png \
+  -c mermaid-config.json -C diagram.css -p puppeteer-config.json -b &quot;#FBF6EC&quot; -s 3
+</code></pre>
+<h2>Tweaking the look</h2>
+<p>Edit <code>mermaid-config.json</code> (colors/fonts/spacing) or <code>diagram.css</code> (shadows/rounding),
+then re-run <code>render.py</code>. <strong>Don't</strong> set <code>font-weight</code> in the CSS — Mermaid measures node
+widths with the base font during layout, so bolding afterwards makes text overflow and clip.</p>
+<h2>Palette</h2>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Hex</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Background (cream)</td>
+<td><code>#FBF6EC</code></td>
+</tr>
+<tr>
+<td>Node fill (honey-cream)</td>
+<td><code>#FDEFD2</code></td>
+</tr>
+<tr>
+<td>Node fill (sage)</td>
+<td><code>#DCE8D0</code></td>
+</tr>
+<tr>
+<td>Node fill (honey)</td>
+<td><code>#FBE9C2</code> / <code>#E8B04B</code></td>
+</tr>
+<tr>
+<td>Border / lines (brown)</td>
+<td><code>#8B5E34</code> / <code>#C9A66B</code></td>
+</tr>
+<tr>
+<td>Text (ink)</td>
+<td><code>#3A2E22</code></td>
+</tr>
+</tbody>
+</table>
