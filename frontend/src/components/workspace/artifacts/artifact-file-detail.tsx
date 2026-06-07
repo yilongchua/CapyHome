@@ -3,6 +3,7 @@ import {
   BotIcon,
   Code2Icon,
   CopyIcon,
+  DatabaseIcon,
   DownloadIcon,
   EyeIcon,
   LoaderIcon,
@@ -59,9 +60,39 @@ import { PlanViewer } from "./plan-viewer";
  */
 const MAX_PREVIEW_CHARS = 200_000;
 
+type SqlitePreviewResponse = {
+  path: string;
+  tables: string[];
+  selected_table: string | null;
+  columns: Array<{
+    name: string;
+    type: string;
+  }>;
+  rows: Array<Record<string, unknown>>;
+  row_count: number;
+  limit: number;
+};
+
 function truncateFilename(name: string): string {
   if (name.length <= 12) return name;
   return `${name.slice(0, 9)}...${name.slice(-5)}`;
+}
+
+function formatSqliteCell(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "[value]";
+  }
 }
 
 export function ArtifactFileDetail({
@@ -96,6 +127,10 @@ export function ArtifactFileDetail({
   }, [filepath]);
   const isJsonFile = useMemo(() => {
     return filepath.toLowerCase().endsWith(".json");
+  }, [filepath]);
+  const isSqliteFile = useMemo(() => {
+    const lower = filepath.toLowerCase();
+    return lower.endsWith(".sqlite") || lower.endsWith(".sqlite3") || lower.endsWith(".db");
   }, [filepath]);
   const isPlanFile = useMemo(() => {
     return (
@@ -159,14 +194,14 @@ export function ArtifactFileDetail({
   const { isMock } = useThread();
   const queryClient = useQueryClient();
   useEffect(() => {
-    if (isCsv) {
+    if (isCsv || isSqliteFile) {
       setViewMode("table");
     } else if (isSupportPreview) {
       setViewMode("preview");
     } else {
       setViewMode("code");
     }
-  }, [isCsv, isSupportPreview]);
+  }, [isCsv, isSqliteFile, isSupportPreview]);
 
   useEffect(() => {
     if (shouldRenderPlan) {
@@ -352,7 +387,7 @@ export function ArtifactFileDetail({
           </ArtifactTitle>
         </div>
         <div className="flex min-w-0 grow items-center justify-center">
-          {(isSupportPreview || isCsv) && (
+          {(isSupportPreview || isCsv || isSqliteFile) && (
             <ToggleGroup
               className="mx-auto"
               type="single"
@@ -365,14 +400,16 @@ export function ArtifactFileDetail({
                 }
               }}
             >
-              {isCsv && (
+              {(isCsv || isSqliteFile) && (
                 <ToggleGroupItem value="table">
-                  <TableIcon />
+                  {isSqliteFile ? <DatabaseIcon /> : <TableIcon />}
                 </ToggleGroupItem>
               )}
-              <ToggleGroupItem value="code">
-                <Code2Icon />
-              </ToggleGroupItem>
+              {!isSqliteFile && (
+                <ToggleGroupItem value="code">
+                  <Code2Icon />
+                </ToggleGroupItem>
+              )}
               {isSupportPreview && (
                 <ToggleGroupItem value="preview">
                   <EyeIcon />
@@ -575,6 +612,12 @@ export function ArtifactFileDetail({
               truncated={isTruncated}
             />
           )}
+          {!shouldRenderPlan && isSqliteFile && viewMode === "table" && (
+            <ArtifactSqlitePreview
+              filepath={filepath}
+              threadId={threadId}
+            />
+          )}
           {!shouldRenderPlan && isCodeFile && viewMode === "code" && (
             <CodeEditor
               className="size-full resize-none rounded-none border-none"
@@ -593,6 +636,148 @@ export function ArtifactFileDetail({
         </div>
       </ArtifactContent>
     </Artifact>
+  );
+}
+
+function ArtifactSqlitePreview({
+  filepath,
+  threadId,
+}: {
+  filepath: string;
+  threadId: string;
+}) {
+  const [preview, setPreview] = useState<SqlitePreviewResponse | null>(null);
+  const [selectedTable, setSelectedTable] = useState<string>("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedTable("");
+  }, [filepath]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const run = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const query = new URLSearchParams();
+        if (selectedTable) {
+          query.set("table", selectedTable);
+        }
+        query.set("limit", "100");
+        const normalizedPath = filepath.replace(/^\/+/, "");
+        const suffix = query.toString() ? `?${query.toString()}` : "";
+        const response = await fetch(
+          `${getBackendBaseURL()}/api/threads/${threadId}/artifacts-sqlite-preview/${normalizedPath}${suffix}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+        const payload = (await response.json()) as SqlitePreviewResponse;
+        setPreview(payload);
+        if (!selectedTable && payload.selected_table) {
+          setSelectedTable(payload.selected_table);
+        }
+      } catch (err) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setPreview(null);
+        setError(err instanceof Error ? err.message : "Failed to preview SQLite database.");
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
+      }
+    };
+    void run();
+    return () => controller.abort();
+  }, [filepath, selectedTable, threadId]);
+
+  if (isLoading && !preview) {
+    return (
+      <div className="text-muted-foreground flex size-full items-center justify-center text-sm">
+        Loading SQLite preview...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-muted-foreground flex size-full items-center justify-center p-4 text-sm">
+        {error}
+      </div>
+    );
+  }
+
+  if (!preview || preview.tables.length === 0) {
+    return (
+      <div className="text-muted-foreground flex size-full items-center justify-center text-sm">
+        No SQLite tables found.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex size-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2 text-sm">
+          <DatabaseIcon className="size-4 shrink-0" />
+          <span className="text-muted-foreground shrink-0">Table</span>
+          <Select value={preview.selected_table ?? ""} onValueChange={setSelectedTable}>
+            <SelectTrigger className="h-8 min-w-48">
+              <span>{preview.selected_table ?? "Select table"}</span>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {preview.tables.map((table) => (
+                  <SelectItem key={table} value={table}>
+                    {table}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="text-muted-foreground shrink-0 text-xs">
+          {preview.rows.length}/{preview.row_count} rows
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto">
+        <table className="w-full min-w-max border-collapse text-left text-xs">
+          <thead className="bg-muted/70 sticky top-0 z-10">
+            <tr>
+              {preview.columns.map((column) => (
+                <th key={column.name} className="border-b px-3 py-2 font-medium">
+                  <div>{column.name}</div>
+                  {column.type && (
+                    <div className="text-muted-foreground text-[10px] font-normal">
+                      {column.type}
+                    </div>
+                  )}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {preview.rows.map((row, rowIndex) => (
+              <tr key={rowIndex} className="odd:bg-muted/20">
+                {preview.columns.map((column) => {
+                  const value = formatSqliteCell(row[column.name]);
+                  return (
+                    <td key={column.name} className="max-w-80 truncate border-b px-3 py-2 font-mono" title={value}>
+                      {value}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

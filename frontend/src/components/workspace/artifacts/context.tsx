@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
@@ -62,25 +63,40 @@ export function DirectoryProvider({ children }: DirectoryProviderProps) {
     setAutoSelect(true);
   }, []);
 
-  const value: DirectoryContextType = {
-    directoryFiles,
-    setDirectoryFiles,
-
-    open,
-    autoOpen,
-    autoSelect,
-    setOpen: (isOpen: boolean) => {
+  const handleSetOpen = useCallback(
+    (isOpen: boolean) => {
       if (!isOpen && autoOpen) {
         setAutoOpen(false);
         setAutoSelect(false);
       }
       setOpen(isOpen);
     },
+    [autoOpen],
+  );
 
-    selectedFile,
-    select,
-    deselect,
-  };
+  const value = useMemo<DirectoryContextType>(
+    () => ({
+      directoryFiles,
+      setDirectoryFiles,
+      selectedFile,
+      autoSelect,
+      select,
+      deselect,
+      open,
+      autoOpen,
+      setOpen: handleSetOpen,
+    }),
+    [
+      autoOpen,
+      autoSelect,
+      deselect,
+      directoryFiles,
+      handleSetOpen,
+      open,
+      select,
+      selectedFile,
+    ],
+  );
 
   return (
     <DirectoryContext.Provider value={value}>

@@ -1,11 +1,12 @@
 import json
 import logging
 import mimetypes
+import sqlite3
 import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
@@ -24,6 +25,21 @@ class UpdateArtifactRequest(BaseModel):
 
 class ListArtifactsResponse(BaseModel):
     files: list[str] = Field(default_factory=list, description="Virtual artifact file paths.")
+
+
+class SqlitePreviewColumn(BaseModel):
+    name: str
+    type: str = ""
+
+
+class SqlitePreviewResponse(BaseModel):
+    path: str
+    tables: list[str] = Field(default_factory=list)
+    selected_table: str | None = None
+    columns: list[SqlitePreviewColumn] = Field(default_factory=list)
+    rows: list[dict[str, object | None]] = Field(default_factory=list)
+    row_count: int = 0
+    limit: int = 100
 
 
 def _resolve_mounted_artifact_path(thread_id: str, path: str) -> Path | None:
@@ -74,6 +90,30 @@ def is_text_file_by_content(path: Path, sample_size: int = 8192) -> bool:
         return False
 
 
+def _resolve_artifact_path(thread_id: str, path: str) -> Path:
+    actual_path = _resolve_mounted_artifact_path(thread_id, path)
+    if actual_path is None:
+        actual_path = resolve_thread_virtual_path(thread_id, path)
+
+    if not actual_path.exists():
+        raise HTTPException(status_code=404, detail=f"Artifact not found: {path}")
+    if not actual_path.is_file():
+        raise HTTPException(status_code=400, detail=f"Path is not a file: {path}")
+    return actual_path
+
+
+def _jsonable_sqlite_value(value: object) -> object | None:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, bytes):
+        return f"<blob {len(value)} bytes>"
+    return str(value)
+
+
+def _quote_sqlite_identifier(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
 def _extract_file_from_skill_archive(zip_path: Path, internal_path: str) -> bytes | None:
     """Extract a file from a .skill ZIP archive.
 
@@ -105,6 +145,75 @@ def _extract_file_from_skill_archive(zip_path: Path, internal_path: str) -> byte
             return None
     except (zipfile.BadZipFile, KeyError):
         return None
+
+
+@router.get(
+    "/threads/{thread_id}/artifacts-sqlite-preview/{path:path}",
+    response_model=SqlitePreviewResponse,
+    summary="Preview SQLite Artifact",
+    description="Return table metadata and a small read-only row preview for a SQLite artifact.",
+)
+async def preview_sqlite_artifact(
+    thread_id: str,
+    path: str,
+    table: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> SqlitePreviewResponse:
+    actual_path = _resolve_artifact_path(thread_id, path)
+    if actual_path.suffix.lower() not in {".sqlite", ".sqlite3", ".db"}:
+        raise HTTPException(status_code=400, detail="Only .sqlite, .sqlite3, and .db artifacts can be previewed.")
+
+    uri = f"{actual_path.as_uri()}?mode=ro"
+    try:
+        conn = sqlite3.connect(uri, uri=True)
+        conn.row_factory = sqlite3.Row
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to open SQLite database: {exc}") from exc
+
+    try:
+        table_rows = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name NOT LIKE 'sqlite_%'
+            ORDER BY name
+            """
+        ).fetchall()
+        tables = [str(row["name"]) for row in table_rows]
+        selected_table = table or (tables[0] if tables else None)
+        if selected_table is None:
+            return SqlitePreviewResponse(path=path, tables=tables, selected_table=None, limit=limit)
+        if selected_table not in tables:
+            raise HTTPException(status_code=404, detail=f"SQLite table not found: {selected_table}")
+
+        quoted_table = _quote_sqlite_identifier(selected_table)
+        column_rows = conn.execute(f"PRAGMA table_info({quoted_table})").fetchall()
+        columns = [
+            SqlitePreviewColumn(name=str(row["name"]), type=str(row["type"] or ""))
+            for row in column_rows
+        ]
+        row_count = int(conn.execute(f"SELECT COUNT(*) AS count FROM {quoted_table}").fetchone()["count"])
+        preview_rows = conn.execute(f"SELECT * FROM {quoted_table} LIMIT ?", (limit,)).fetchall()
+        rows = [
+            {key: _jsonable_sqlite_value(row[key]) for key in row.keys()}
+            for row in preview_rows
+        ]
+        return SqlitePreviewResponse(
+            path=path,
+            tables=tables,
+            selected_table=selected_table,
+            columns=columns,
+            rows=rows,
+            row_count=row_count,
+            limit=limit,
+        )
+    except HTTPException:
+        raise
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to read SQLite database: {exc}") from exc
+    finally:
+        conn.close()
 
 
 @router.get(

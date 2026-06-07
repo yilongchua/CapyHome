@@ -12,6 +12,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getBackendBaseURL } from "@/core/config";
 import { sanitizeThreadId } from "@/core/utils/strings";
+import { useWorkspaceRefreshSubscription } from "@/core/workspace-refresh";
 import { cn } from "@/lib/utils";
 
 import {
@@ -217,6 +218,14 @@ const ChatBox: React.FC<{
   const handleArtifactsRefresh = useCallback(async () => {
     await loadArtifacts();
   }, [loadArtifacts]);
+
+  const handleWorkspaceRefresh = useCallback((event: { meta?: Record<string, unknown> }) => {
+    if (event.meta?.source === "workflow-execute") {
+      void loadArtifacts();
+    }
+  }, [loadArtifacts]);
+
+  useWorkspaceRefreshSubscription([`thread:${threadId}`], handleWorkspaceRefresh);
 
   const handleCollapse = () => {
     isOuterPanelCollapsingRef.current = true;
