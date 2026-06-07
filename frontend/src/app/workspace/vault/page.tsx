@@ -441,6 +441,7 @@ export default function VaultPage() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
+                  id="vault-idle-autorun-menu-trigger"
                   size="sm"
                   variant={idleMinutes > 0 ? "default" : "outline"}
                   className="px-2"
@@ -554,6 +555,7 @@ export default function VaultPage() {
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
+                          id="vault-ingest-options-menu-trigger"
                           size="sm"
                           variant="outline"
                           className="rounded-l-none px-2"
@@ -667,6 +669,7 @@ export default function VaultPage() {
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
+                          id="vault-lint-options-menu-trigger"
                           size="sm"
                           variant="outline"
                           className="rounded-l-none px-2"

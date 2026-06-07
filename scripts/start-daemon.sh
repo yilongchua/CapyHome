@@ -15,13 +15,7 @@ cd "$REPO_ROOT"
 # ── Stop existing services ────────────────────────────────────────────────────
 
 echo "Stopping existing services if any..."
-pkill -f "langgraph dev" 2>/dev/null || true
-pkill -f "uvicorn src.gateway.app:app" 2>/dev/null || true
-pkill -f "next dev" 2>/dev/null || true
-nginx -c "$REPO_ROOT/docker/nginx/nginx.local.conf" -p "$REPO_ROOT" -s quit 2>/dev/null || true
-sleep 1
-pkill -9 nginx 2>/dev/null || true
-./scripts/cleanup-containers.sh capyhome-sandbox 2>/dev/null || true
+"$REPO_ROOT/scripts/stop-services.sh" 2>/dev/null || true
 sleep 1
 
 # ── Banner ────────────────────────────────────────────────────────────────────
@@ -53,13 +47,7 @@ fi
 
 cleanup_on_failure() {
     echo "Failed to start services, cleaning up..."
-    pkill -f "langgraph dev" 2>/dev/null || true
-    pkill -f "uvicorn src.gateway.app:app" 2>/dev/null || true
-    pkill -f "next dev" 2>/dev/null || true
-    nginx -c "$REPO_ROOT/docker/nginx/nginx.local.conf" -p "$REPO_ROOT" -s quit 2>/dev/null || true
-    sleep 1
-    pkill -9 nginx 2>/dev/null || true
-    echo "✓ Cleanup complete"
+    "$REPO_ROOT/scripts/stop-services.sh" || true
 }
 
 trap cleanup_on_failure INT TERM
@@ -68,8 +56,10 @@ trap cleanup_on_failure INT TERM
 
 mkdir -p logs
 
-echo "Starting LangGraph server..."
-nohup sh -c 'cd backend && BG_JOB_ISOLATED_LOOPS=true N_JOBS_PER_WORKER=3 NO_COLOR=1 uv run langgraph dev --no-browser --allow-blocking --no-reload > ../logs/langgraph.log 2>&1' &
+LANGGRAPH_WORKERS="${LANGGRAPH_WORKERS:-3}"
+
+echo "Starting LangGraph server with ${LANGGRAPH_WORKERS} worker job(s)..."
+nohup sh -c 'cd backend && BG_JOB_ISOLATED_LOOPS=true NO_COLOR=1 uv run langgraph dev --no-browser --allow-blocking --no-reload --n-jobs-per-worker "$1" > ../logs/langgraph.log 2>&1' _ "$LANGGRAPH_WORKERS" &
 ./scripts/wait-for-port.sh 2024 60 "LangGraph" || {
     echo "✗ LangGraph failed to start. Last log output:"
     tail -60 logs/langgraph.log

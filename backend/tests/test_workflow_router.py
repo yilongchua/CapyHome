@@ -574,3 +574,48 @@ async def test_child_row_run_honors_model_display_name(monkeypatch):
     assert client.runs.create_kwargs["context"]["model_name"] == "qwen-mlx"
     assert client.runs.create_kwargs["metadata"]["model_display_name"] == "local-mlx"
     assert client.runs.create_kwargs["metadata"]["model_name"] == "qwen-mlx"
+
+
+@pytest.mark.anyio
+async def test_child_row_run_cancels_if_stop_requested_during_run_create(monkeypatch):
+    class _AppConfig:
+        def get_default_run_config(self):
+            return {}
+
+    class _Threads:
+        async def create(self):
+            return {"thread_id": "child-thread"}
+
+        async def get_state(self, _thread_id):
+            raise AssertionError("stopped child rows should not read final state")
+
+    class _Runs:
+        def __init__(self, active):
+            self.active = active
+            self.cancelled = []
+
+        async def create(self, *_args, **_kwargs):
+            self.active.stop_requested = True
+            return {"run_id": "child-run"}
+
+        async def cancel(self, thread_id, run_id, **kwargs):
+            self.cancelled.append((thread_id, run_id, kwargs))
+
+        async def join(self, _thread_id, _run_id):
+            raise AssertionError("stopped child rows should not wait for join")
+
+    class _Client:
+        def __init__(self, active):
+            self.threads = _Threads()
+            self.runs = _Runs(active)
+
+    active = workflow_router._ActiveWorkflowRun()
+    client = _Client(active)
+    monkeypatch.setattr(workflow_router, "get_app_config", lambda: _AppConfig())
+    row = {"row_index": 0, "row_number": "1", "source": {"name": "Example A"}}
+
+    result = await workflow_router._execute_child_row(client, "parent-thread", _workflow_payload(), row, active)
+
+    assert result == (0, "cancelled", None, "child-thread", "child-run", "stopped")
+    assert client.runs.cancelled == [("child-thread", "child-run", {"wait": False, "action": "interrupt"})]
+    assert active.child_runs == {}

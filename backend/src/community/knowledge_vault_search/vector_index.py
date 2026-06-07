@@ -16,6 +16,7 @@ from src.control_plane.vault_text_utils import parse_frontmatter as _parse_front
 
 _DEFAULT_WINDOW = 1200
 _DEFAULT_OVERLAP = 200
+_DEFAULT_EMBED_BATCH_SIZE = 8
 
 
 def _tokenize(text: str) -> list[str]:
@@ -49,6 +50,7 @@ class OpenAICompatibleEmbedder:
     ) -> None:
         self._timeout_seconds = float(timeout_seconds)
         self._configured_model = str(model_name or "").strip() or None
+        self._last_error = ""
 
     def _resolve_client_config(self) -> tuple[str | None, str | None, str | None]:
         # Prefer user-onboarded embedding endpoints (knowledge graph tab) over
@@ -99,10 +101,12 @@ class OpenAICompatibleEmbedder:
         return base_url.rstrip("/"), api_key or None, model_name
 
     def embed_batch(self, texts: list[str]) -> list[np.ndarray] | None:
+        self._last_error = ""
         if not texts:
             return []
         base_url, api_key, model_name = self._resolve_client_config()
         if not base_url or not model_name:
+            self._last_error = "missing embedding base_url or model"
             return None
         try:
             headers = {"Content-Type": "application/json"}
@@ -119,20 +123,27 @@ class OpenAICompatibleEmbedder:
                 )
                 response.raise_for_status()
                 payload = response.json()
-        except Exception:
+        except httpx.HTTPStatusError as exc:
+            self._last_error = f"HTTP {exc.response.status_code}: {exc.response.text[:500]}"
+            return None
+        except Exception as exc:
+            self._last_error = f"{type(exc).__name__}: {exc}"
             return None
 
         data = payload.get("data", []) if isinstance(payload, dict) else []
         if not isinstance(data, list) or len(data) != len(texts):
+            self._last_error = f"unexpected embedding response data length: expected={len(texts)} actual={len(data) if isinstance(data, list) else 'non-list'}"
             return None
         vectors: list[np.ndarray] = []
         for item in data:
             embedding = item.get("embedding") if isinstance(item, dict) else None
             if not isinstance(embedding, list) or not embedding:
+                self._last_error = "embedding response item did not include an embedding vector"
                 return None
             try:
                 vector = np.array(embedding, dtype=np.float32)
-            except Exception:
+            except Exception as exc:
+                self._last_error = f"invalid embedding vector: {type(exc).__name__}: {exc}"
                 return None
             vectors.append(_normalize(vector))
         return vectors
@@ -171,6 +182,7 @@ class VaultVectorIndex:
         self.backend = backend
         self.embedding_model = embedding_model.strip()
         self._embedder = OpenAICompatibleEmbedder(model_name=self.embedding_model)
+        self._embed_batch_size = _DEFAULT_EMBED_BATCH_SIZE
 
     def _split_chunks(self, text: str) -> list[str]:
         normalized = text.strip()
@@ -246,17 +258,75 @@ class VaultVectorIndex:
                 )
         return chunks
 
+    def _compiled_signature(self) -> dict[str, Any]:
+        page_count = 0
+        latest_mtime_ns = 0
+        for category_dir in sorted(self.compiled_dir.iterdir() if self.compiled_dir.exists() else []):
+            if not category_dir.is_dir():
+                continue
+            for path in sorted(category_dir.glob("*.md")):
+                if path.name == "index.md":
+                    continue
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                page_count += 1
+                latest_mtime_ns = max(latest_mtime_ns, int(stat.st_mtime_ns))
+        return {
+            "page_count": page_count,
+            "latest_mtime_ns": latest_mtime_ns,
+        }
+
+    def _metadata_is_current(self, payload: dict[str, Any]) -> bool:
+        if int(payload.get("chunk_chars") or 0) != self.chunk_chars or int(payload.get("overlap_chars") or 0) != self.overlap_chars:
+            return False
+
+        current_signature = self._compiled_signature()
+        stored_signature = payload.get("compiled_signature")
+        if not isinstance(stored_signature, dict):
+            # Old metadata cannot prove it matches the current compiled pages.
+            # Rebuild once and write a signature so future loads are cheap.
+            return int(current_signature.get("page_count") or 0) == 0
+
+        return (
+            int(stored_signature.get("page_count") or 0) == int(current_signature.get("page_count") or 0)
+            and int(stored_signature.get("latest_mtime_ns") or 0) == int(current_signature.get("latest_mtime_ns") or 0)
+        )
+
     def _embed_chunks(self, chunks: list[dict[str, Any]]) -> tuple[np.ndarray, str]:
         if not chunks:
             return np.empty((0, self.dimensions), dtype=np.float32), "none"
-        texts = [str(item["text"]) for item in chunks]
         # Strict mode: Vault ingestion must use embedding endpoint; do not fallback to hash vectors.
-        vectors = self._embedder.embed_batch(texts)
+        vectors: list[np.ndarray] = []
+        batch_size = max(1, int(self._embed_batch_size))
+        last_error = ""
+        for start in range(0, len(chunks), batch_size):
+            texts = [str(item["text"]) for item in chunks[start : start + batch_size]]
+            batch_vectors = self._embedder.embed_batch(texts)
+            if not batch_vectors or len(batch_vectors) != len(texts):
+                last_error = str(getattr(self._embedder, "_last_error", "") or "batch embedding returned no usable vectors")
+                if len(texts) <= 1:
+                    vectors = []
+                    break
+                recovered_vectors: list[np.ndarray] = []
+                for text in texts:
+                    single_vector = self._embedder.embed_batch([text])
+                    if not single_vector or len(single_vector) != 1:
+                        last_error = str(getattr(self._embedder, "_last_error", "") or "single embedding retry returned no usable vector")
+                        recovered_vectors = []
+                        break
+                    recovered_vectors.extend(single_vector)
+                if not recovered_vectors:
+                    vectors = []
+                    break
+                batch_vectors = recovered_vectors
+            vectors.extend(batch_vectors)
         if not vectors or len(vectors) != len(chunks):
             configured = self.embedding_model or "<default-first-configured-model>"
             raise RuntimeError(
                 "Vault vector indexing requires /embeddings and received no usable vectors "
-                f"(configured_embedding_model={configured!r})."
+                f"(configured_embedding_model={configured!r}, backend_error={last_error!r})."
             )
         matrix = np.vstack([_normalize(v.astype(np.float32)) for v in vectors])
         return matrix, "openai_compatible"
@@ -280,6 +350,7 @@ class VaultVectorIndex:
             "dimensions": int(matrix.shape[1]) if matrix.ndim == 2 and matrix.shape[0] > 0 else self.dimensions,
             "chunk_chars": self.chunk_chars,
             "overlap_chars": self.overlap_chars,
+            "compiled_signature": self._compiled_signature(),
             "built_at": built_at,
             "chunk_count": len(chunks),
             "chunks": chunks,
@@ -310,7 +381,9 @@ class VaultVectorIndex:
             payload = json.loads(self.metadata_path.read_text(encoding="utf-8"))
         except Exception:
             return self.build()
-        if int(payload.get("chunk_chars") or 0) != self.chunk_chars or int(payload.get("overlap_chars") or 0) != self.overlap_chars:
+        if not isinstance(payload, dict):
+            return self.build()
+        if not self._metadata_is_current(payload):
             return self.build()
         return payload
 

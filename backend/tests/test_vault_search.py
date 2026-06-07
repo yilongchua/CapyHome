@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
+
+import numpy as np
+import pytest
 
 from src.community.knowledge_vault_search.search import (
     VALID_CATEGORIES,
@@ -13,10 +17,29 @@ from src.community.knowledge_vault_search.search import (
     _excerpt,
     _tokenize,
 )
+from src.community.knowledge_vault_search.vector_index import VaultVectorIndex
 
 # ---------------------------------------------------------------------------
 # Pure-function tests (no disk I/O)
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _disable_hybrid_search_for_lexical_tests(monkeypatch):
+    monkeypatch.setattr(
+        "src.control_plane.services.unified_vault_search.get_app_config",
+        lambda: SimpleNamespace(
+            knowledge_vault=SimpleNamespace(
+                vector_search_enabled=False,
+                hybrid_rrf_k=60,
+                vector_dimensions=256,
+                vector_chunk_chars=1200,
+                vector_chunk_overlap_chars=200,
+                vector_backend="openai_compatible",
+                vector_embedding_model="",
+            )
+        ),
+    )
 
 
 class TestTokenize:
@@ -239,6 +262,68 @@ class TestVaultSearcherTags:
         titles = [r["title"] for r in results]
         assert "Tagged Page" in titles
         assert "Body Only" in titles
+
+
+class _FakeEmbedder:
+    def __init__(self) -> None:
+        self.batch_sizes: list[int] = []
+
+    def embed_batch(self, texts: list[str]) -> list[np.ndarray]:
+        self.batch_sizes.append(len(texts))
+        return [np.array([1.0, float(index + 1), 0.5], dtype=np.float32) for index, _text in enumerate(texts)]
+
+    def resolved_model_name(self) -> str:
+        return "fake-embedding-model"
+
+
+class TestVaultVectorIndexInvalidation:
+    def test_stale_zero_chunk_metadata_rebuilds_when_compiled_pages_exist(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        _write_page(vault, "sources", "langgraph.md", "LangGraph Overview", "LangGraph supports agent workflows.")
+
+        index = VaultVectorIndex(vault)
+        fake = _FakeEmbedder()
+        index._embedder = fake  # noqa: SLF001
+        index.metadata_path.write_text(
+            json.dumps(
+                {
+                    "backend": "openai_compatible",
+                    "effective_backend": "none",
+                    "embedding_model": "",
+                    "effective_embedding_model": "old-chat-model",
+                    "dimensions": 256,
+                    "chunk_chars": index.chunk_chars,
+                    "overlap_chars": index.overlap_chars,
+                    "built_at": "2026-06-05T18:32:42+00:00",
+                    "chunk_count": 0,
+                    "chunks": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        payload = index.load()
+
+        assert payload["chunk_count"] > 0
+        assert payload["effective_backend"] == "openai_compatible"
+        assert payload["effective_embedding_model"] == "fake-embedding-model"
+        assert payload["compiled_signature"]["page_count"] == 1
+        assert index.matrix_path.exists()
+
+    def test_embedding_requests_are_batched(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        for i in range(5):
+            _write_page(vault, "sources", f"doc-{i}.md", f"Doc {i}", f"batch embedding content {i}")
+
+        index = VaultVectorIndex(vault)
+        fake = _FakeEmbedder()
+        index._embedder = fake  # noqa: SLF001
+        index._embed_batch_size = 2  # noqa: SLF001
+
+        payload = index.build()
+
+        assert payload["chunk_count"] == 5
+        assert fake.batch_sizes == [2, 2, 1]
 
 
 # ---------------------------------------------------------------------------

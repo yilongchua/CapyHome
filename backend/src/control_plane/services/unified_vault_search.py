@@ -190,7 +190,10 @@ class UnifiedVaultSearchService:
         if not self._vector_index:
             return results
 
-        vector_hits = self._vector_index.search(query, categories=cats, limit=max(20, len(results) or 10))
+        try:
+            vector_hits = self._vector_index.search(query, categories=cats, limit=max(20, len(results) or 10))
+        except Exception:
+            return results
         vector_rank_by_path = {str(item.get("path") or ""): rank for rank, item in enumerate(vector_hits, start=1)}
         vector_by_path = {str(item.get("path") or ""): item for item in vector_hits}
 

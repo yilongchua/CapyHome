@@ -103,6 +103,7 @@ class WorkflowStatusResponse(BaseModel):
 class _ActiveWorkflowRun:
     stop_requested: bool = False
     child_runs: dict[str, str] = field(default_factory=dict)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 _ACTIVE_RUNS: dict[str, _ActiveWorkflowRun] = {}
@@ -596,8 +597,9 @@ def _build_child_prompt(workflow: dict[str, Any], row: dict[str, Any]) -> str:
 
 
 async def _execute_child_row(client: Any, thread_id: str, workflow: dict[str, Any], row: dict[str, Any], active: _ActiveWorkflowRun) -> tuple[int, str, dict[str, Any] | None, str | None, str | None, str | None]:
-    if active.stop_requested:
-        return row["row_index"], "cancelled", None, None, None, "stopped"
+    async with active.lock:
+        if active.stop_requested:
+            return row["row_index"], "cancelled", None, None, None, "stopped"
     child_thread = await client.threads.create()
     child_thread_id = str(child_thread["thread_id"])
     prompt = _build_child_prompt(workflow, row)
@@ -640,21 +642,33 @@ async def _execute_child_row(client: Any, thread_id: str, workflow: dict[str, An
         metadata=metadata,
     )
     child_run_id = str(created.get("run_id") if isinstance(created, dict) else created)
-    active.child_runs[child_thread_id] = child_run_id
+    async with active.lock:
+        should_cancel = active.stop_requested
+        if not should_cancel:
+            active.child_runs[child_thread_id] = child_run_id
+    if should_cancel:
+        try:
+            await client.runs.cancel(child_thread_id, child_run_id, wait=False, action="interrupt")
+        except Exception:
+            pass
+        return row["row_index"], "cancelled", None, child_thread_id, child_run_id, "stopped"
     try:
         await client.runs.join(child_thread_id, child_run_id)
-        if active.stop_requested:
-            return row["row_index"], "cancelled", None, child_thread_id, child_run_id, "stopped"
+        async with active.lock:
+            if active.stop_requested:
+                return row["row_index"], "cancelled", None, child_thread_id, child_run_id, "stopped"
         state = await client.threads.get_state(child_thread_id)
         raw_text = extract_final_ai_text(state)
         result_status, result, error = parse_child_result(raw_text, workflow)
         return row["row_index"], result_status, result, child_thread_id, child_run_id, error
     except Exception as exc:
-        if active.stop_requested:
-            return row["row_index"], "cancelled", None, child_thread_id, child_run_id, "stopped"
+        async with active.lock:
+            if active.stop_requested:
+                return row["row_index"], "cancelled", None, child_thread_id, child_run_id, "stopped"
         return row["row_index"], "failed", None, child_thread_id, child_run_id, str(exc)
     finally:
-        active.child_runs.pop(child_thread_id, None)
+        async with active.lock:
+            active.child_runs.pop(child_thread_id, None)
 
 
 async def _delete_flushed_children(client: Any, thread_id: str, *, limit: int, flush_all: bool) -> None:
@@ -700,12 +714,14 @@ async def _delete_flushed_children(client: Any, thread_id: str, *, limit: int, f
 
 
 async def _cancel_active(thread_id: str, active: _ActiveWorkflowRun) -> None:
-    active.stop_requested = True
+    async with active.lock:
+        active.stop_requested = True
+        child_runs = list(active.child_runs.items())
     try:
         from langgraph_sdk import get_client
 
         client = get_client(url=_langgraph_url())
-        for child_thread_id, child_run_id in list(active.child_runs.items()):
+        for child_thread_id, child_run_id in child_runs:
             try:
                 await client.runs.cancel(child_thread_id, child_run_id, wait=False, action="interrupt")
             except Exception:

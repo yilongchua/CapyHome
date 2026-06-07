@@ -145,7 +145,7 @@ services:
       dockerfile: backend/Dockerfile
       # cache_from disabled - requires manual setup: mkdir -p /tmp/docker-cache-langgraph
     container_name: capyhome-langgraph
-    command: sh -c "cd backend && uv run langgraph dev --no-browser --allow-blocking --host 0.0.0.0 --port 2024 > /app/logs/langgraph.log 2>&1"
+    command: sh -c "cd backend && BG_JOB_ISOLATED_LOOPS=true uv run langgraph dev --no-browser --allow-blocking --host 0.0.0.0 --port 2024 --n-jobs-per-worker $${LANGGRAPH_WORKERS:-3} > /app/logs/langgraph.log 2>&1"
     volumes:
       - ../backend/:/app/backend/
       # Preserve the .venv built during Docker image build — mounting the full backend/
@@ -162,6 +162,7 @@ services:
     working_dir: /app
     environment:
       - CI=true
+      - LANGGRAPH_WORKERS=${LANGGRAPH_WORKERS:-3}
       - CAPYBARA_HOME_HOST_BASE_DIR=${CAPYBARA_HOME_ROOT}/backend/.capyhome
       - CAPYBARA_HOME_HOST_SKILLS_PATH=${CAPYBARA_HOME_ROOT}/skills
       - CAPYBARA_HOME_SANDBOX_HOST=host.docker.internal

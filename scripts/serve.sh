@@ -38,15 +38,7 @@ fi
 # ── Stop existing services ────────────────────────────────────────────────────
 
 echo "Stopping existing services if any..."
-pkill -f "langgraph dev" 2>/dev/null || true
-pkill -f "uvicorn src.gateway.app:app" 2>/dev/null || true
-pkill -f "next dev" 2>/dev/null || true
-pkill -f "next-server" 2>/dev/null || true
-nginx -c "$REPO_ROOT/docker/nginx/nginx.local.conf" -p "$REPO_ROOT" -s quit 2>/dev/null || true
-sleep 1
-pkill -9 nginx 2>/dev/null || true
-killall -9 nginx 2>/dev/null || true
-./scripts/cleanup-containers.sh capyhome-sandbox 2>/dev/null || true
+"$REPO_ROOT/scripts/stop-services.sh" 2>/dev/null || true
 sleep 1
 
 # ── Banner ────────────────────────────────────────────────────────────────────
@@ -93,22 +85,7 @@ cleanup() {
     trap - INT TERM
     echo ""
     echo "Shutting down services..."
-    pkill -f "langgraph dev" 2>/dev/null || true
-    pkill -f "uvicorn src.gateway.app:app" 2>/dev/null || true
-    pkill -f "next dev" 2>/dev/null || true
-    pkill -f "next start" 2>/dev/null || true
-    # Kill nginx using the captured PID first (most reliable),
-    # then fall back to pkill/killall for any stray nginx workers.
-    if [ -n "${NGINX_PID:-}" ] && kill -0 "$NGINX_PID" 2>/dev/null; then
-        kill -TERM "$NGINX_PID" 2>/dev/null || true
-        sleep 1
-        kill -9 "$NGINX_PID" 2>/dev/null || true
-    fi
-    pkill -9 nginx 2>/dev/null || true
-    killall -9 nginx 2>/dev/null || true
-    echo "Cleaning up sandbox containers..."
-    ./scripts/cleanup-containers.sh capyhome-sandbox 2>/dev/null || true
-    echo "✓ All services stopped"
+    "$REPO_ROOT/scripts/stop-services.sh" || true
     exit 0
 }
 trap cleanup INT TERM
@@ -124,13 +101,13 @@ else
     LANGGRAPH_EXTRA_FLAGS="--no-reload"
     GATEWAY_EXTRA_FLAGS=""
 fi
+LANGGRAPH_WORKERS="${LANGGRAPH_WORKERS:-3}"
 
-echo "Starting LangGraph server..."
+echo "Starting LangGraph server with ${LANGGRAPH_WORKERS} worker job(s)..."
 # BG_JOB_ISOLATED_LOOPS=true gives each run its own event loop so a slow LLM
-# call or hung tool in one run cannot block the queue worker. N_JOBS_PER_WORKER
-# raises the per-worker concurrency above the default 1 to match
-# MAX_CONCURRENT_SUBAGENTS.
-(cd backend && BG_JOB_ISOLATED_LOOPS=true N_JOBS_PER_WORKER=3 NO_COLOR=1 uv run langgraph dev --no-browser --allow-blocking $LANGGRAPH_EXTRA_FLAGS > ../logs/langgraph.log 2>&1) &
+# call or hung tool in one run cannot block the queue worker. LangGraph's CLI
+# owns N_JOBS_PER_WORKER, so pass the flag explicitly instead of relying on env.
+(cd backend && BG_JOB_ISOLATED_LOOPS=true NO_COLOR=1 uv run langgraph dev --no-browser --allow-blocking --n-jobs-per-worker "$LANGGRAPH_WORKERS" $LANGGRAPH_EXTRA_FLAGS > ../logs/langgraph.log 2>&1) &
 ./scripts/wait-for-port.sh 2024 60 "LangGraph" || {
     echo "  See logs/langgraph.log for details"
     tail -20 logs/langgraph.log

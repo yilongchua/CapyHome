@@ -1,8 +1,10 @@
+LANGGRAPH_WORKERS ?= 3
+
 install:
 	uv sync
 
 dev:
-	BG_JOB_ISOLATED_LOOPS=true N_JOBS_PER_WORKER=3 uv run langgraph dev --no-browser --allow-blocking --no-reload
+	BG_JOB_ISOLATED_LOOPS=true uv run langgraph dev --no-browser --allow-blocking --no-reload --n-jobs-per-worker $(LANGGRAPH_WORKERS)
 
 gateway:
 	uv run uvicorn src.gateway.app:app --host 0.0.0.0 --port 8001
