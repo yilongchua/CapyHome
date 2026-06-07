@@ -170,6 +170,25 @@ class TestTitleMiddlewareCoreLogic:
         monkeypatch.setattr(middleware, "_should_generate_title", lambda state: False)
         assert asyncio.run(middleware.aafter_model(state, runtime=MagicMock())) is None
 
+    def test_runtime_compact_title_skips_generation(self, monkeypatch):
+        middleware = TitleMiddleware()
+        monkeypatch.setattr(
+            middleware,
+            "_should_generate_title",
+            lambda _state: (_ for _ in ()).throw(AssertionError("title generation should be bypassed")),
+        )
+        runtime = MagicMock()
+        runtime.context = {"skip_title_generation": True, "compact_title": "wf r34"}
+        state = {
+            "messages": [
+                HumanMessage(content="Run one workflow row"),
+                AIMessage(content='{"full_address": ""}'),
+            ]
+        }
+
+        assert middleware.after_model(state, runtime=runtime) == {"title": "wf r34"}
+        assert asyncio.run(middleware.aafter_model(state, runtime=runtime)) == {"title": "wf r34"}
+
     def test_after_agent_returns_generated_title_when_background_task_completed(self):
         """after_agent must return the LLM title once the background task has stored it.
 
