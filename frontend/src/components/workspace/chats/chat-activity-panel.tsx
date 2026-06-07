@@ -44,6 +44,7 @@ type WorkflowExecution = {
   current_row_index?: number;
   completed_rows?: number;
   consecutive_failures?: number;
+  consecutive_failures_limit?: number;
   failure_rows?: unknown[];
   last_run_seconds?: number;
   average_run_seconds?: number;
@@ -97,6 +98,7 @@ function WorkflowStatusCard({
   const percentage = totalRows > 0 ? Math.round((processedRows / totalRows) * 100) : 0;
   const currentRowIndex = Math.max(0, Number(execution.current_row_index ?? 0));
   const maxParallel = Math.max(1, Number(execution.max_parallel ?? 1));
+  const consecutiveFailuresLimit = Math.max(1, Number(execution.consecutive_failures_limit ?? 5));
   const remainingRows = Math.max(0, totalRows - processedRows);
   const estimatedRemainingSeconds =
     typeof execution.estimated_remaining_seconds === "number"
@@ -133,7 +135,7 @@ function WorkflowStatusCard({
         <WorkflowMetric label="Next row" value={nextRow} />
         <WorkflowMetric label="Max parallel" value={String(maxParallel)} />
         <WorkflowMetric label="Failures" value={String(failureCount)} />
-        <WorkflowMetric label="Consecutive" value={String(Number(execution.consecutive_failures ?? 0))} />
+        <WorkflowMetric label="Consecutive" value={`${Number(execution.consecutive_failures ?? 0)}/${consecutiveFailuresLimit}`} />
       </div>
     </section>
   );

@@ -29,7 +29,7 @@ router = APIRouter(prefix="/api", tags=["workflow"])
 WORKFLOW_JSON_VIRTUAL_PATH = "/mnt/user-data/workspace/runtime/workflow.json"
 WORKFLOW_SQLITE_VIRTUAL_PATH = "/mnt/user-data/workspace/runtime/workflow.sqlite"
 _ASSISTANT_ID = "work_agent"
-_FAILURE_THRESHOLD = 5
+_DEFAULT_CONSECUTIVE_FAILURES_LIMIT = 5
 _TERMINAL_STATUSES = {"done", "stopped_failed_threshold"}
 
 
@@ -52,6 +52,31 @@ def _parse_utc_iso(value: str | None) -> datetime | None:
 
 def _round_seconds(value: float) -> float:
     return round(max(0.0, value), 2)
+
+
+def _as_bool(value: Any, *, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    if value is None:
+        return default
+    return bool(value)
+
+
+def should_flush_completed_rows(previous_completed_rows: int, current_completed_rows: int, flush_every_completed_rows: int) -> bool:
+    flush_every = max(1, int(flush_every_completed_rows or 1))
+    previous = max(0, int(previous_completed_rows or 0))
+    current = max(0, int(current_completed_rows or 0))
+    return current > previous and current // flush_every > previous // flush_every
+
+
+def _processed_row_count(conn: sqlite3.Connection) -> int:
+    return int(conn.execute("SELECT COUNT(*) FROM workflow_rows WHERE status IN ('success', 'failed')").fetchone()[0])
 
 
 class WorkflowPatchRequest(BaseModel):
@@ -159,9 +184,12 @@ def normalize_workflow(thread_id: str, workflow: dict[str, Any]) -> dict[str, An
     execution.setdefault("status", "ready")
     execution["max_parallel"] = max(1, int(execution.get("max_parallel") or 1))
     execution["flush_every_completed_rows"] = max(1, int(execution.get("flush_every_completed_rows") or 20))
+    execution["flush_all"] = _as_bool(execution.get("flush_all"), default=False)
+    execution["add_to_memory"] = _as_bool(execution.get("add_to_memory"), default=False)
     execution["current_row_index"] = max(0, int(execution.get("current_row_index") or 0))
     execution["completed_rows"] = max(0, int(execution.get("completed_rows") or 0))
     execution["consecutive_failures"] = max(0, int(execution.get("consecutive_failures") or 0))
+    execution["consecutive_failures_limit"] = max(1, int(execution.get("consecutive_failures_limit") or _DEFAULT_CONSECUTIVE_FAILURES_LIMIT))
     failure_rows = execution.get("failure_rows")
     execution["failure_rows"] = [str(row) for row in failure_rows] if isinstance(failure_rows, list) else []
 
@@ -434,7 +462,8 @@ def record_row_result(
         execution["failure_rows"] = failure_rows
     execution["completed_rows"] = int(completed)
     execution["current_row_index"] = int(pending["idx"]) if pending and pending["idx"] is not None else int(workflow["source"].get("row_count") or completed)
-    if int(execution.get("consecutive_failures") or 0) >= _FAILURE_THRESHOLD:
+    consecutive_failures_limit = max(1, int(execution.get("consecutive_failures_limit") or _DEFAULT_CONSECUTIVE_FAILURES_LIMIT))
+    if int(execution.get("consecutive_failures") or 0) >= consecutive_failures_limit:
         execution["status"] = "stopped_failed_threshold"
     elif execution["completed_rows"] >= int(workflow["source"].get("row_count") or 0):
         execution["status"] = "done"
@@ -556,6 +585,8 @@ async def _execute_child_row(client: Any, thread_id: str, workflow: dict[str, An
     child_thread = await client.threads.create()
     child_thread_id = str(child_thread["thread_id"])
     prompt = _build_child_prompt(workflow, row)
+    child_title = f"wf r{row['row_number']}"
+    add_to_memory = _as_bool(workflow["execution"].get("add_to_memory"), default=False)
     context = {
         "thread_id": child_thread_id,
         "current_mode": "work",
@@ -566,6 +597,12 @@ async def _execute_child_row(client: Any, thread_id: str, workflow: dict[str, An
         "subagent_enabled": True,
         "thinking_enabled": True,
         "auto_mode": False,
+        "add_to_memory": add_to_memory,
+        "skip_title_generation": True,
+        "compact_title": child_title,
+        "workflow_child": True,
+        "workflow_parent_thread_id": thread_id,
+        "workflow_row_number": row["row_number"],
         "current_turn_text": prompt,
         "original_user_request": prompt,
     }
@@ -575,7 +612,7 @@ async def _execute_child_row(client: Any, thread_id: str, workflow: dict[str, An
         input={"messages": [{"type": "human", "content": prompt}]},
         config=get_app_config().get_default_run_config(),
         context=context,
-        metadata={"trigger": "workflow_row", "parent_thread_id": thread_id, "row_number": row["row_number"]},
+        metadata={"trigger": "workflow_row", "parent_thread_id": thread_id, "row_number": row["row_number"], "title": child_title},
     )
     child_run_id = str(created.get("run_id") if isinstance(created, dict) else created)
     active.child_runs[child_thread_id] = child_run_id
@@ -595,27 +632,43 @@ async def _execute_child_row(client: Any, thread_id: str, workflow: dict[str, An
         active.child_runs.pop(child_thread_id, None)
 
 
-async def _delete_successful_children(client: Any, thread_id: str) -> None:
+async def _delete_flushed_children(client: Any, thread_id: str, *, limit: int, flush_all: bool) -> None:
     db_path = workflow_sqlite_path(thread_id)
+    cleanup_limit = max(1, int(limit or 1))
+    statuses = ("success", "failed") if flush_all else ("success",)
+    placeholders = ", ".join("?" for _ in statuses)
     with _connect(db_path) as conn:
         ensure_schema(conn)
         rows = conn.execute(
-            """
-            SELECT row_index, child_thread_id
+            f"""
+            SELECT row_index, status, child_thread_id
             FROM workflow_rows
-            WHERE status = 'success'
+            WHERE status IN ({placeholders})
               AND child_thread_id IS NOT NULL
               AND (error IS NULL OR error != 'child_thread_deleted')
             ORDER BY row_index
-            LIMIT 20
-            """
+            LIMIT ?
+            """,
+            (*statuses, cleanup_limit),
         ).fetchall()
     for row in rows:
         child_thread_id = str(row["child_thread_id"])
         try:
             await client.threads.delete(child_thread_id)
             with _connect(db_path) as conn:
-                conn.execute("UPDATE workflow_rows SET error = 'child_thread_deleted' WHERE row_index = ?", (row["row_index"],))
+                conn.execute(
+                    """
+                    UPDATE workflow_rows
+                    SET child_thread_id = NULL,
+                        child_run_id = NULL,
+                        error = CASE
+                            WHEN status = 'success' AND error IS NULL THEN 'child_thread_deleted'
+                            ELSE error
+                        END
+                    WHERE row_index = ?
+                    """,
+                    (row["row_index"],),
+                )
                 conn.commit()
         except Exception:
             continue
@@ -728,6 +781,9 @@ async def execute_next(thread_id: str) -> WorkflowExecuteResponse:
 
         claimed_rows: list[str] = []
         failed_rows: list[str] = []
+        with _connect(workflow_sqlite_path(thread_id)) as conn:
+            ensure_schema(conn)
+            previous_processed_rows = _processed_row_count(conn)
         for row_index, status, result, child_thread_id, child_run_id, error in results:
             claimed_rows.append(str(row_index + 1))
             db_status = "failed" if status == "failed" else ("pending" if status == "cancelled" else "success")
@@ -744,14 +800,19 @@ async def execute_next(thread_id: str) -> WorkflowExecuteResponse:
             if db_status == "failed":
                 failed_rows.append(str(row_index + 1))
 
+        with _connect(workflow_sqlite_path(thread_id)) as conn:
+            ensure_schema(conn)
+            current_processed_rows = _processed_row_count(conn)
+        flush_every_completed_rows = int(workflow["execution"].get("flush_every_completed_rows") or 20)
+        flush_all = bool(workflow["execution"].get("flush_all") is True)
         should_export = (
             active.stop_requested
             or workflow["execution"].get("status") in _TERMINAL_STATUSES
-            or int(workflow["execution"].get("completed_rows") or 0) % int(workflow["execution"].get("flush_every_completed_rows") or 20) == 0
+            or should_flush_completed_rows(previous_processed_rows, current_processed_rows, flush_every_completed_rows)
         )
         output = export_output_csv(thread_id, workflow) if should_export else workflow["runtime"]["output_csv"]
         if should_export:
-            await _delete_successful_children(client, thread_id)
+            await _delete_flushed_children(client, thread_id, limit=flush_every_completed_rows, flush_all=flush_all)
         if active.stop_requested:
             reset_running_rows(thread_id)
             workflow["execution"]["status"] = "stopped"

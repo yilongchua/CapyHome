@@ -57,9 +57,12 @@ POST   /api/threads/{thread_id}/workflow/export
     "status": "ready",
     "max_parallel": 1,
     "flush_every_completed_rows": 20,
+    "flush_all": false,
+    "add_to_memory": false,
     "current_row_index": 0,
     "completed_rows": 0,
     "consecutive_failures": 0,
+    "consecutive_failures_limit": 5,
     "failure_rows": []
   }
 }

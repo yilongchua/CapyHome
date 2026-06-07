@@ -36,11 +36,17 @@
 8. Backend parses final assistant output as JSON.
 9. Backend writes row results to SQLite.
 10. Backend updates `workflow.json.execution`.
-11. Backend exports output CSV when flush conditions are met.
+11. Backend exports output CSV when flush conditions are met. The cadence comes from `workflow.json.execution.flush_every_completed_rows`.
 12. Blocking request returns to the frontend.
 13. Frontend refreshes workflow status and shows the overlay again if rows remain.
 
 With `max_parallel: 1`, each click processes the next row. With `max_parallel > 1`, each click processes one batch.
+
+`flush_every_completed_rows` is the source of truth for periodic materialization. If the user changes it in `workflow.json`, the next `execute-next` call uses that value for both output CSV export cadence and child cleanup batch size.
+
+By default, flush cleanup deletes only successful child threads and keeps failed child thread IDs available for debugging. If `workflow.json.execution.flush_all` is `true`, flush cleanup also deletes failed child threads and clears their child thread/run IDs from SQLite while preserving the failed row status, result, error, and `failure_rows` record.
+
+Workflow child threads default to `execution.add_to_memory: false`. That flag tells normal Work Mode memory middleware and pre-summarization memory flush hooks to skip long-term memory updates for child row runs. Users can set it to `true` in `workflow.json` when row-level outputs should be eligible for memory. Child row threads also use compact titles like `wf r34` and bypass title LLM generation.
 
 ## Auto-Mode
 
@@ -88,6 +94,6 @@ Failure effects:
 - SQLite row status becomes `failed`.
 - Row number is appended to `execution.failure_rows`.
 - `execution.consecutive_failures` increments.
-- At 5 consecutive failures, `execution.status` becomes `stopped_failed_threshold`.
+- At `execution.consecutive_failures_limit` consecutive failures, `execution.status` becomes `stopped_failed_threshold`. The default limit is 5 and can be edited in `workflow.json`.
 
 The configured no-result value, normally `""`, is a successful no-result and resets consecutive failures.

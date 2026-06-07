@@ -47,9 +47,12 @@ def _workflow_payload() -> dict:
             "status": "ready",
             "max_parallel": 1,
             "flush_every_completed_rows": 20,
+            "flush_all": False,
+            "add_to_memory": False,
             "current_row_index": 0,
             "completed_rows": 0,
             "consecutive_failures": 0,
+            "consecutive_failures_limit": 5,
             "failure_rows": [],
         },
     }
@@ -79,6 +82,17 @@ def test_initialize_imports_csv_to_sqlite(monkeypatch, tmp_path):
     claimed = workflow_router.claim_rows(thread_id, initialized)
     assert [row["row_number"] for row in claimed] == ["1"]
     assert claimed[0]["source"]["name"] == "Example A"
+
+
+def test_normalize_workflow_defaults_child_memory_off(monkeypatch, tmp_path):
+    thread_id = "thread-1"
+    _patch_paths(monkeypatch, tmp_path)
+    payload = _workflow_payload()
+    payload["execution"].pop("add_to_memory")
+
+    normalized = workflow_router.normalize_workflow(thread_id, payload)
+
+    assert normalized["execution"]["add_to_memory"] is False
 
 
 def test_result_accounting_and_export(monkeypatch, tmp_path):
@@ -118,6 +132,181 @@ def test_result_accounting_and_export(monkeypatch, tmp_path):
     rows = list(csv.DictReader(output_path.open("r", encoding="utf-8", newline="")))
     assert rows[0]["full_address"] == "1 Full Street, Singapore"
     assert rows[1]["full_address"] == "failed run"
+
+
+def test_custom_consecutive_failure_limit_stops_workflow(monkeypatch, tmp_path):
+    thread_id = "thread-1"
+    paths = _patch_paths(monkeypatch, tmp_path)
+    _write_source(paths, thread_id)
+    payload = _workflow_payload()
+    payload["execution"]["consecutive_failures_limit"] = 1
+    workflow_router.write_workflow(thread_id, payload)
+    data = workflow_router.initialize_runtime(thread_id, workflow_router.read_workflow(thread_id))
+
+    data = workflow_router.record_row_result(
+        thread_id,
+        data,
+        0,
+        status="failed",
+        result={"full_address": "failed run"},
+        child_thread_id="child-1",
+        child_run_id="run-1",
+        error="failed_run",
+    )
+
+    assert data["execution"]["consecutive_failures_limit"] == 1
+    assert data["execution"]["consecutive_failures"] == 1
+    assert data["execution"]["status"] == "stopped_failed_threshold"
+
+
+def test_flush_every_completed_rows_crossing_uses_workflow_value():
+    assert workflow_router.should_flush_completed_rows(19, 20, 20)
+    assert workflow_router.should_flush_completed_rows(19, 21, 20)
+    assert not workflow_router.should_flush_completed_rows(20, 21, 20)
+    assert not workflow_router.should_flush_completed_rows(0, 0, 20)
+    assert workflow_router.should_flush_completed_rows(2, 3, 3)
+
+
+def test_processed_row_count_includes_failed_rows(monkeypatch, tmp_path):
+    thread_id = "thread-1"
+    paths = _patch_paths(monkeypatch, tmp_path)
+    _write_source(paths, thread_id)
+    workflow_router.write_workflow(thread_id, _workflow_payload())
+    data = workflow_router.initialize_runtime(thread_id, workflow_router.read_workflow(thread_id))
+    data = workflow_router.record_row_result(
+        thread_id,
+        data,
+        0,
+        status="success",
+        result={"full_address": "1 Full Street, Singapore"},
+        child_thread_id="child-success",
+        child_run_id="run-success",
+        error=None,
+    )
+    workflow_router.record_row_result(
+        thread_id,
+        data,
+        1,
+        status="failed",
+        result={"full_address": "failed run"},
+        child_thread_id="child-failed",
+        child_run_id="run-failed",
+        error="failed_run",
+    )
+
+    with workflow_router._connect(workflow_router.workflow_sqlite_path(thread_id)) as conn:
+        assert workflow_router._processed_row_count(conn) == 2
+
+
+@pytest.mark.anyio
+async def test_flush_cleanup_keeps_failed_children_by_default(monkeypatch, tmp_path):
+    thread_id = "thread-1"
+    paths = _patch_paths(monkeypatch, tmp_path)
+    _write_source(paths, thread_id)
+    workflow_router.write_workflow(thread_id, _workflow_payload())
+    data = workflow_router.initialize_runtime(thread_id, workflow_router.read_workflow(thread_id))
+    data = workflow_router.record_row_result(
+        thread_id,
+        data,
+        0,
+        status="success",
+        result={"full_address": "1 Full Street, Singapore"},
+        child_thread_id="child-success",
+        child_run_id="run-success",
+        error=None,
+    )
+    workflow_router.record_row_result(
+        thread_id,
+        data,
+        1,
+        status="failed",
+        result={"full_address": "failed run"},
+        child_thread_id="child-failed",
+        child_run_id="run-failed",
+        error="failed_run",
+    )
+
+    class _Threads:
+        def __init__(self):
+            self.deleted: list[str] = []
+
+        async def delete(self, thread_id):
+            self.deleted.append(thread_id)
+
+    class _Client:
+        def __init__(self):
+            self.threads = _Threads()
+
+    client = _Client()
+    await workflow_router._delete_flushed_children(client, thread_id, limit=20, flush_all=False)
+
+    assert client.threads.deleted == ["child-success"]
+    with workflow_router._connect(workflow_router.workflow_sqlite_path(thread_id)) as conn:
+        rows = conn.execute("SELECT status, child_thread_id, child_run_id, error FROM workflow_rows ORDER BY row_index").fetchall()
+    assert rows[0]["status"] == "success"
+    assert rows[0]["child_thread_id"] is None
+    assert rows[0]["child_run_id"] is None
+    assert rows[0]["error"] == "child_thread_deleted"
+    assert rows[1]["status"] == "failed"
+    assert rows[1]["child_thread_id"] == "child-failed"
+    assert rows[1]["child_run_id"] == "run-failed"
+    assert rows[1]["error"] == "failed_run"
+
+
+@pytest.mark.anyio
+async def test_flush_all_deletes_failed_children(monkeypatch, tmp_path):
+    thread_id = "thread-1"
+    paths = _patch_paths(monkeypatch, tmp_path)
+    _write_source(paths, thread_id)
+    payload = _workflow_payload()
+    payload["execution"]["flush_all"] = True
+    workflow_router.write_workflow(thread_id, payload)
+    data = workflow_router.initialize_runtime(thread_id, workflow_router.read_workflow(thread_id))
+    data = workflow_router.record_row_result(
+        thread_id,
+        data,
+        0,
+        status="success",
+        result={"full_address": "1 Full Street, Singapore"},
+        child_thread_id="child-success",
+        child_run_id="run-success",
+        error=None,
+    )
+    workflow_router.record_row_result(
+        thread_id,
+        data,
+        1,
+        status="failed",
+        result={"full_address": "failed run"},
+        child_thread_id="child-failed",
+        child_run_id="run-failed",
+        error="failed_run",
+    )
+
+    class _Threads:
+        def __init__(self):
+            self.deleted: list[str] = []
+
+        async def delete(self, thread_id):
+            self.deleted.append(thread_id)
+
+    class _Client:
+        def __init__(self):
+            self.threads = _Threads()
+
+    client = _Client()
+    await workflow_router._delete_flushed_children(client, thread_id, limit=20, flush_all=True)
+
+    assert client.threads.deleted == ["child-success", "child-failed"]
+    with workflow_router._connect(workflow_router.workflow_sqlite_path(thread_id)) as conn:
+        rows = conn.execute("SELECT status, child_thread_id, child_run_id, error FROM workflow_rows ORDER BY row_index").fetchall()
+    assert rows[0]["child_thread_id"] is None
+    assert rows[0]["child_run_id"] is None
+    assert rows[0]["error"] == "child_thread_deleted"
+    assert rows[1]["status"] == "failed"
+    assert rows[1]["child_thread_id"] is None
+    assert rows[1]["child_run_id"] is None
+    assert rows[1]["error"] == "failed_run"
 
 
 def test_child_result_parsing():
@@ -216,3 +405,7 @@ async def test_child_row_run_uses_shared_config_recursion_limit(monkeypatch):
 
     assert result[:3] == (0, "success", {"full_address": "1 Full Street"})
     assert client.runs.create_kwargs["config"] == {"recursion_limit": 1000}
+    assert client.runs.create_kwargs["context"]["add_to_memory"] is False
+    assert client.runs.create_kwargs["context"]["skip_title_generation"] is True
+    assert client.runs.create_kwargs["context"]["compact_title"] == "wf r1"
+    assert client.runs.create_kwargs["metadata"]["title"] == "wf r1"

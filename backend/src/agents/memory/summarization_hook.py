@@ -7,7 +7,7 @@ import logging
 from langchain_core.messages import AIMessage
 
 from src.agents.memory.queue import get_memory_queue
-from src.agents.middlewares.memory_middleware import filter_messages_for_memory
+from src.agents.middlewares.memory_middleware import filter_messages_for_memory, runtime_add_to_memory_enabled
 from src.agents.middlewares.runtime_events import append_runtime_event
 from src.config.memory_config import get_memory_config
 
@@ -28,6 +28,8 @@ def memory_flush_hook(event) -> None:
     summarization path.
     """
     if not get_memory_config().enabled or not event.thread_id:
+        return
+    if not runtime_add_to_memory_enabled(getattr(event, "runtime", None)):
         return
 
     try:

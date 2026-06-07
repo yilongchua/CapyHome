@@ -17,6 +17,16 @@ logger = logging.getLogger(__name__)
 _UPLOAD_BLOCK_RE = re.compile(r"<uploaded_files>[\s\S]*?</uploaded_files>\n*", re.IGNORECASE)
 
 
+def runtime_add_to_memory_enabled(runtime: Runtime | None) -> bool:
+    """Return whether the current run should be queued for long-term memory."""
+    context = getattr(runtime, "context", None) or {}
+    if context.get("add_to_memory") is False:
+        return False
+    if isinstance(context.get("add_to_memory"), str) and context["add_to_memory"].strip().lower() in {"0", "false", "no", "off"}:
+        return False
+    return True
+
+
 class MemoryMiddlewareState(AgentState):
     """Compatible with the `ThreadState` schema."""
 
@@ -161,6 +171,9 @@ class MemoryMiddleware(AgentMiddleware[MemoryMiddlewareState]):
         """
         config = get_memory_config()
         if not config.enabled:
+            return None
+        if not runtime_add_to_memory_enabled(runtime):
+            logger.debug("MemoryMiddleware: add_to_memory is false, skipping memory update")
             return None
 
         # Get thread ID from runtime context
