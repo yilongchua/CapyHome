@@ -46,7 +46,11 @@ With `max_parallel: 1`, each click processes the next row. With `max_parallel > 
 
 By default, flush cleanup deletes only successful child threads and keeps failed child thread IDs available for debugging. If `workflow.json.execution.flush_all` is `true`, flush cleanup also deletes failed child threads and clears their child thread/run IDs from SQLite while preserving the failed row status, result, error, and `failure_rows` record.
 
-Workflow child threads default to `execution.add_to_memory: false`. That flag tells normal Work Mode memory middleware and pre-summarization memory flush hooks to skip long-term memory updates for child row runs. Users can set it to `true` in `workflow.json` when row-level outputs should be eligible for memory. Child row threads also use compact titles like `wf r34` and bypass title LLM generation.
+Workflow child threads default to `execution.add_to_memory: false`. That flag tells normal Work Mode memory middleware and pre-summarization memory flush hooks to skip long-term memory updates for child row runs. Users can set it to `true` in `workflow.json` when row-level outputs should be eligible for memory.
+
+Child row threads also default to `execution.compact_child_runs: true`. When enabled, the backend gives child threads compact titles like `wf r34` and bypasses title LLM generation. Set it to `false` if you want child threads to behave like normal Work Mode threads for title generation/debugging.
+
+Workflow child rows can choose their processing model with `execution.model_display_name`. The value is matched against model `display_name` in `config.yaml`, case-insensitively, then falls back to internal model `name`. Leave it as `""` to use the app default model. For example, set `"model_display_name": "local-mlx"` to process rows with the model displayed as `local-mlx`.
 
 ## Auto-Mode
 

@@ -237,6 +237,8 @@ function buildWorkflowPlanningPrompt(request: string): string {
           flush_every_completed_rows: 20,
           flush_all: false,
           add_to_memory: false,
+          compact_child_runs: true,
+          model_display_name: "",
           current_row_index: 0,
           completed_rows: 0,
           consecutive_failures: 0,

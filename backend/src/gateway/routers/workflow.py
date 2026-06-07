@@ -126,6 +126,20 @@ def output_virtual_path_for_source(source_virtual_path: str) -> str:
     return str(path.with_name(f"{path.stem}_output{path.suffix}"))
 
 
+def resolve_workflow_model_name(model_display_name: str | None) -> str | None:
+    requested = str(model_display_name or "").strip()
+    if not requested:
+        return None
+    app_config = get_app_config()
+    lowered = requested.lower()
+    for model in app_config.models:
+        display_name = str(model.display_name or "").strip()
+        if display_name and display_name.lower() == lowered:
+            return model.name
+    model_config = app_config.get_model_config(requested)
+    return model_config.name if model_config is not None else None
+
+
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
@@ -186,6 +200,8 @@ def normalize_workflow(thread_id: str, workflow: dict[str, Any]) -> dict[str, An
     execution["flush_every_completed_rows"] = max(1, int(execution.get("flush_every_completed_rows") or 20))
     execution["flush_all"] = _as_bool(execution.get("flush_all"), default=False)
     execution["add_to_memory"] = _as_bool(execution.get("add_to_memory"), default=False)
+    execution["compact_child_runs"] = _as_bool(execution.get("compact_child_runs"), default=True)
+    execution["model_display_name"] = str(execution.get("model_display_name") or "").strip()
     execution["current_row_index"] = max(0, int(execution.get("current_row_index") or 0))
     execution["completed_rows"] = max(0, int(execution.get("completed_rows") or 0))
     execution["consecutive_failures"] = max(0, int(execution.get("consecutive_failures") or 0))
@@ -587,6 +603,8 @@ async def _execute_child_row(client: Any, thread_id: str, workflow: dict[str, An
     prompt = _build_child_prompt(workflow, row)
     child_title = f"wf r{row['row_number']}"
     add_to_memory = _as_bool(workflow["execution"].get("add_to_memory"), default=False)
+    compact_child_runs = _as_bool(workflow["execution"].get("compact_child_runs"), default=True)
+    model_name = resolve_workflow_model_name(workflow["execution"].get("model_display_name"))
     context = {
         "thread_id": child_thread_id,
         "current_mode": "work",
@@ -598,21 +616,28 @@ async def _execute_child_row(client: Any, thread_id: str, workflow: dict[str, An
         "thinking_enabled": True,
         "auto_mode": False,
         "add_to_memory": add_to_memory,
-        "skip_title_generation": True,
-        "compact_title": child_title,
+        "skip_title_generation": compact_child_runs,
         "workflow_child": True,
         "workflow_parent_thread_id": thread_id,
         "workflow_row_number": row["row_number"],
         "current_turn_text": prompt,
         "original_user_request": prompt,
     }
+    metadata = {"trigger": "workflow_row", "parent_thread_id": thread_id, "row_number": row["row_number"]}
+    if model_name:
+        context["model_name"] = model_name
+        metadata["model_display_name"] = workflow["execution"].get("model_display_name")
+        metadata["model_name"] = model_name
+    if compact_child_runs:
+        context["compact_title"] = child_title
+        metadata["title"] = child_title
     created = await client.runs.create(
         child_thread_id,
         _ASSISTANT_ID,
         input={"messages": [{"type": "human", "content": prompt}]},
         config=get_app_config().get_default_run_config(),
         context=context,
-        metadata={"trigger": "workflow_row", "parent_thread_id": thread_id, "row_number": row["row_number"], "title": child_title},
+        metadata=metadata,
     )
     child_run_id = str(created.get("run_id") if isinstance(created, dict) else created)
     active.child_runs[child_thread_id] = child_run_id

@@ -49,6 +49,8 @@ def _workflow_payload() -> dict:
             "flush_every_completed_rows": 20,
             "flush_all": False,
             "add_to_memory": False,
+            "compact_child_runs": True,
+            "model_display_name": "",
             "current_row_index": 0,
             "completed_rows": 0,
             "consecutive_failures": 0,
@@ -89,10 +91,35 @@ def test_normalize_workflow_defaults_child_memory_off(monkeypatch, tmp_path):
     _patch_paths(monkeypatch, tmp_path)
     payload = _workflow_payload()
     payload["execution"].pop("add_to_memory")
+    payload["execution"].pop("compact_child_runs")
 
     normalized = workflow_router.normalize_workflow(thread_id, payload)
 
     assert normalized["execution"]["add_to_memory"] is False
+    assert normalized["execution"]["compact_child_runs"] is True
+    assert normalized["execution"]["model_display_name"] == ""
+
+
+def test_resolve_workflow_model_name_accepts_display_name_and_internal_name(monkeypatch):
+    class _Model:
+        def __init__(self, name, display_name):
+            self.name = name
+            self.display_name = display_name
+            self.model = name
+
+    class _AppConfig:
+        models = [_Model("qwen-local", "local"), _Model("qwen-mlx", "local-mlx")]
+
+        def get_model_config(self, name):
+            return next((model for model in self.models if model.name == name), None)
+
+    monkeypatch.setattr(workflow_router, "get_app_config", lambda: _AppConfig())
+
+    assert workflow_router.resolve_workflow_model_name("local") == "qwen-local"
+    assert workflow_router.resolve_workflow_model_name("LOCAL-MLX") == "qwen-mlx"
+    assert workflow_router.resolve_workflow_model_name("qwen-local") == "qwen-local"
+    assert workflow_router.resolve_workflow_model_name("") is None
+    assert workflow_router.resolve_workflow_model_name("missing") is None
 
 
 def test_result_accounting_and_export(monkeypatch, tmp_path):
@@ -451,3 +478,99 @@ async def test_child_row_run_honors_add_to_memory_opt_in(monkeypatch):
 
     assert client.runs.create_kwargs["context"]["add_to_memory"] is True
     assert client.runs.create_kwargs["context"]["compact_title"] == "wf r12"
+
+
+@pytest.mark.anyio
+async def test_child_row_run_honors_compact_child_runs_opt_out(monkeypatch):
+    class _AppConfig:
+        def get_default_run_config(self):
+            return {}
+
+    class _Threads:
+        async def create(self):
+            return {"thread_id": "child-thread"}
+
+        async def get_state(self, _thread_id):
+            return {"values": {"messages": [{"type": "ai", "content": '{"full_address": ""}'}]}}
+
+    class _Runs:
+        def __init__(self):
+            self.create_kwargs = None
+
+        async def create(self, *args, **kwargs):
+            self.create_kwargs = kwargs
+            return {"run_id": "child-run"}
+
+        async def join(self, _thread_id, _run_id):
+            return None
+
+    class _Client:
+        def __init__(self):
+            self.threads = _Threads()
+            self.runs = _Runs()
+
+    client = _Client()
+    active = workflow_router._ActiveWorkflowRun()
+    monkeypatch.setattr(workflow_router, "get_app_config", lambda: _AppConfig())
+    row = {"row_index": 0, "row_number": "12", "source": {"name": "Example A"}}
+    payload = _workflow_payload()
+    payload["execution"]["compact_child_runs"] = False
+
+    await workflow_router._execute_child_row(client, "parent-thread", payload, row, active)
+
+    assert client.runs.create_kwargs["context"]["skip_title_generation"] is False
+    assert "compact_title" not in client.runs.create_kwargs["context"]
+    assert "title" not in client.runs.create_kwargs["metadata"]
+
+
+@pytest.mark.anyio
+async def test_child_row_run_honors_model_display_name(monkeypatch):
+    class _Model:
+        name = "qwen-mlx"
+        display_name = "local-mlx"
+        model = "qwen-mlx"
+
+    class _AppConfig:
+        models = [_Model()]
+
+        def get_default_run_config(self):
+            return {}
+
+        def get_model_config(self, name):
+            return _Model() if name == "qwen-mlx" else None
+
+    class _Threads:
+        async def create(self):
+            return {"thread_id": "child-thread"}
+
+        async def get_state(self, _thread_id):
+            return {"values": {"messages": [{"type": "ai", "content": '{"full_address": ""}'}]}}
+
+    class _Runs:
+        def __init__(self):
+            self.create_kwargs = None
+
+        async def create(self, *args, **kwargs):
+            self.create_kwargs = kwargs
+            return {"run_id": "child-run"}
+
+        async def join(self, _thread_id, _run_id):
+            return None
+
+    class _Client:
+        def __init__(self):
+            self.threads = _Threads()
+            self.runs = _Runs()
+
+    client = _Client()
+    active = workflow_router._ActiveWorkflowRun()
+    monkeypatch.setattr(workflow_router, "get_app_config", lambda: _AppConfig())
+    row = {"row_index": 0, "row_number": "12", "source": {"name": "Example A"}}
+    payload = _workflow_payload()
+    payload["execution"]["model_display_name"] = "local-mlx"
+
+    await workflow_router._execute_child_row(client, "parent-thread", payload, row, active)
+
+    assert client.runs.create_kwargs["context"]["model_name"] == "qwen-mlx"
+    assert client.runs.create_kwargs["metadata"]["model_display_name"] == "local-mlx"
+    assert client.runs.create_kwargs["metadata"]["model_name"] == "qwen-mlx"
