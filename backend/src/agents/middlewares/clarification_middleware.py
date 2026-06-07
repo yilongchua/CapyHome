@@ -14,8 +14,9 @@ The run is interrupted via ``Command(goto=END)`` only when one of:
      zero ready todos remain in ``state.todo_graph.ready_ids`` (no useful
      parallel work the agent can still do).
 
-Auto mode bypasses the queue entirely when a recommended option exists —
-the recommended label is injected as an answer and the run proceeds.
+Auto mode bypasses the queue entirely by selecting the recommended option, or
+the first valid option when none is explicitly recommended. The selected label
+is injected as an answer and the run proceeds.
 """
 
 import logging
@@ -53,6 +54,27 @@ def _resolve_auto_mode(runtime: Runtime, state: dict[str, Any]) -> bool:
     if isinstance(runtime_ctx, dict) and "auto_mode" in runtime_ctx:
         return bool(runtime_ctx["auto_mode"])
     return bool(state.get("auto_mode", False))
+
+
+def _resolve_plan_mode(runtime: Runtime) -> bool:
+    """Return true when the current run is explicitly in Plan Mode."""
+    config = getattr(runtime, "config", None)
+    configurable = config.get("configurable") if isinstance(config, dict) else None
+    if isinstance(configurable, dict):
+        raw_mode = configurable.get("current_mode") or configurable.get("mode")
+        if raw_mode:
+            return str(raw_mode).strip().lower() == "plan"
+        if bool(configurable.get("is_plan_mode")):
+            return True
+
+    runtime_ctx = getattr(runtime, "context", None)
+    if isinstance(runtime_ctx, dict):
+        raw_mode = runtime_ctx.get("current_mode") or runtime_ctx.get("mode")
+        if raw_mode:
+            return str(raw_mode).strip().lower() == "plan"
+        if bool(runtime_ctx.get("is_plan_mode")):
+            return True
+    return False
 
 
 def _normalize_question(text: Any) -> str:
@@ -154,9 +176,9 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
           the resume picks up where this left off.
 
     Auto-mode bypass:
-        - When ``auto_mode=True`` and the question has a recommended option,
-          mark the entry as answered with the recommended label and inject
-          the answer into the message stream without interrupting.
+        - When ``auto_mode=True``, select the recommended option if present
+          otherwise the first valid option, mark the entry as answered, and
+          inject the answer into the message stream without interrupting.
     """
 
     state_schema = ClarificationMiddlewareState
@@ -215,13 +237,19 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
             "tool_call_id": tool_call_id or None,
         }
 
-    def _get_recommended_label(self, args: dict) -> str | None:
+    def _get_auto_selected_label(self, args: dict) -> str | None:
+        fallback: str | None = None
         for option in args.get("options") or []:
-            if isinstance(option, dict) and option.get("recommended"):
-                label = str(option.get("label") or "").strip()
-                if label:
-                    return label
-        return None
+            if not isinstance(option, dict):
+                continue
+            label = str(option.get("label") or "").strip()
+            if not label:
+                continue
+            if fallback is None:
+                fallback = label
+            if option.get("recommended"):
+                return label
+        return fallback
 
     def _format_breadcrumb(self, entry: dict[str, Any]) -> str:
         """One-line ToolMessage content. The full UI lives in the side panel."""
@@ -240,33 +268,34 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
         tool_call_id = request.tool_call.get("id", "") or ""
         state = getattr(request, "state", None) or {}
         auto_mode = _resolve_auto_mode(request.runtime, state)
+        plan_mode = _resolve_plan_mode(request.runtime)
 
         question_text = str(args.get("question") or "").strip()
         entry = self._build_entry(args, tool_call_id)
 
-        # Auto-mode bypass: if a recommended option exists, pre-answer the
-        # clarification and don't interrupt.
+        # Auto-mode bypass: pre-answer with the recommended option, or the
+        # first valid option when the model did not mark a recommendation.
         if auto_mode:
-            recommended = self._get_recommended_label(args)
-            if recommended:
+            selected = self._get_auto_selected_label(args)
+            if selected:
                 entry["status"] = "answered"
-                entry["answer"] = recommended
+                entry["answer"] = selected
                 entry["answered_at"] = _utc_now_iso()
-                logger.info("Auto mode: auto-selecting '%s' for clarification: %s", recommended, entry.get("question"))
+                logger.info("Auto mode: auto-selecting '%s' for clarification: %s", selected, entry.get("question"))
                 return Command(
                     update={
                         "clarifications": [entry],
                         # Pending stays as-is (depends on other entries in state).
                         "messages": [
                             ToolMessage(
-                                content=f"[Auto Mode] Selected: {recommended}",
+                                content=f"[Auto Mode] Selected: {selected}",
                                 tool_call_id=tool_call_id,
                                 name="ask_user_for_clarification",
                             )
                         ],
                     }
                 )
-            logger.info("Auto mode: no recommended option for clarification '%s'; falling through to normal queue", entry.get("question"))
+            logger.info("Auto mode: no valid options for clarification '%s'; falling through to normal queue", entry.get("question"))
 
         if _planner_clarification_duplicate(question_text, state.get("plan")):
             logger.info(
@@ -285,7 +314,8 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
                             name="ask_user_for_clarification",
                         )
                     ],
-                }
+                },
+                goto=END if plan_mode else None,
             )
 
         # Decide whether to interrupt.
@@ -299,7 +329,7 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
         had_ready = _had_any_ready_todos(todo_graph)
         ready_remain = _has_any_ready_after_blocks(todo_graph, next_clarifications)
 
-        should_interrupt = urgency == "blocking" or (
+        should_interrupt = plan_mode or urgency == "blocking" or (
             had_ready and not ready_remain and _has_pending_clarifications(next_clarifications)
         )
 

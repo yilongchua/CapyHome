@@ -75,6 +75,27 @@ def test_auto_mode_pre_answers_clarification_without_interrupting():
     assert result.update["messages"][0].content == "[Auto Mode] Selected: Recommended"
 
 
+def test_auto_mode_pre_answers_first_option_when_no_recommendation():
+    middleware = ClarificationMiddleware()
+    request = _request(
+        context={"auto_mode": True},
+        options=[
+            {"label": "First choice", "description": "Default by order"},
+            {"label": "Second choice", "description": "Alternative"},
+        ],
+    )
+    result = middleware.wrap_tool_call(
+        request,
+        lambda _req: ToolMessage(content="unused", tool_call_id="tc-1", name="ask_user_for_clarification"),
+    )
+    assert isinstance(result, Command)
+    assert not result.goto
+    appended = result.update["clarifications"][0]
+    assert appended["status"] == "answered"
+    assert appended["answer"] == "First choice"
+    assert result.update["messages"][0].content == "[Auto Mode] Selected: First choice"
+
+
 def test_auto_mode_pre_answers_duplicate_planner_inline_clarification():
     middleware = ClarificationMiddleware()
     request = _request(
@@ -204,6 +225,22 @@ def test_deferrable_does_not_interrupt_when_no_ready_todos_existed():
     )
     assert isinstance(result, Command)
     assert not result.goto  # empty/None goto means no interrupt
+
+
+def test_plan_mode_deferrable_clarification_interrupts_even_without_ready_todos():
+    middleware = ClarificationMiddleware()
+    request = _request(
+        state={"clarifications": [], "todo_graph": {"nodes": []}},
+        context={"mode": "plan"},
+        urgency="deferrable",
+    )
+    result = middleware.wrap_tool_call(
+        request,
+        lambda _req: ToolMessage(content="unused", tool_call_id="tc-1", name="ask_user_for_clarification"),
+    )
+    assert isinstance(result, Command)
+    assert result.goto == END
+    assert result.update["clarification_pending"] is True
 
 
 # --- multiple questions in one turn ----------------------------------------
