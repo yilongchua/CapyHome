@@ -242,6 +242,26 @@ export const enUS: Translations = {
   // Chats
   chats: {
     searchChats: "Search chats",
+    manageChats: "Manage chats",
+    manageChatsDescription:
+      "Review your chat history, select multiple conversations, and delete them safely.",
+    noChatsToManage: "No chats to manage yet.",
+    noMatchingChats: "No matching chats.",
+    updated: "Updated",
+    selectAllVisible: "Select all visible",
+    clearSelection: "Clear selection",
+    selectedChats: (count: number) =>
+      `${count} chat${count === 1 ? "" : "s"} selected`,
+    deleteSelectedChats: "Delete selected chats",
+    deleteSelectedChatsConfirm: (count: number) =>
+      `Delete ${count} selected chat${count === 1 ? "" : "s"}? This action cannot be undone.`,
+    deleteSelectedChatsProgress: (current: number, total: number) =>
+      `Deleting ${current} of ${total}...`,
+    deleteSelectedChatsSuccess: (count: number) =>
+      `Deleted ${count} chat${count === 1 ? "" : "s"}`,
+    deleteSelectedChatsFailed: "Failed to delete selected chats",
+    deleteSelectedChatsPartialFailure: (success: number, failed: number) =>
+      `Deleted ${success} chat${success === 1 ? "" : "s"}, ${failed} failed`,
     deleteAllChats: "Delete all chats",
     deleteAllChatsConfirm:
       "Are you sure you want to delete all chats? This action cannot be undone.",
@@ -312,6 +332,7 @@ export const enUS: Translations = {
       appearance: "Appearance",
       memory: "Memory",
       knowledgeVault: "Knowledge Vault",
+      chats: "Chats",
       pipelineCleanup: "Pipeline Cleanup",
       autoresearchCleanup: "Autoresearch Cleanup",
       tools: "Tools",

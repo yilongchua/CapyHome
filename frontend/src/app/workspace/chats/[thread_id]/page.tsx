@@ -1153,7 +1153,11 @@ function ChatPageContent({
             )}
           >
             <div className="flex w-full items-center gap-2 text-sm font-medium">
-              <ThreadTitle threadId={threadId} thread={thread} />
+              <ThreadTitle
+                threadId={threadId}
+                thread={thread}
+                isNewThread={isNewThread}
+              />
               {runningRun && (thread.isLoading || isExecutingPlan) && (
                 <span
                   className="text-muted-foreground rounded bg-amber-500/10 px-2 py-0.5 text-xs font-normal"

@@ -1918,6 +1918,70 @@ export function useDeleteThread() {
   });
 }
 
+export function useDeleteSelectedThreads() {
+  const queryClient = useQueryClient();
+  const { t } = useI18n();
+  const [progress, setProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: async ({ threadIds }: { threadIds: string[] }) => {
+      const deletedThreadIds: string[] = [];
+      const failedThreadIds: string[] = [];
+
+      setProgress({ current: 0, total: threadIds.length });
+      for (const [index, threadId] of threadIds.entries()) {
+        setProgress({ current: index + 1, total: threadIds.length });
+        try {
+          await deleteThreadWithCleanup(threadId);
+          deletedThreadIds.push(threadId);
+        } catch {
+          failedThreadIds.push(threadId);
+        }
+      }
+
+      return { deletedThreadIds, failedThreadIds };
+    },
+    onSuccess(result) {
+      const deleted = new Set(result.deletedThreadIds);
+      queryClient.setQueriesData(
+        {
+          queryKey: ["threads", "search"],
+          exact: false,
+        },
+        (oldData: Array<AgentThread> | undefined) => {
+          return oldData?.filter((thread) => !deleted.has(thread.thread_id));
+        },
+      );
+      for (const threadId of result.deletedThreadIds) {
+        publishThreadRefresh(threadId);
+      }
+      publishWorkspaceRefresh(["threads"], { source: "delete-selected-threads" });
+
+      if (result.failedThreadIds.length > 0) {
+        toast.error(
+          t.chats.deleteSelectedChatsPartialFailure(
+            result.deletedThreadIds.length,
+            result.failedThreadIds.length,
+          ),
+        );
+        return;
+      }
+      toast.success(t.chats.deleteSelectedChatsSuccess(result.deletedThreadIds.length));
+    },
+    onError(error) {
+      toast.error(error instanceof Error ? error.message : t.chats.deleteSelectedChatsFailed);
+    },
+    onSettled() {
+      setProgress(null);
+    },
+  });
+
+  return { ...mutation, progress };
+}
+
 export function useRenameThread() {
   const queryClient = useQueryClient();
   const apiClient = getAPIClient();

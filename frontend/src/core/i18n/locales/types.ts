@@ -194,6 +194,20 @@ export interface Translations {
   // Chats
   chats: {
     searchChats: string;
+    manageChats: string;
+    manageChatsDescription: string;
+    noChatsToManage: string;
+    noMatchingChats: string;
+    updated: string;
+    selectAllVisible: string;
+    clearSelection: string;
+    selectedChats: (count: number) => string;
+    deleteSelectedChats: string;
+    deleteSelectedChatsConfirm: (count: number) => string;
+    deleteSelectedChatsProgress: (current: number, total: number) => string;
+    deleteSelectedChatsSuccess: (count: number) => string;
+    deleteSelectedChatsFailed: string;
+    deleteSelectedChatsPartialFailure: (success: number, failed: number) => string;
     deleteAllChats: string;
     deleteAllChatsConfirm: string;
     deleteAllChatsSuccess: string;
@@ -260,6 +274,7 @@ export interface Translations {
       appearance: string;
       memory: string;
       knowledgeVault: string;
+      chats: string;
       pipelineCleanup: string;
       autoresearchCleanup: string;
       tools: string;
