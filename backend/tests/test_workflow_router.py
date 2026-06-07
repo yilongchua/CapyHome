@@ -409,3 +409,45 @@ async def test_child_row_run_uses_shared_config_recursion_limit(monkeypatch):
     assert client.runs.create_kwargs["context"]["skip_title_generation"] is True
     assert client.runs.create_kwargs["context"]["compact_title"] == "wf r1"
     assert client.runs.create_kwargs["metadata"]["title"] == "wf r1"
+
+
+@pytest.mark.anyio
+async def test_child_row_run_honors_add_to_memory_opt_in(monkeypatch):
+    class _AppConfig:
+        def get_default_run_config(self):
+            return {}
+
+    class _Threads:
+        async def create(self):
+            return {"thread_id": "child-thread"}
+
+        async def get_state(self, _thread_id):
+            return {"values": {"messages": [{"type": "ai", "content": '{"full_address": ""}'}]}}
+
+    class _Runs:
+        def __init__(self):
+            self.create_kwargs = None
+
+        async def create(self, *args, **kwargs):
+            self.create_kwargs = kwargs
+            return {"run_id": "child-run"}
+
+        async def join(self, _thread_id, _run_id):
+            return None
+
+    class _Client:
+        def __init__(self):
+            self.threads = _Threads()
+            self.runs = _Runs()
+
+    client = _Client()
+    active = workflow_router._ActiveWorkflowRun()
+    monkeypatch.setattr(workflow_router, "get_app_config", lambda: _AppConfig())
+    row = {"row_index": 0, "row_number": "12", "source": {"name": "Example A"}}
+    payload = _workflow_payload()
+    payload["execution"]["add_to_memory"] = True
+
+    await workflow_router._execute_child_row(client, "parent-thread", payload, row, active)
+
+    assert client.runs.create_kwargs["context"]["add_to_memory"] is True
+    assert client.runs.create_kwargs["context"]["compact_title"] == "wf r12"

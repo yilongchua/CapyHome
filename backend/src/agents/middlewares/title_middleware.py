@@ -98,6 +98,17 @@ class TitleMiddleware(AgentMiddleware[TitleMiddlewareState]):
         assistant_messages = [m for m in messages if m.type == "ai"]
         return len(user_messages) == 1 and len(assistant_messages) >= 1
 
+    def _runtime_compact_title(self, state: TitleMiddlewareState, runtime: Runtime) -> str | None:
+        if state.get("title"):
+            return None
+        context = getattr(runtime, "context", None) or {}
+        if context.get("skip_title_generation") is not True:
+            return None
+        title = str(context.get("compact_title") or context.get("thread_title") or "").strip()
+        if not title:
+            return None
+        return self._normalize_title(title, get_title_config().max_chars)
+
     def _prepare_generation(self, state: TitleMiddlewareState) -> tuple[str, str, str, int]:
         config = get_title_config()
         messages = state.get("messages", [])
@@ -164,6 +175,9 @@ class TitleMiddleware(AgentMiddleware[TitleMiddlewareState]):
     @override
     def after_model(self, state: TitleMiddlewareState, runtime: Runtime) -> dict | None:
         """Sync path: return fallback title immediately — no LLM call."""
+        compact_title = self._runtime_compact_title(state, runtime)
+        if compact_title:
+            return {"title": compact_title}
         if not self._should_generate_title(state):
             return None
         _, user_msg, _, max_chars = self._prepare_generation(state)
@@ -173,6 +187,9 @@ class TitleMiddleware(AgentMiddleware[TitleMiddlewareState]):
     @override
     async def aafter_model(self, state: TitleMiddlewareState, runtime: Runtime) -> dict | None:
         """Async path: checkpoint fallback instantly; generate real title in the background."""
+        compact_title = self._runtime_compact_title(state, runtime)
+        if compact_title:
+            return {"title": compact_title}
         if not self._should_generate_title(state):
             return None
 
