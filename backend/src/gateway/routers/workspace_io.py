@@ -431,12 +431,6 @@ def _guess_fence_language(path: Path) -> str:
     return ext
 
 
-def _to_virtual_outputs(path: Path, thread_id: str) -> str:
-    outputs_dir = get_paths().sandbox_outputs_dir(thread_id).resolve()
-    rel = path.resolve().relative_to(outputs_dir).as_posix()
-    return f"/mnt/user-data/workspace/{rel}"
-
-
 def _docs_root(thread_id: str) -> Path:
     return get_paths().sandbox_work_dir(thread_id).resolve() / ".docs"
 

@@ -14,6 +14,7 @@ from src.agents.background import submit_background_task
 from src.agents.common.handoff import parse_plan_md
 from src.agents.middlewares.todo_dag_middleware import _materialize_ready_ids, normalize_todo_nodes
 from src.config.handoffs_config import get_handoffs_config
+from src.config.paths import PLAN_FILENAME
 from src.sandbox.path_mapping import replace_virtual_path
 
 logger = logging.getLogger(__name__)
@@ -93,7 +94,7 @@ def _load_canonical_plan_overrides(values: dict[str, Any]) -> dict[str, Any]:
         workspace_path = (thread_data or {}).get("workspace_path") if isinstance(thread_data, dict) else None
         if not workspace_path:
             return {}
-        physical_path = Path(workspace_path) / "plan.md"
+        physical_path = Path(workspace_path) / PLAN_FILENAME
     else:
         physical_path = Path(replace_virtual_path(virtual_path, thread_data))
     try:

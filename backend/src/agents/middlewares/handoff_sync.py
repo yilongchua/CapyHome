@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from src.agents.middlewares._fs_utils import write_if_changed
+from src.config.paths import PLAN_FILENAME, PLAN_VERSIONED_PREFIX, PLANS_SUBDIR
 from src.sandbox.path_mapping import replace_virtual_path, to_virtual_path
 
 _DEFAULT_PLAN_SUMMARY = "Living execution record for the current thread."
@@ -32,7 +33,7 @@ def slugify_plan_title(title: str) -> str:
 
 def versioned_plan_filename(title: str, created_at: datetime) -> str:
     stamp = created_at.strftime("%Y%m%d-%H%M%S")
-    return f"plan-{stamp}-{slugify_plan_title(title)}.md"
+    return f"{PLAN_VERSIONED_PREFIX}{stamp}-{slugify_plan_title(title)}.md"
 
 
 # Backwards-compatible private aliases for in-module callers.
@@ -141,10 +142,10 @@ def ensure_plan_state(state: dict[str, Any]) -> dict[str, Any] | None:
     plan_path = str(existing.get("plan_path") or "").strip()
     latest_alias_path = str(existing.get("latest_alias_path") or "").strip()
     if not plan_path:
-        versioned_plan_file = Path(plan_root) / "plans" / _versioned_plan_filename(title, created_at_dt)
+        versioned_plan_file = Path(plan_root) / PLANS_SUBDIR / _versioned_plan_filename(title, created_at_dt)
         plan_path = to_virtual_path(str(versioned_plan_file), thread_data) or str(versioned_plan_file)
     if not latest_alias_path:
-        latest_plan_alias_file = Path(plan_root) / "plan.md"
+        latest_plan_alias_file = Path(plan_root) / PLAN_FILENAME
         latest_alias_path = to_virtual_path(str(latest_plan_alias_file), thread_data) or str(latest_plan_alias_file)
 
     ensured = {

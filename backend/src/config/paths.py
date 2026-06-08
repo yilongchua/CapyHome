@@ -5,6 +5,24 @@ from pathlib import Path
 # Virtual path prefix seen by agents inside the sandbox
 VIRTUAL_PATH_PREFIX = "/mnt/user-data"
 
+# Plan artifact paths — single source of truth shared by planner_middleware,
+# evaluator_middleware, plan_agent prompts, AND the physical plan-file writers
+# (handoff_sync, work_run_handoff). The filename/subdir primitives below are the
+# canonical spelling; both the virtual sandbox paths and the physical writers
+# derive from them, so renaming the plan artifacts is a one-line change here.
+VIRTUAL_WORKSPACE = f"{VIRTUAL_PATH_PREFIX}/workspace"
+PLAN_FILENAME = "plan.md"  # canonical latest-plan alias filename
+PLANS_SUBDIR = "plans"  # workspace subdir holding timestamped plan traces
+PLAN_VERSIONED_PREFIX = "plan-"  # timestamped trace filename prefix (plan-<stamp>-<slug>.md)
+
+# Virtual sandbox paths (what the agent, prompts, and validation see)
+VIRTUAL_PLAN_ALIAS = f"{VIRTUAL_WORKSPACE}/{PLAN_FILENAME}"
+VIRTUAL_PLANS_DIR = f"{VIRTUAL_WORKSPACE}/{PLANS_SUBDIR}"
+VIRTUAL_PLANS_PATTERN = f"{VIRTUAL_PLANS_DIR}/{PLAN_VERSIONED_PREFIX}*.md"
+# Workspace-relative suffix/infix used for validating stored virtual paths
+PLAN_ALIAS_SUFFIX = f"/workspace/{PLAN_FILENAME}"
+PLAN_VERSIONED_INFIX = f"/workspace/{PLANS_SUBDIR}/{PLAN_VERSIONED_PREFIX}"
+
 _SAFE_THREAD_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 
 
@@ -24,9 +42,14 @@ class Paths:
         └── threads/
             └── {thread_id}/
                 └── user-data/         <-- mounted as /mnt/user-data/ inside sandbox
-                    ├── workspace/     <-- /mnt/user-data/workspace/
-                    │   └── uploads/   <-- /mnt/user-data/workspace/uploads/
-                    └── outputs/       <-- /mnt/user-data/workspace/
+                    └── workspace/     <-- /mnt/user-data/workspace/  (the single backing dir)
+                        └── uploads/   <-- /mnt/user-data/workspace/uploads/
+
+    Note: ``workspace/`` is the one canonical backing directory for everything the
+    user sees under ``/mnt/user-data/``. The legacy ``outputs/`` directory and the
+    legacy virtual ``/mnt/user-data/outputs/`` path are aliases that resolve to
+    ``workspace/`` (see ``sandbox_outputs_dir`` and ``path_mapping``); no module
+    should treat outputs as a distinct location.
 
     BaseDir resolution (in priority order):
         1. Constructor argument `base_dir`
@@ -125,10 +148,17 @@ class Paths:
     def sandbox_outputs_dir(self, thread_id: str) -> Path:
         """
         Host path for agent-generated artifacts.
-        Host: `{base_dir}/threads/{thread_id}/user-data/outputs/`
+
+        Host: `{base_dir}/threads/{thread_id}/user-data/workspace/`
         Sandbox: `/mnt/user-data/workspace/`
+
+        `outputs` is a legacy alias of `workspace`: this returns the workspace
+        directory so that callers, bind-mounts, and reverse path-mapping all
+        resolve to the single canonical backing dir. The previous separate
+        `user-data/outputs/` directory is migrated into workspace on
+        `ensure_thread_dirs` (see `_migrate_legacy_outputs`).
         """
-        return self.thread_dir(thread_id) / "user-data" / "outputs"
+        return self.sandbox_work_dir(thread_id)
 
     def sandbox_user_data_dir(self, thread_id: str) -> Path:
         """
@@ -147,10 +177,11 @@ class Paths:
         The explicit chmod() call is necessary because Path.mkdir(mode=...) is
         subject to the process umask and may not yield the intended permissions.
 
-        Also performs a one-time migration of files from the legacy uploads
-        location ({user-data}/uploads/) into the new nested location
-        ({user-data}/workspace/uploads/) for threads created before uploads
-        were moved under workspace. The migration is best-effort and idempotent.
+        Also performs one-time best-effort migrations of files from legacy
+        locations into the canonical workspace tree: uploads from
+        ({user-data}/uploads/) → ({user-data}/workspace/uploads/), and
+        outputs from ({user-data}/outputs/) → ({user-data}/workspace/).
+        Both migrations are idempotent.
         """
         for d in [
             self.sandbox_work_dir(thread_id),
@@ -161,6 +192,7 @@ class Paths:
             d.chmod(0o777)
 
         self._migrate_legacy_uploads(thread_id)
+        self._migrate_legacy_outputs(thread_id)
 
     def _migrate_legacy_uploads(self, thread_id: str) -> None:
         """Move files from legacy `{user-data}/uploads/` into `{user-data}/workspace/uploads/`.
@@ -204,6 +236,52 @@ class Paths:
             import logging
             logging.getLogger(__name__).info(
                 "[paths] migrated %d legacy upload(s) for thread %s from %s -> %s",
+                moved, thread_id, legacy_dir, new_dir,
+            )
+
+    def _migrate_legacy_outputs(self, thread_id: str) -> None:
+        """Move files from legacy `{user-data}/outputs/` into `{user-data}/workspace/`.
+
+        `outputs` was historically a separate host directory that reverse-mapped
+        to the same `/mnt/user-data/workspace/` virtual namespace as workspace —
+        a collision risk. workspace is now the single backing dir, so any files a
+        pre-migration thread wrote under `outputs/` are folded into workspace here.
+
+        Safe to call repeatedly: returns early when the legacy dir is absent or
+        empty, skips any filename that already exists at the workspace path (does
+        not overwrite), and only removes the legacy dir once emptied.
+        """
+        legacy_dir = self.thread_dir(thread_id) / "user-data" / "outputs"
+        if not legacy_dir.is_dir():
+            return
+
+        new_dir = self.sandbox_work_dir(thread_id)
+        try:
+            entries = list(legacy_dir.iterdir())
+        except OSError:
+            return
+
+        moved = 0
+        for entry in entries:
+            target = new_dir / entry.name
+            if target.exists():
+                continue
+            try:
+                entry.rename(target)
+                moved += 1
+            except OSError:
+                continue
+
+        try:
+            if not any(legacy_dir.iterdir()):
+                legacy_dir.rmdir()
+        except OSError:
+            pass
+
+        if moved:
+            import logging
+            logging.getLogger(__name__).info(
+                "[paths] migrated %d legacy output(s) for thread %s from %s -> %s",
                 moved, thread_id, legacy_dir, new_dir,
             )
 

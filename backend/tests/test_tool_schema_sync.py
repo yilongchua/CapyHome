@@ -93,6 +93,10 @@ def test_plan_catalog_excludes_execution_tools() -> None:
     forbidden = {"bash", "write_file", "str_replace"}
     leaked = {defn.name for defn in plan_defns} & forbidden
     assert not leaked, f"Execution tools leaked into plan catalog: {sorted(leaked)}"
+    present = {defn.name for defn in plan_defns}
+    assert "write_plan" in present, "Plan catalog must expose canonical `write_plan`"
+    assert "write_todos" not in present, "Plan catalog must not expose legacy `write_todos`"
+    assert "setup_agent" not in present, "Plan catalog must not expose bootstrap-only `setup_agent`"
 
 
 def test_plan_catalog_task_only_offers_planning_subagents() -> None:

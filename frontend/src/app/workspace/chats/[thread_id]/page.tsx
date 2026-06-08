@@ -1012,8 +1012,6 @@ function ChatPageContent({
             "Apply the following user edits to the current draft plan:",
             "",
             trimmed,
-            "",
-            "Keep the plan in draft status (do not execute yet) and rewrite plan.md to match.",
           ].join("\n"),
           files: [],
         },

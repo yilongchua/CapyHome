@@ -4,6 +4,7 @@ from .recall_tool import recall_tool
 from .setup_agent_tool import setup_agent
 from .task_tool import task_tool
 from .view_image_tool import view_image_tool
+from .write_plan_tool import write_plan_tool
 from .write_todos_tool import write_todos_tool
 
 __all__ = [
@@ -13,5 +14,6 @@ __all__ = [
     "ask_user_for_clarification_tool",
     "view_image_tool",
     "task_tool",
+    "write_plan_tool",
     "write_todos_tool",
 ]

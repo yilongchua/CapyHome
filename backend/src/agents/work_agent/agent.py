@@ -74,7 +74,6 @@ from src.config.recursion_pivot_config import get_recursion_pivot_config
 from src.config.resume_config import get_resume_config
 from src.config.retry_config import get_retry_config
 from src.config.scratchpad_config import get_scratchpad_config
-from src.config.sprint_contracts_config import get_sprint_contracts_config
 from src.config.subagents_config import get_subagents_app_config
 from src.config.summarization_config import get_summarization_config
 from src.config.task_memory_config import get_task_memory_config
@@ -333,17 +332,9 @@ def _create_planner(ctx: _RegistryContext) -> AgentMiddleware | None:
     planner_cfg = get_planner_config()
     if not ctx.is_plan_mode or not planner_cfg.enabled:
         return None
-    return PlannerMiddleware(
-        requested_model=ctx.model_name,
-        max_plan_steps=planner_cfg.max_plan_steps,
-        max_clarifications=planner_cfg.max_clarifications,
-        dag_enabled=get_todos_config().dag_enabled,
-        handoffs_config=get_handoffs_config(),
-        sprint_contracts_config=get_sprint_contracts_config(),
-        research_fanout=planner_cfg.research_fanout,
-        research_fanout_min_todos=planner_cfg.research_fanout_min_todos,
-        timeout_seconds=planner_cfg.timeout_seconds,
-    )
+    # Plan authoring lives in the `write_plan` tool now; this middleware only
+    # orchestrates turn-halting + work-mode handoff (no constructor knobs).
+    return PlannerMiddleware()
 
 
 def _create_evaluator(ctx: _RegistryContext) -> AgentMiddleware | None:

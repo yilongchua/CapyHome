@@ -14,6 +14,7 @@ from langgraph.runtime import Runtime
 
 from src.agents.middlewares.runtime_events import append_runtime_event
 from src.config.handoffs_config import HandoffsConfig
+from src.config.paths import PLAN_ALIAS_SUFFIX, PLAN_VERSIONED_INFIX, VIRTUAL_PLAN_ALIAS, VIRTUAL_PLANS_DIR, VIRTUAL_PLANS_PATTERN
 from src.models import ModelRouter, create_chat_model
 from src.sandbox.path_mapping import replace_virtual_path, to_virtual_path
 
@@ -23,8 +24,8 @@ _EVALUATOR_PROMPT_TEMPLATE = (
     "CRITIQUE: <one concise paragraph>\n\n"
     "Enforcement rules:\n"
     "- A planning turn is only valid when both artifacts exist:\n"
-    "  1) /mnt/user-data/workspace/plan.md\n"
-    "  2) /mnt/user-data/workspace/plans/plan-*.md (timestamped trace artifact)\n"
+    f"  1) {VIRTUAL_PLAN_ALIAS}\n"
+    f"  2) {VIRTUAL_PLANS_PATTERN} (timestamped trace artifact)\n"
     "- If artifacts are missing or stale, return FAIL and instruct the agent to continue and create fresh plan artifacts now.\n"
     "- Do not suggest recovering from previous plans; require creating a fresh plan turn artifact pair.\n\n"
     "Plan title: {plan_title}\n"
@@ -209,13 +210,13 @@ class EvaluatorMiddleware(AgentMiddleware[EvaluatorState]):
                 alias_exists = Path(resolved_alias_path).exists()
                 plan_path_text = str(plan_path).strip()
                 alias_path_text = str(latest_alias_path).strip()
-                if "/workspace/plans/plan-" not in plan_path_text:
+                if PLAN_VERSIONED_INFIX not in plan_path_text:
                     failures.append(
-                        "Versioned plan trace artifact path is invalid. Continue planning and write a fresh timestamped plan file under `/mnt/user-data/workspace/plans/`."
+                        f"Versioned plan trace artifact path is invalid. Continue planning and write a fresh timestamped plan file under `{VIRTUAL_PLANS_DIR}/`."
                     )
-                if not alias_path_text.endswith("/workspace/plan.md"):
+                if not alias_path_text.endswith(PLAN_ALIAS_SUFFIX):
                     failures.append(
-                        "Latest plan alias path is invalid. Continue planning and update `/mnt/user-data/workspace/plan.md` for this turn."
+                        f"Latest plan alias path is invalid. Continue planning and update `{VIRTUAL_PLAN_ALIAS}` for this turn."
                     )
                 if not versioned_exists or not alias_exists:
                     failures.append(

@@ -69,12 +69,45 @@ def test_json_builtin_includes_view_image_when_vision_supported() -> None:
     assert "view_image" in tools
 
 
+def test_plan_catalog_uses_write_plan_not_write_todos() -> None:
+    tools = _names(_build_builtin_tools_from_json(subagent_enabled=False, supports_vision=False, mode="plan"))
+    assert "write_plan" in tools
+    assert "write_todos" not in tools
+    assert "setup_agent" not in tools
+
+
 def test_get_available_tools_flag_off_uses_legacy_path() -> None:
     config = get_app_config()
     config.json_driven_tools = False
     tools = _names(get_available_tools(include_mcp=False, subagent_enabled=False))
     for legacy in BUILTIN_TOOLS:
         assert legacy.name in tools
+
+
+def test_get_available_tools_flag_off_plan_mode_includes_write_plan_only() -> None:
+    config = get_app_config()
+    config.json_driven_tools = False
+    tools = _names(get_available_tools(include_mcp=False, subagent_enabled=False, mode="plan"))
+    assert "write_plan" in tools
+
+
+def test_get_available_tools_flag_off_plan_mode_respects_write_plan_disable(monkeypatch) -> None:
+    config = get_app_config()
+    config.json_driven_tools = False
+
+    def _enabled(tool_name: str) -> bool:
+        return tool_name != "write_plan"
+
+    monkeypatch.setattr("src.tools.tools._get_community_tool_enabled", _enabled)
+    tools = _names(get_available_tools(include_mcp=False, subagent_enabled=False, mode="plan"))
+    assert "write_plan" not in tools
+
+
+def test_get_available_tools_flag_off_work_mode_does_not_include_write_plan() -> None:
+    config = get_app_config()
+    config.json_driven_tools = False
+    tools = _names(get_available_tools(include_mcp=False, subagent_enabled=False, mode="work"))
+    assert "write_plan" not in tools
 
 
 def test_get_available_tools_flag_on_keeps_all_legacy_surface() -> None:

@@ -3,9 +3,16 @@
     "name": "ask_user_for_clarification",
     "description": "While drafting the plan, surface a question to the user when an essential decision cannot be settled from context, recalled memory, or sensible defaults. Questions are queued into a side panel as tabs — the user reads them all and answers in a batch. BY DEFAULT this call is non-blocking: the run continues and the agent should keep working on parts of the plan that do not depend on the answer. Call this tool multiple times in one turn (one question per call) to surface several questions at once — the user prefers a batch over one-at-a-time popups. Use `blocks` to declare which todo ids in `plan.todos` depend on each answer; TodoDagMiddleware will keep those todos out of `ready_ids` until the user answers. Use `urgency: \"blocking\"` only when no useful planning progress is possible without the answer (run halts via `Command(goto=END)`). Use for: (1) missing information needed to scope the plan; (2) ambiguous requirements with two or more equally valid plan shapes; (3) approach choices; (4) risk confirmation for any destructive step in the plan (required, never assume); (5) suggestion when you have a recommended direction and want approval. Do NOT use for: questions you can answer by reading code, calling `recall`, or making a reasonable judgement call. CHOICE-ONLY UI: the user answers by clicking one of your `options` — there is NO free-text box, so always supply `options` and make every option a concrete, directly-selectable answer. NEVER offer placeholder options like \"Provide stats\", \"Enter manually\", \"Skip\", or \"Other\"; the user cannot type a value. Decompose any open-ended quantity (weight, height, age, budget, dates, available time) into discrete labelled ranges that span the realistic range — e.g. height → \"150–160 cm\", \"160–170 cm\", \"170–180 cm\", \"180 cm+\". Ask one attribute per question: split \"weight and height\" into two separate questions, each with its own range options. One focused question per call.",
     "handler": "src.tools.builtins.clarification_tool:ask_user_for_clarification_tool",
-    "mode": ["plan"],
-    "phase": ["draft", "approved"],
-    "groups": ["interaction"],
+    "mode": [
+      "plan"
+    ],
+    "phase": [
+      "draft",
+      "approved"
+    ],
+    "groups": [
+      "interaction"
+    ],
     "endpoint": "any",
     "requires_vision": false,
     "requires_subagent_enabled": false,
@@ -19,7 +26,10 @@
     ],
     "parameters": {
       "type": "object",
-      "required": ["question", "clarification_type"],
+      "required": [
+        "question",
+        "clarification_type"
+      ],
       "properties": {
         "question": {
           "type": "string",
@@ -27,7 +37,13 @@
         },
         "clarification_type": {
           "type": "string",
-          "enum": ["missing_info", "ambiguous_requirement", "approach_choice", "risk_confirmation", "suggestion"],
+          "enum": [
+            "missing_info",
+            "ambiguous_requirement",
+            "approach_choice",
+            "risk_confirmation",
+            "suggestion"
+          ],
           "description": "Why clarification is needed. Use `risk_confirmation` whenever the plan will include a destructive action (file deletion, prod writes, force-push, dropping data) — never skip the confirmation step. Use `approach_choice` or `suggestion` when `options` are supplied."
         },
         "context": {
@@ -39,7 +55,9 @@
           "description": "Structured choices the user picks from — each renders as a clickable button (`label` = title, `description` = helper text); mark at most one entry `recommended: true` and the UI highlights it (it is also the choice applied if the user dismisses the question). There is NO free-text input, so options must be exhaustive and directly selectable: for numeric or open-ended attributes give labelled ranges covering the realistic span (e.g. \"60–70 kg\", \"70–80 kg\", \"80–90 kg\", \"90 kg+\") instead of a prompt to type a value, and never include placeholder options like \"Provide stats\", \"Enter manually\", \"Skip\", or \"Other\".",
           "items": {
             "type": "object",
-            "required": ["label"],
+            "required": [
+              "label"
+            ],
             "properties": {
               "label": {
                 "type": "string",
@@ -59,11 +77,16 @@
         "blocks": {
           "type": "array",
           "description": "Optional list of todo ids in plan.todos whose readiness depends on this answer. TodoDagMiddleware will keep these todos out of `ready_ids` until the user answers. Pass `[]` (or omit) for questions that don't gate any specific todo.",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         },
         "urgency": {
           "type": "string",
-          "enum": ["deferrable", "blocking"],
+          "enum": [
+            "deferrable",
+            "blocking"
+          ],
           "description": "`deferrable` (default) queues the question and lets the run continue on unblocked todos. `blocking` halts the run immediately until the user answers — use only when no useful planning progress is possible without the answer."
         }
       }
@@ -73,9 +96,16 @@
     "name": "present_files",
     "description": "Surface one or more workspace files to the user during planning — typically a draft plan document, a research note you've written into the workspace, or a reference artifact the user should review before approving the plan. Only paths under `/mnt/user-data/workspace` may be presented; paths outside that root are rejected with an error. Supported renderable types include PDF, MD, CSV, XLSX, common code/text formats, and images (PNG, JPG, SVG). Do NOT use for files you only need to read for your own analysis — that's what `read_file` is for. In Plan Mode this tool is for keeping the user looped in on planning artifacts, not for declaring task completion. Safe to call in parallel with other tools; an artifact reducer merges concurrent updates without conflict.",
     "handler": "src.tools.builtins.present_file_tool:present_file_tool",
-    "mode": ["plan"],
-    "phase": ["draft", "approved"],
-    "groups": ["artifacts"],
+    "mode": [
+      "plan"
+    ],
+    "phase": [
+      "draft",
+      "approved"
+    ],
+    "groups": [
+      "artifacts"
+    ],
     "endpoint": "any",
     "requires_vision": false,
     "requires_subagent_enabled": false,
@@ -87,7 +117,9 @@
     ],
     "parameters": {
       "type": "object",
-      "required": ["filepaths"],
+      "required": [
+        "filepaths"
+      ],
       "properties": {
         "filepaths": {
           "type": "array",
@@ -104,9 +136,16 @@
     "name": "recall",
     "description": "Search long-term memory for facts and context relevant to a short query — especially valuable while planning, where prior decisions, conventions, and user preferences should shape the plan before you ever ask the user. Searches both the workspace scope (per-thread memories) and the global scope (cross-thread / org-wide memories) when both are enabled. Call this BEFORE assuming you have to ask the user for context that may already exist — e.g. the user's role, prior decisions, project or case conventions, regular clients/vendors, dietary or scheduling preferences, preferred tools. Short factual phrases (`\"preferred invoice format\"`, `\"dietary restrictions\"`, `\"deployment workflow\"`) outperform full-sentence questions because the underlying retriever is keyword + embedding based, not conversational. Use cases span software work, legal / administrative case management, and lifestyle lookups. Returns the top-K matches above a relevance threshold; if nothing relevant is stored, you get an explicit 'No relevant memory found.' message and should fall back to asking the user or using sensible defaults.",
     "handler": "src.tools.builtins.recall_tool:recall_tool",
-    "mode": ["plan"],
-    "phase": ["draft", "approved"],
-    "groups": ["memory"],
+    "mode": [
+      "plan"
+    ],
+    "phase": [
+      "draft",
+      "approved"
+    ],
+    "groups": [
+      "memory"
+    ],
     "endpoint": "any",
     "requires_vision": false,
     "requires_subagent_enabled": false,
@@ -120,7 +159,9 @@
     ],
     "parameters": {
       "type": "object",
-      "required": ["query"],
+      "required": [
+        "query"
+      ],
       "properties": {
         "query": {
           "type": "string",
@@ -130,43 +171,19 @@
     }
   },
   {
-    "name": "setup_agent",
-    "description": "Create or replace a custom CapyHome agent by writing its SOUL.md personality file and a short description. The agent name is taken from runtime context (set by the platform when the user opens the agent editor) — it is NOT a parameter, so do not include it in the call. Calling this again for the same agent fully overwrites the existing SOUL.md and config.yaml. Use only when the user has explicitly asked to set up, configure, or update a custom agent's personality during this planning conversation. Do NOT call speculatively or as part of normal planning — this is a configuration tool, not a runtime behavior switch.",
-    "handler": "src.tools.builtins.setup_agent_tool:setup_agent",
-    "mode": ["plan"],
-    "phase": ["draft", "approved"],
-    "groups": ["meta"],
-    "endpoint": "any",
-    "requires_vision": false,
-    "requires_subagent_enabled": false,
-    "returns": "Command that writes SOUL.md (and config.yaml for non-default agents) to the agent's directory and emits a tool message naming the agent. On any error during file writing the directory is rolled back and an error message is returned instead.",
-    "examples": [
-      "setup_agent(soul=\"# Personality\\nFocused researcher.\\n\\n# Goals\\nAnswer with sources.\\n\\n# Tool restrictions\\nNo destructive commands.\\n\\n# Style\\nTerse, citation-first.\", description=\"Source-cited research helper\")",
-      "setup_agent(soul=\"# Personality\\nMeticulous legal assistant familiar with Singapore civil procedure.\\n\\n# Goals\\nHelp the user manage case files, extract obligations from contracts, and draft client-facing summaries.\\n\\n# Tool restrictions\\nNever edit a contract draft without explicit risk_confirmation.\\n\\n# Style\\nFormal, neutral, jurisdiction-aware.\", description=\"Legal case management assistant\")",
-      "setup_agent(soul=\"# Personality\\nWarm, organised admin partner.\\n\\n# Goals\\nGenerate invoices, expense reports, and client correspondence in XLSX/MD.\\n\\n# Tool restrictions\\nAlways present generated files before considering work done.\\n\\n# Style\\nClear, numbers-first, no jargon.\", description=\"Admin / invoicing helper\")"
-    ],
-    "parameters": {
-      "type": "object",
-      "required": ["soul", "description"],
-      "properties": {
-        "soul": {
-          "type": "string",
-          "description": "Full SOUL.md content defining the agent's personality and behavior. Recommended section headers: `# Personality`, `# Goals`, `# Tool restrictions`, `# Style`. Markdown is preserved verbatim; do not wrap in code fences."
-        },
-        "description": {
-          "type": "string",
-          "description": "One-line description of what the agent does (under ~100 characters). Shown in the agent picker as the agent's subtitle."
-        }
-      }
-    }
-  },
-  {
     "name": "view_image",
     "description": "Load an image file into the model's vision channel so you can analyse it visually while drafting a plan — e.g. an architecture diagram the user uploaded, a screenshot of an error, a contract scan, or a chart you need to reference in the plan. This tool requires a vision-capable model and is only exposed when one is in use. Pair with `present_files` when the user should ALSO see the image — `view_image` makes it visible to you, `present_files` makes it visible to them. Do NOT use for non-image files (use `present_files` or `read_file`) or to bulk-display many images (use `present_files` instead). Supported formats: `.jpg`, `.jpeg`, `.png`, `.webp`. Keep images under ~10 MB to avoid token-budget blow-ups.",
     "handler": "src.tools.builtins.view_image_tool:view_image_tool",
-    "mode": ["plan"],
-    "phase": ["draft", "approved"],
-    "groups": ["vision"],
+    "mode": [
+      "plan"
+    ],
+    "phase": [
+      "draft",
+      "approved"
+    ],
+    "groups": [
+      "vision"
+    ],
     "endpoint": "any",
     "requires_vision": true,
     "requires_subagent_enabled": false,
@@ -179,7 +196,9 @@
     ],
     "parameters": {
       "type": "object",
-      "required": ["image_path"],
+      "required": [
+        "image_path"
+      ],
       "properties": {
         "image_path": {
           "type": "string",
@@ -189,69 +208,237 @@
     }
   },
   {
-    "name": "write_todos",
-    "description": "Create or update the structured todo list / DAG that captures the plan's steps. This is the core planning tool: every step the executor will later take should be expressed as a todo item here. Items progress `pending` → `in_progress` → `completed` (or `blocked`). Items can declare dependencies via `depends_on`; downstream items remain `blocked` until their dependencies complete. Existing items are patched by `id`; items with a new or omitted `id` are appended as new nodes. While `plan.status='draft'` (the normal state during Plan Mode), `completed` status is NOT allowed and all ids must use the `todo-N` prefix — finalise progression after plan approval. Once `plan.status='completed'` the graph is frozen and further mutations are rejected.",
-    "handler": "src.tools.builtins.write_todos_tool:write_todos_tool",
-    "mode": ["plan"],
-    "phase": ["draft", "approved"],
-    "groups": ["planning"],
+    "name": "write_plan",
+    "description": "Emit the FINISHED execution plan as the canonical plan.md plus the structured plan/todo_graph state the Work agent reads on handoff. This is the terminal action of a plan turn: call it ONCE, after you have investigated enough (with ls/grep/read_file/task/web_search/recall) to scope the work and resolved any blocking questions via ask_user_for_clarification. Provide a title, objective, summary, the domain, and an ordered list of todos. Every todo should carry an observable completion_requirement on its steps; add depends_on ONLY where there is a real data dependency so independent work can run in parallel. Use the optional clarifications list only when a missing detail would fundamentally change the plan's shape — it renders inline in the Execute Plan popup. Do NOT execute any of the plan here; planning produces the document, the Work agent carries it out.",
+    "handler": "src.tools.builtins.write_plan_tool:write_plan_tool",
+    "mode": [
+      "plan"
+    ],
+    "phase": [
+      "draft",
+      "approved"
+    ],
+    "groups": [
+      "planning"
+    ],
     "endpoint": "any",
     "requires_vision": false,
     "requires_subagent_enabled": false,
-    "returns": "Command that writes `state.todo_graph` (`{nodes, ready_ids, updated_at}`), refreshes the legacy `state.todos` list for UI compatibility, and syncs the plan handoff files. On rejection emits a tool message tagged with one of: `draft_completion_blocked`, `completed_plan_frozen`, `validation_failed`.",
+    "returns": "Command that writes `state.plan` (status `draft`, or `approved` under auto mode), `state.todo_graph` (`{nodes, ready_ids}`), the legacy `state.todos` list, `state.plan_history`, and the handoff artifacts; saves `plan.md` + a versioned snapshot under the workspace; emits a `plan_created` SSE event; and flags `plan_just_written` so the planner finalises and ends the turn.",
     "examples": [
-      "write_todos(todos=[{\"id\": \"todo-1\", \"content\": \"Outline doc structure\", \"status\": \"in_progress\"}])",
-      "write_todos(todos=[{\"id\": \"todo-1\", \"content\": \"Draft Q2 invoice for Acme Corp\", \"status\": \"pending\"}, {\"id\": \"todo-2\", \"content\": \"Email invoice to client for approval\", \"status\": \"pending\", \"depends_on\": [\"todo-1\"]}])",
-      "write_todos(todos=[{\"id\": \"todo-1\", \"content\": \"Draft Q2 invoice for Acme Corp\", \"status\": \"pending\"}, {\"id\": \"todo-2\", \"content\": \"Generate expense summary XLSX\", \"status\": \"pending\"}, {\"id\": \"todo-3\", \"content\": \"Email both files to client\", \"status\": \"pending\", \"depends_on\": [\"todo-1\", \"todo-2\"]}])",
-      "write_todos(todos=[{\"id\": \"todo-1\", \"content\": \"Survey weekend events in Singapore\", \"status\": \"pending\", \"owner\": \"subagent\", \"subagent_type\": \"knowledge-researcher\"}])"
+      "write_plan(title=\"Netherlands coast trip\", objective=\"A 12-day itinerary along the western Dutch coast and islands.\", summary=\"Day-by-day plan covering transport, lodging, and island hops.\", domain=\"travel\", todos=[{\"id\": \"todo-1\", \"content\": \"Shortlist coastal towns and islands to visit\", \"rationale\": \"Anchors the route before scheduling.\", \"steps\": [{\"description\": \"Identify candidate stops\", \"completion_requirement\": \"List has >= 8 towns/islands with region tags\"}]}, {\"id\": \"todo-2\", \"content\": \"Draft day-by-day itinerary\", \"depends_on\": [\"todo-1\"], \"steps\": [{\"description\": \"Sequence stops across 12 days\", \"completion_requirement\": \"Itinerary covers 12 days with transport between each stop\"}]}])",
+      "write_plan(title=\"Refactor auth module\", objective=\"Replace the session auth with JWT across the API.\", summary=\"Stepwise migration with tests gating each change.\", domain=\"code\", todos=[{\"id\": \"todo-1\", \"content\": \"Map current auth call sites\", \"steps\": [{\"description\": \"grep for session usage\", \"completion_requirement\": \"List of files+lines touching session auth\"}]}, {\"id\": \"todo-2\", \"content\": \"Implement JWT issuance\", \"depends_on\": [\"todo-1\"]}], clarifications=[{\"question\": \"Token lifetime?\", \"options\": [{\"label\": \"15 min + refresh\", \"recommended\": True}, {\"label\": \"24h\"}]}])"
     ],
     "parameters": {
       "type": "object",
-      "required": ["todos"],
+      "required": [
+        "title",
+        "objective",
+        "summary",
+        "todos"
+      ],
       "properties": {
+        "title": {
+          "type": "string",
+          "description": "Short plan title (<= 8 words)."
+        },
+        "objective": {
+          "type": "string",
+          "description": "One-paragraph description of the intended end state the user wants."
+        },
+        "summary": {
+          "type": "string",
+          "description": "1-2 sentence overview of what the plan will accomplish."
+        },
+        "domain": {
+          "type": "string",
+          "description": "Dominant domain — one of code|research|legal|life_admin|data|shopping|food|events|travel|learning|generic. Shapes dependency defaults.",
+          "enum": [
+            "code",
+            "research",
+            "legal",
+            "life_admin",
+            "data",
+            "shopping",
+            "food",
+            "events",
+            "travel",
+            "learning",
+            "generic"
+          ]
+        },
         "todos": {
           "type": "array",
-          "description": "List of todo updates. Reuse an existing `id` to patch an existing node; omit or use a new `id` to create a new node. Only the fields you supply are written — unspecified fields preserve their prior values on patches.",
+          "description": "Ordered execution todos. Use ids 'todo-1', 'todo-2', ... Add depends_on only for real data dependencies; keep independent todos unsequenced so they can run in parallel.",
           "items": {
             "type": "object",
-            "required": ["content", "status"],
+            "required": [
+              "content"
+            ],
             "properties": {
               "id": {
                 "type": "string",
-                "description": "Optional stable identifier. Reuse to patch an existing todo, omit (or supply a new value) to create one. In draft plans the id must match `todo-N`."
+                "description": "Stable id in 'todo-N' format."
               },
               "content": {
                 "type": "string",
-                "description": "One-line description of the work. Phrase as an imperative action (`\"Add login form\"`, not `\"login form\"`)."
+                "description": "Action verb + concise task (<= 14 words)."
               },
-              "status": {
+              "rationale": {
                 "type": "string",
-                "enum": ["pending", "in_progress", "completed", "blocked"],
-                "description": "Lifecycle state. Use `in_progress` for exactly one todo at a time (the one you are actively elaborating). `blocked` is reserved for waiting on a dependency. `completed` is forbidden while plan.status='draft'."
+                "description": "Why this step exists and why now (1 sentence)."
               },
               "depends_on": {
                 "type": "array",
-                "items": {"type": "string"},
-                "description": "Ids of todos that must reach `completed` before this todo can transition out of `blocked` into `pending`/`in_progress`. The graph must remain acyclic — cycles cause the whole update to be rejected."
+                "items": {
+                  "type": "string"
+                },
+                "description": "Ids of todos that MUST complete before this one starts. Omit for independent work."
               },
               "owner": {
                 "type": "string",
-                "enum": ["lead", "subagent"],
-                "description": "Who will execute this todo. Default `lead`. Use `subagent` to mark work that should later be delegated via `task`; set `subagent_type` alongside."
+                "enum": [
+                  "lead",
+                  "subagent"
+                ],
+                "description": "Who runs it: 'lead' (default) or 'subagent'."
               },
               "subagent_type": {
-                "type": "string",
-                "enum": ["general-purpose", "knowledge-researcher", "docs-explorer", "comparison-dimension-researcher", "synthesis-reviewer", "vault-source-researcher"],
-                "description": "Required when `owner=subagent`. Names the subagent that will execute this todo."
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Suggested subagent for the Work agent to use, when owner is 'subagent'."
               },
-              "target_endpoint": {
+              "objective": {
                 "type": "string",
-                "enum": ["primary", "helper"],
-                "description": "Routing hint for the model endpoint. `primary` for the main reasoning model, `helper` for cheaper triage. Defaults to `primary` for lead-owned work."
+                "description": "Phase-level outcome this todo achieves (1-2 sentences)."
               },
-              "tool_budget": {
-                "type": "integer",
-                "description": "Optional soft cap on tool calls this todo is expected to need. Used by middlewares for progress / stall detection."
+              "failure_fallback": {
+                "type": "string",
+                "description": "What the Work agent should do if a step fails (e.g. best-effort labelled, or ask_user_for_clarification)."
+              },
+              "completion_requirement": {
+                "type": "string",
+                "description": "Optional todo-level observable check, when it adds something beyond the final step."
+              },
+              "steps": {
+                "type": "array",
+                "description": "Ordered execution steps; each MUST have an observable completion_requirement.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "description"
+                  ],
+                  "properties": {
+                    "description": {
+                      "type": "string",
+                      "description": "Short action sentence for the step."
+                    },
+                    "completion_requirement": {
+                      "type": "string",
+                      "description": "Concrete check proving the step is done (e.g. 'file has >= 10 entries')."
+                    },
+                    "subagent_types": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Suggested subagents for this step (Work-agent hint)."
+                    },
+                    "tools": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Suggested tools for this step (Work-agent hint)."
+                    },
+                    "output_artifact_path": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Virtual path under /mnt/user-data/workspace, only when the completion_requirement references a file."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Assumptions the plan relies on."
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Hard constraints the work must respect."
+        },
+        "risks": {
+          "type": "array",
+          "description": "Main delivery risks with mitigations.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "risk": {
+                "type": "string"
+              },
+              "mitigation": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Observable success criteria for the whole plan."
+        },
+        "clarifications": {
+          "type": "array",
+          "description": "Optional clarifying questions surfaced in the Execute Plan popup. Use only when a missing detail would fundamentally change the plan.",
+          "items": {
+            "type": "object",
+            "required": [
+              "question",
+              "options"
+            ],
+            "properties": {
+              "question": {
+                "type": "string",
+                "description": "The clarifying question."
+              },
+              "options": {
+                "type": "array",
+                "description": "2-4 options; mark exactly one recommended:true and list it first.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "label"
+                  ],
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "recommended": {
+                      "type": "boolean"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
               }
             }
           }
@@ -263,9 +450,16 @@
     "name": "ls",
     "description": "List the contents of a directory in tree format, up to 2 levels deep — useful in Plan Mode for surveying the codebase, an uploads folder, or a case-file directory before deciding the plan's shape. Faster and more readable than `bash(\"ls -la ...\")` for quick discovery — prefer this when you just want to see what's in a directory. Returns each child on its own line with simple indentation for the second level. Does NOT honor `.gitignore` — hidden and ignored files appear in the listing. For deeper recursion, exact-name file search, or filtering, defer that to execution (Work Mode) rather than expanding the plan's scope here. Empty directories return the literal string `(empty)`.",
     "handler": "src.sandbox.tools:ls_tool",
-    "mode": ["plan"],
-    "phase": ["draft", "approved"],
-    "groups": ["sandbox"],
+    "mode": [
+      "plan"
+    ],
+    "phase": [
+      "draft",
+      "approved"
+    ],
+    "groups": [
+      "sandbox"
+    ],
     "endpoint": "any",
     "requires_vision": false,
     "requires_subagent_enabled": false,
@@ -276,7 +470,10 @@
     ],
     "parameters": {
       "type": "object",
-      "required": ["description", "path"],
+      "required": [
+        "description",
+        "path"
+      ],
       "properties": {
         "description": {
           "type": "string",
@@ -293,9 +490,16 @@
     "name": "read_file",
     "description": "Read the contents of a text file — source code, configuration, logs, markdown, a contract draft, a case note — to inform the plan. In Plan Mode you should read before you decide: if your plan depends on what's in a file, read it now rather than guessing. Supply `start_line` and `end_line` TOGETHER (both or neither) to read a 1-indexed inclusive range; omit both to read the whole file. Prefer reading a specific range for large files — full reads are wasteful for files over a few hundred lines. Do NOT use this tool for binary files or images — use `view_image` for images, and defer unknown binary inspection to execution.",
     "handler": "src.sandbox.tools:read_file_tool",
-    "mode": ["plan"],
-    "phase": ["draft", "approved"],
-    "groups": ["sandbox"],
+    "mode": [
+      "plan"
+    ],
+    "phase": [
+      "draft",
+      "approved"
+    ],
+    "groups": [
+      "sandbox"
+    ],
     "endpoint": "any",
     "requires_vision": false,
     "requires_subagent_enabled": false,
@@ -308,7 +512,10 @@
     ],
     "parameters": {
       "type": "object",
-      "required": ["description", "path"],
+      "required": [
+        "description",
+        "path"
+      ],
       "properties": {
         "description": {
           "type": "string",
@@ -391,9 +598,16 @@
     "name": "task",
     "description": "Delegate ONE scoped scope-discovery objective to a planning subagent that runs in its own isolated context, then returns a structured brief you reason over while drafting the plan. In Plan Mode the only subagents available are read-only planning helpers — they investigate and report, they NEVER execute work or produce the deliverable. Use this to understand the problem faster, especially by running several finders in PARALLEL across independent facets (e.g. one `finder-agent` mapping the backend while another maps the frontend, or several `scope-researcher` calls covering different sub-topics). The subagent does NOT see this conversation — its `prompt` must be fully self-contained: state the one facet/area, any constraints, and the brief you want back. Keep each delegation to a single narrow objective; split broad asks into multiple `task` calls. Do NOT use for: work you can do directly with `ls`/`grep`/`read_file`/`web_search`; anything that edits files or executes the plan (that is Work Mode); questions that need the user (use `ask_user_for_clarification`).",
     "handler": "src.tools.builtins.task_tool:task_tool",
-    "mode": ["plan"],
-    "phase": ["draft", "approved"],
-    "groups": ["subagents"],
+    "mode": [
+      "plan"
+    ],
+    "phase": [
+      "draft",
+      "approved"
+    ],
+    "groups": [
+      "subagents"
+    ],
     "endpoint": "any",
     "requires_vision": false,
     "requires_subagent_enabled": true,
@@ -405,7 +619,11 @@
     ],
     "parameters": {
       "type": "object",
-      "required": ["description", "prompt", "subagent_type"],
+      "required": [
+        "description",
+        "prompt",
+        "subagent_type"
+      ],
       "properties": {
         "description": {
           "type": "string",
@@ -417,7 +635,10 @@
         },
         "subagent_type": {
           "type": "string",
-          "enum": ["scope-researcher", "finder-agent"],
+          "enum": [
+            "scope-researcher",
+            "finder-agent"
+          ],
           "description": "Which planning subagent to invoke. `scope-researcher`: understands the SCOPE of one facet using `web_search` + `query_knowledge_vault` (sub-topics, sources, ambiguities). `finder-agent`: FINDS AND UNDERSTANDS local files/directories using `grep`/`ls`/`read_file` (maps a repo/folder, reads README/entrypoints/configs, reports where things live)."
         },
         "max_turns": {

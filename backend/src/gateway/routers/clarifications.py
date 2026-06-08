@@ -264,9 +264,10 @@ async def clarify_batch(thread_id: str, request: ClarifyBatchRequest) -> Clarify
 
     resumed_run_id: str | None = None
     if should_replan:
-        # Re-enter Plan Mode so the planner revises the draft in place. The
-        # planner sees clarification_pending=False (set above) and the fresh
-        # answer message, so `_should_plan` triggers an in-place re-plan.
+        # Re-enter Plan Mode so the agent revises the draft in place. It sees
+        # clarification_pending=False (set above) and the fresh answer message,
+        # then calls `write_plan` again to emit the revised plan (reusing the
+        # plan_id and bumping the revision).
         try:
             objective = str(plan.get("objective") or plan.get("title") or "").strip()
             context: dict[str, Any] = {

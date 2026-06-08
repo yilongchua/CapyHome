@@ -6,7 +6,7 @@ from langchain.tools import BaseTool
 from src.community.knowledge_vault_search import query_knowledge_vault_tool, save_to_knowledge_vault_tool
 from src.config import get_app_config
 from src.reflection import resolve_variable
-from src.tools.builtins import ask_user_for_clarification_tool, present_file_tool, recall_tool, task_tool, view_image_tool, write_todos_tool
+from src.tools.builtins import ask_user_for_clarification_tool, present_file_tool, recall_tool, task_tool, view_image_tool, write_plan_tool, write_todos_tool
 from src.tools.loader import build_structured_tool, filter_mcp_tools_by_policy, load_external_policy, load_tool_definitions
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,7 @@ BUILTIN_TOOLS = [
 _COMMUNITY_TOOL_MODES: dict[str, frozenset[str]] = {
     "query_knowledge_vault": frozenset({"work", "auto"}),
     "save_to_knowledge_vault": frozenset({"work", "auto"}),
+    "write_todos": frozenset({"work", "auto"}),
     # Execution tools defined in config.yaml. The JSON work catalog already
     # excludes these from plan mode, but the config.yaml `loaded_tools` path
     # would otherwise re-introduce them under plan_agent without a policy.
@@ -202,6 +203,8 @@ def get_available_tools(
         if supports_vision:
             builtin_tools.append(view_image_tool)
             logger.info(f"Including view_image_tool for model '{model_name}' (supports_vision=True)")
+        if (mode or "").strip().lower() == "plan" and _get_community_tool_enabled(write_plan_tool.name):
+            builtin_tools.append(write_plan_tool)
 
     # When JSON drives tools, prefer the JSON-built BaseTool on name collisions so
     # the JSON-sourced description/policy wins over any config.yaml duplicate.
