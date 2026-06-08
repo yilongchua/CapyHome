@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from src.community.knowledge_vault_search import vector_index as vi
 from src.community.knowledge_vault_search.search import (
     VALID_CATEGORIES,
     VaultSearcher,
@@ -419,3 +421,171 @@ class TestQueryKnowledgeVaultTool:
         parsed = json.loads(raw)
         assert parsed["ok"] is False
         assert "disk error" in parsed["error"]
+
+
+# ---------------------------------------------------------------------------
+# VaultVectorIndex rebuild safety: no inline rebuild from search(), build lock
+# collapses the thundering herd, cooldown throttles repeated attempts.
+# (Embedder is stubbed so these never touch a real /embeddings endpoint.)
+# ---------------------------------------------------------------------------
+
+
+def _fake_vec(text: str, dims: int) -> np.ndarray:
+    """Deterministic, all-positive bag-of-tokens embedding.
+
+    All entries are >= a positive baseline, so the cosine similarity between any
+    two vectors is strictly positive (matching tokens add more). This mirrors
+    real embeddings (related text is positively correlated) and avoids the
+    random-sign flakiness a Gaussian embedding would introduce against the
+    ``score <= 0`` filter in ``VaultVectorIndex.search``.
+    """
+    vec = np.full(dims, 0.1, dtype=np.float32)
+    for token in _tokenize(text):
+        vec[int(hashlib.sha1(token.encode()).hexdigest(), 16) % dims] += 1.0
+    return vec
+
+
+class _CountingEmbedder:
+    """Deterministic, offline embedder that counts batch calls (thread-safe)."""
+
+    def __init__(self, dims: int = 8) -> None:
+        import threading
+
+        self.dims = dims
+        self.batch_calls = 0
+        self._lock = threading.Lock()
+
+    def embed_batch(self, texts):
+        with self._lock:
+            self.batch_calls += 1
+        return [_fake_vec(t, self.dims) for t in texts]
+
+    def embed_one(self, text):
+        return _fake_vec(text, self.dims)
+
+    def resolved_model_name(self) -> str:
+        return "fake-embedding-model"
+
+
+def _make_index(vault: Path, embedder: _CountingEmbedder) -> VaultVectorIndex:
+    idx = VaultVectorIndex(vault, dimensions=embedder.dims, chunk_chars=400, overlap_chars=50)
+    idx._embedder = embedder
+    return idx
+
+
+def _poll_until_searchable(idx: VaultVectorIndex, query: str, timeout: float = 5.0) -> list:
+    """Poll search() until the background rebuild lands and it returns hits.
+
+    This polls the observable contract (search results) rather than internal
+    rebuild bookkeeping, so it is free of background-thread timing races.
+    """
+    import time as _time
+
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        results = idx.search(query)
+        if results:
+            return results
+        _time.sleep(0.02)
+    return idx.search(query)
+
+
+class TestVectorIndexRebuildSafety:
+    def test_search_does_not_rebuild_inline(self, tmp_path):
+        """A search on a missing index returns [] immediately without embedding inline.
+
+        The async scheduler is stubbed out so this asserts purely the inline
+        path: no embedding work, immediate lexical-fallback [].
+        """
+        vault = _make_vault(tmp_path)
+        _write_page(vault, "sources", "lg.md", "LangGraph", "LangGraph is a graph agent framework.")
+        embedder = _CountingEmbedder()
+        idx = _make_index(vault, embedder)
+
+        scheduled = {"count": 0}
+        idx.ensure_built_async = lambda: scheduled.__setitem__("count", scheduled["count"] + 1)  # type: ignore[method-assign]
+
+        assert idx.search("LangGraph agent") == []
+        assert embedder.batch_calls == 0, "search must not embed the vault inline"
+        assert scheduled["count"] == 1, "search must schedule exactly one background rebuild"
+
+    def test_search_returns_hits_after_background_rebuild(self, tmp_path):
+        """After the scheduled background rebuild lands, search returns vector hits."""
+        vault = _make_vault(tmp_path)
+        _write_page(vault, "sources", "lg.md", "LangGraph", "LangGraph is a graph agent framework.")
+        embedder = _CountingEmbedder()
+        idx = _make_index(vault, embedder)
+
+        # First search returns [] and schedules the rebuild in the background.
+        assert idx.search("LangGraph agent") == []
+
+        # Poll the real contract: eventually a search returns hits.
+        results = _poll_until_searchable(idx, "LangGraph agent")
+        assert results and results[0]["page_id"] == "lg"
+        assert embedder.batch_calls >= 1
+        assert idx.matrix_path.exists()
+
+    def test_build_lock_collapses_concurrent_rebuilds(self, tmp_path):
+        """N concurrent build() calls produce ONE rebuild, not N."""
+        import threading
+
+        vault = _make_vault(tmp_path)
+        for i in range(6):
+            _write_page(vault, "sources", f"p{i}.md", f"Page {i}", f"Body content number {i} about agents.")
+        embedder = _CountingEmbedder()
+        idx = _make_index(vault, embedder)
+
+        barrier = threading.Barrier(5)
+
+        def _build():
+            barrier.wait()
+            idx.build()
+
+        threads = [threading.Thread(target=_build) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # 6 pages → with chunk_chars=400 each short page is one chunk → 6 chunks
+        # → one build = ceil(6/8) = 1 embed batch. The herd must collapse to a
+        # single real rebuild, so total batch calls stay at that single build's
+        # count rather than 5x it.
+        assert embedder.batch_calls == 1, f"expected herd collapse to 1 batch, got {embedder.batch_calls}"
+        assert idx.matrix_path.exists()
+
+    def test_cooldown_throttles_repeated_async_rebuilds(self, tmp_path):
+        """A failing rebuild is not re-scheduled within the cooldown window."""
+        vault = _make_vault(tmp_path)
+        _write_page(vault, "sources", "x.md", "X", "Some body about agents and graphs.")
+        embedder = _CountingEmbedder()
+        idx = _make_index(vault, embedder)
+
+        # Force build() to fail so the matrix never appears and _is_ready stays False.
+        def _boom():
+            raise RuntimeError("embeddings unavailable")
+
+        idx._build_locked = _boom  # type: ignore[method-assign]
+
+        key = str(idx.matrix_path)
+        idx.ensure_built_async()
+        # Wait out the (failing) background attempt.
+        import time as _time
+
+        deadline = _time.monotonic() + 2.0
+        while _time.monotonic() < deadline:
+            with vi._REBUILD_STATE_GUARD:
+                done = key not in vi._REBUILD_IN_PROGRESS
+            if done:
+                break
+            _time.sleep(0.02)
+
+        with vi._REBUILD_STATE_GUARD:
+            assert key not in vi._REBUILD_IN_PROGRESS  # finished (failed)
+            assert key in vi._REBUILD_LAST_ATTEMPT  # attempt was recorded
+
+        # A second immediate request must be throttled by the cooldown (no new thread).
+        before = dict(vi._REBUILD_LAST_ATTEMPT)
+        idx.ensure_built_async()
+        with vi._REBUILD_STATE_GUARD:
+            assert vi._REBUILD_LAST_ATTEMPT[key] == before[key], "cooldown should suppress re-scheduling"

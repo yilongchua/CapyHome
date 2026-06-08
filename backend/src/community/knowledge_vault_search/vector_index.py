@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import re
+import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -14,9 +17,32 @@ import numpy as np
 from src.config import get_app_config
 from src.control_plane.vault_text_utils import parse_frontmatter as _parse_frontmatter
 
+logger = logging.getLogger(__name__)
+
 _DEFAULT_WINDOW = 1200
 _DEFAULT_OVERLAP = 200
 _DEFAULT_EMBED_BATCH_SIZE = 8
+
+# Re-embedding the whole vault is expensive (one /embeddings call per batch).
+# A `search()` must never trigger that inline — concurrent searches would each
+# launch their own full rebuild and storm the embedding endpoint. These
+# module-level structures serialize rebuilds to at most one per index (keyed by
+# matrix path) and add a cooldown so a down endpoint can't be hammered.
+_BUILD_LOCKS: dict[str, threading.Lock] = {}
+_BUILD_LOCKS_GUARD = threading.Lock()
+_REBUILD_IN_PROGRESS: set[str] = set()
+_REBUILD_LAST_ATTEMPT: dict[str, float] = {}
+_REBUILD_STATE_GUARD = threading.Lock()
+_REBUILD_COOLDOWN_SECONDS = 60.0
+
+
+def _get_build_lock(key: str) -> threading.Lock:
+    with _BUILD_LOCKS_GUARD:
+        lock = _BUILD_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _BUILD_LOCKS[key] = lock
+        return lock
 
 
 def _tokenize(text: str) -> list[str]:
@@ -331,7 +357,87 @@ class VaultVectorIndex:
         matrix = np.vstack([_normalize(v.astype(np.float32)) for v in vectors])
         return matrix, "openai_compatible"
 
+    def _read_metadata(self) -> dict[str, Any] | None:
+        """Read the index metadata from disk without ever triggering a build."""
+        if not self.metadata_path.exists():
+            return None
+        try:
+            payload = json.loads(self.metadata_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _is_ready(self) -> bool:
+        """True iff a current, non-empty matrix + metadata exist on disk.
+
+        Cheap, build-free check used by ``search()`` to decide whether vector
+        search can run now or whether it should fall back to lexical search and
+        schedule a background rebuild.
+        """
+        payload = self._read_metadata()
+        if payload is None or not self._metadata_is_current(payload):
+            return False
+        if int(payload.get("chunk_count") or 0) <= 0:
+            # Legitimately empty vault — "ready" but nothing to vector-search.
+            # Treat as not-ready so search() returns [] and skips matrix load.
+            return False
+        return self.matrix_path.exists()
+
+    def _read_matrix(self, expected_count: int) -> np.ndarray:
+        """Read the matrix from disk without ever triggering a build."""
+        if not self.matrix_path.exists():
+            return np.empty((0, self.dimensions), dtype=np.float32)
+        try:
+            with np.load(self.matrix_path) as data:
+                matrix = np.array(data["embeddings"], dtype=np.float32)
+        except Exception:
+            return np.empty((0, self.dimensions), dtype=np.float32)
+        if matrix.ndim != 2 or matrix.shape[0] != expected_count:
+            return np.empty((0, self.dimensions), dtype=np.float32)
+        return matrix
+
+    def ensure_built_async(self) -> None:
+        """Schedule a single background rebuild of the index, if warranted.
+
+        At most one rebuild runs per index at a time, and repeated attempts are
+        throttled by a cooldown so a persistently-unavailable embedding endpoint
+        is not hammered on every search.
+        """
+        key = str(self.matrix_path)
+        now = time.monotonic()
+        with _REBUILD_STATE_GUARD:
+            if key in _REBUILD_IN_PROGRESS:
+                return
+            last = _REBUILD_LAST_ATTEMPT.get(key, 0.0)
+            if last and (now - last) < _REBUILD_COOLDOWN_SECONDS:
+                return
+            _REBUILD_IN_PROGRESS.add(key)
+            _REBUILD_LAST_ATTEMPT[key] = now
+
+        def _runner() -> None:
+            try:
+                self.build()
+            except Exception:
+                logger.exception("vault vector index background rebuild failed (key=%s)", key)
+            finally:
+                with _REBUILD_STATE_GUARD:
+                    _REBUILD_IN_PROGRESS.discard(key)
+
+        threading.Thread(target=_runner, name="vault-vector-rebuild", daemon=True).start()
+
     def build(self) -> dict[str, Any]:
+        # Serialize rebuilds per index so concurrent callers don't each launch a
+        # full re-embed of the vault (thundering herd against /embeddings).
+        with _get_build_lock(str(self.matrix_path)):
+            # Another thread may have just produced a current index while we
+            # waited on the lock — skip the redundant rebuild.
+            if self._is_ready():
+                cached = self._read_metadata()
+                if cached is not None:
+                    return cached
+            return self._build_locked()
+
+    def _build_locked(self) -> dict[str, Any]:
         chunks = self._build_chunks()
         matrix, effective_backend = self._embed_chunks(chunks)
         built_at = datetime.now(UTC).isoformat()
@@ -428,12 +534,21 @@ class VaultVectorIndex:
         }
 
     def search(self, query: str, *, categories: list[str] | None = None, limit: int = 10) -> list[dict[str, Any]]:
-        payload = self.load()
+        # A search must never block on (or trigger) a full vault re-embed. If the
+        # on-disk index is missing/stale/empty, schedule a single background
+        # rebuild and fall back to lexical search (the caller fuses our []).
+        if not self._is_ready():
+            self.ensure_built_async()
+            return []
+        payload = self._read_metadata() or {}
         raw_chunks = payload.get("chunks", [])
         if not isinstance(raw_chunks, list) or not raw_chunks:
             return []
-        matrix = self._load_matrix(len(raw_chunks))
+        matrix = self._read_matrix(len(raw_chunks))
         if matrix.shape[0] == 0:
+            # Matrix missing or shape-mismatched vs metadata — repair in the
+            # background and serve lexical results this turn.
+            self.ensure_built_async()
             return []
 
         query_vector: np.ndarray | None = None

@@ -265,7 +265,7 @@ When `app_config.json_driven_tools` is `true` (the default), the LLM-facing cont
 - `image_search/` - Image search tool
 - `aio_sandbox/` - Docker/container-based sandbox provider
 - `comfyui/` - ComfyUI image/video generation integration
-- `knowledge_vault_search/` - BM25 keyword search over compiled vault pages
+- `knowledge_vault_search/` - hybrid (BM25 + vector) search over compiled vault pages. **Vector-index rebuild is lazy but never inline-on-search**: `VaultVectorIndex.search()` reads an existing matrix if present/current, otherwise it schedules a single background rebuild (`ensure_built_async`) and returns `[]` so the caller falls back to lexical results — it never blocks the agent's `query_knowledge_vault` call on a full re-embed. `build()` is serialized by a per-index lock and re-checks readiness after acquiring it, so concurrent searches collapse to one rebuild instead of a thundering herd against the `/embeddings` endpoint. A persistently-failing rebuild is throttled by a cooldown. (Historical trap: an empty-vault build deletes the `.npz` matrix and writes a `chunk_count: 0` sentinel; once the vault grows, every search saw a stale signature and used to trigger a fresh full rebuild — now guarded.)
 - `web_search/` - Web search via local SearXNG backend with crawl4ai
 
 ### MCP System (`src/mcp/`)

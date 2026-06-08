@@ -27,9 +27,19 @@ class _ThreadsClient:
         self._values = {**self._values, **values}
 
 
+class _RunsClient:
+    def __init__(self):
+        self.create_calls: list[tuple[tuple, dict]] = []
+
+    async def create(self, *args, **kwargs):
+        self.create_calls.append((args, kwargs))
+        return {"run_id": "run-work-1"}
+
+
 class _Client:
-    def __init__(self, threads: _ThreadsClient):
+    def __init__(self, threads: _ThreadsClient, runs: _RunsClient | None = None):
         self.threads = threads
+        self.runs = runs or _RunsClient()
 
 
 def _messages(count: int) -> list[dict]:
@@ -188,17 +198,19 @@ def test_execute_plan_resolves_answered_clarification(monkeypatch):
             "plan_history": [{"plan_id": "plan-1", "title": "Plan", "status": "draft"}],
         }
     )
-    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads))
-    monkeypatch.setattr("src.gateway.routers.steering.spawn_work_mode_handoff", lambda **kwargs: None)
+    runs = _RunsClient()
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads, runs))
 
     response = asyncio.run(execute_plan("thread-1", ExecutePlanRequest(plan_id="plan-1")))
 
     assert response.acknowledged is True
     assert response.status == "accepted"
-    assert response.plan_status == "approved"
+    assert response.plan_status == "executing"
+    assert response.run_id == "run-work-1"
     updated_plan = threads.calls[-1][1]["plan"]
     assert updated_plan["clarification_pending"] is False
     assert isinstance(updated_plan["clarification_answered_at"], str)
+    assert runs.create_calls[-1][0][:2] == ("thread-1", "work_agent")
 
 
 def test_execute_plan_accepts_draft_plan(monkeypatch):
@@ -208,13 +220,16 @@ def test_execute_plan_accepts_draft_plan(monkeypatch):
             "plan_history": [{"plan_id": "plan-1", "title": "Plan", "status": "draft"}],
         }
     )
-    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads))
+    runs = _RunsClient()
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads, runs))
 
     response = asyncio.run(execute_plan("thread-1", ExecutePlanRequest(plan_id="plan-1")))
     assert response.acknowledged is True
     assert response.status == "accepted"
-    assert response.plan_status == "approved"
+    assert response.plan_status == "executing"
+    assert response.run_id == "run-work-1"
     assert threads.calls, "execute endpoint should persist approved plan state"
+    assert runs.create_calls[-1][0][:2] == ("thread-1", "work_agent")
 
 
 def test_execute_plan_duplicate_for_already_approved(monkeypatch):
@@ -228,34 +243,27 @@ def test_execute_plan_duplicate_for_already_approved(monkeypatch):
             "work_mode": {"active": True},
         }
     )
-    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads))
-    spawn_calls: list[dict] = []
-    monkeypatch.setattr(
-        "src.gateway.routers.steering.spawn_work_mode_handoff",
-        lambda **kwargs: spawn_calls.append(kwargs),
-    )
+    runs = _RunsClient()
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads, runs))
 
     response = asyncio.run(execute_plan("thread-1", ExecutePlanRequest(plan_id="plan-1")))
     assert response.status == "duplicate"
     assert response.plan_status == "executing"
-    assert spawn_calls == []
+    assert runs.create_calls == []
 
 
 def test_execute_plan_recovers_approved_plan_without_handoff(monkeypatch):
     threads = _ThreadsClient(values={"plan": {"plan_id": "plan-1", "status": "approved"}})
-    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads))
-    spawn_calls: list[dict] = []
-    monkeypatch.setattr(
-        "src.gateway.routers.steering.spawn_work_mode_handoff",
-        lambda **kwargs: spawn_calls.append(kwargs),
-    )
+    runs = _RunsClient()
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads, runs))
 
     response = asyncio.run(execute_plan("thread-1", ExecutePlanRequest(plan_id="plan-1")))
 
     assert response.status == "accepted"
-    assert response.plan_status == "approved"
-    assert len(spawn_calls) == 1
-    assert threads.calls[-1][1]["plan"].get("execution_handoff_started") is not True
+    assert response.plan_status == "executing"
+    assert response.run_id == "run-work-1"
+    assert len(runs.create_calls) == 1
+    assert threads.calls[-1][1]["plan"].get("execution_handoff_started") is True
     assert threads.calls[-1][1]["plan"]["execution_handoff_failed"] is False
 
 
@@ -271,17 +279,14 @@ def test_execute_plan_retries_after_failed_handoff(monkeypatch):
             }
         }
     )
-    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads))
-    spawn_calls: list[dict] = []
-    monkeypatch.setattr(
-        "src.gateway.routers.steering.spawn_work_mode_handoff",
-        lambda **kwargs: spawn_calls.append(kwargs),
-    )
+    runs = _RunsClient()
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads, runs))
 
     response = asyncio.run(execute_plan("thread-1", ExecutePlanRequest(plan_id="plan-1")))
 
     assert response.status == "accepted"
-    assert len(spawn_calls) == 1
+    assert response.plan_status == "executing"
+    assert len(runs.create_calls) == 1
     assert threads.calls[-1][1]["plan"]["execution_handoff_failed"] is False
 
 
@@ -296,17 +301,14 @@ def test_execute_plan_stale_handoff_flag_without_work_still_accepts(monkeypatch)
             "work_mode": {"active": False},
         }
     )
-    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads))
-    spawn_calls: list[dict] = []
-    monkeypatch.setattr(
-        "src.gateway.routers.steering.spawn_work_mode_handoff",
-        lambda **kwargs: spawn_calls.append(kwargs),
-    )
+    runs = _RunsClient()
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads, runs))
 
     response = asyncio.run(execute_plan("thread-1", ExecutePlanRequest(plan_id="plan-1")))
 
     assert response.status == "accepted"
-    assert len(spawn_calls) == 1
+    assert response.plan_status == "executing"
+    assert len(runs.create_calls) == 1
 
 
 def test_execute_plan_conflict_when_plan_missing(monkeypatch):

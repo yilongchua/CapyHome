@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from langgraph.graph import END, START, StateGraph
+
 from src.agents.middlewares.todo_dag_middleware import (
     collect_clarification_blocked_todo_ids,
     compute_effective_ready_ids,
 )
-from src.agents.thread_state import merge_clarifications
-
+from src.agents.thread_state import ThreadState, merge_clarifications, replace_bool
 
 # --- helper functions ------------------------------------------------------
 
@@ -83,3 +84,28 @@ def test_merge_clarifications_drops_entries_with_no_id():
 def test_merge_clarifications_handles_none_existing():
     assert merge_clarifications(None, [{"id": "c1"}]) == [{"id": "c1"}]
     assert merge_clarifications(None, None) == []
+
+
+def test_replace_bool_latest_explicit_value_wins():
+    assert replace_bool(True, False) is False
+    assert replace_bool(False, True) is True
+
+
+def test_clarification_pending_allows_parallel_true_writes():
+    def _node_a(_state: ThreadState) -> dict:
+        return {"clarification_pending": True}
+
+    def _node_b(_state: ThreadState) -> dict:
+        return {"clarification_pending": True}
+
+    graph_builder = StateGraph(ThreadState)
+    graph_builder.add_node("a", _node_a)
+    graph_builder.add_node("b", _node_b)
+    graph_builder.add_edge(START, "a")
+    graph_builder.add_edge(START, "b")
+    graph_builder.add_edge("a", END)
+    graph_builder.add_edge("b", END)
+
+    result = graph_builder.compile().invoke({})
+
+    assert result["clarification_pending"] is True

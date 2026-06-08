@@ -267,6 +267,18 @@ def merge_clarifications(existing: list[Clarification] | None, new: list[Clarifi
     return merged
 
 
+def replace_bool(_existing: bool | None, new: bool | None) -> bool:
+    """Reducer for boolean mirror fields that may be written by parallel tools.
+
+    The canonical clarification queue has its own merge reducer; this boolean
+    is only a UI/convenience mirror. Treat each explicit write as authoritative
+    so a later `False` can clear prior pending state, while duplicate parallel
+    `True` writes coalesce instead of tripping LangGraph's concurrent-update
+    guard.
+    """
+    return bool(new)
+
+
 def merge_artifacts(existing: list[str] | None, new: list[str] | None) -> list[str]:
     """Reducer for artifacts list - merges and deduplicates artifacts."""
     if existing is None:
@@ -313,7 +325,7 @@ class ThreadState(AgentState):
     # runs (legacy plan.md v5 still reads/writes the nested field for back-
     # compat — see handoff.py).
     clarifications: Annotated[list[Clarification], merge_clarifications]
-    clarification_pending: NotRequired[bool]
+    clarification_pending: Annotated[bool, replace_bool]
     eval_attempts: NotRequired[int]
     todo_graph: NotRequired[TodoGraphState | None]
     deferred_task_calls: NotRequired[list[dict] | None]
