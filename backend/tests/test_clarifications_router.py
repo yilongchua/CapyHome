@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+from src.agents.middlewares.message_selection import is_synthetic_human_message
 from src.gateway.routers.clarifications import ClarificationAnswer, ClarifyBatchRequest, clarify_batch
 
 
@@ -61,6 +62,18 @@ def _pending_clarification_two() -> dict:
     }
 
 
+def test_legacy_unnamed_replan_message_is_synthetic():
+    message = {
+        "type": "human",
+        "content": (
+            "Resolved planning request:\n"
+            "Create the Plan Mode draft from the original request and the settled clarification answers below."
+        ),
+    }
+
+    assert is_synthetic_human_message(message)
+
+
 def test_clarify_batch_starts_plan_turn_when_no_plan_exists(monkeypatch):
     threads = _ThreadsClient(
         {
@@ -87,13 +100,16 @@ def test_clarify_batch_starts_plan_turn_when_no_plan_exists(monkeypatch):
     args, kwargs = runs.create_calls[-1]
     assert args[:2] == ("thread-1", "plan_agent")
     prompt = kwargs["input"]["messages"][0]["content"]
-    assert prompt.startswith("Resolved planning request:")
-    assert "Plan a 12-day Netherlands coast trip" in prompt
-    assert "Existing plan reference:" in prompt
-    assert "plan.md: /mnt/user-data/workspace/plan.md" in prompt
-    assert "State: no structured plan is currently recorded" in prompt
+    assert kwargs["input"]["messages"][0]["name"] == "clarification_replan"
+    assert prompt.startswith("Clarification response received.")
+    assert "Original user request:\nPlan a 12-day Netherlands coast trip" in prompt
+    assert "Existing plan reference:" not in prompt
     assert "What transport mode should the itinerary use?: Train + rental car" in prompt
-    assert "settled user constraints" in prompt
+    assert "Treat these answers as settled user constraints" in prompt
+    assert "Continue the standard Plan Mode workflow" in prompt
+    assert "investigate intent" in prompt
+    assert "analyse scope with read-only tools where useful" in prompt
+    assert "different unresolved question is genuinely blocking" in prompt
     assert "Prior planning context:" not in prompt
     assert "write_plan" in prompt
     assert kwargs["config"] == {"recursion_limit": 1000}
@@ -141,12 +157,14 @@ def test_clarify_batch_starts_plan_turn_and_resolves_existing_draft_plan_with_al
     assert updated_plan["clarification_resolved"] is True
     assert [answer["selected_label"] for answer in updated_plan["clarification_answers"]] == ["Train + rental car", "Two flexible days"]
     prompt = runs.create_calls[-1][1]["input"]["messages"][0]["content"]
+    assert runs.create_calls[-1][1]["input"]["messages"][0]["name"] == "clarification_replan"
     assert "Existing plan reference:" in prompt
     assert "plan.md: /mnt/user-data/workspace/custom-plan.md" in prompt
     assert "Coast Trip" in prompt
     assert "A draft route along the Netherlands coast." in prompt
     assert "What transport mode should the itinerary use?: Train + rental car" in prompt
     assert "How many travel days should stay flexible?: Two flexible days" in prompt
+    assert "Continue the standard Plan Mode workflow" in prompt
     assert runs.create_calls[-1][1]["config"] == {"recursion_limit": 1000}
 
 

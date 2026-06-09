@@ -32,17 +32,29 @@ const SYNTHETIC_HUMAN_MESSAGE_NAMES = new Set([
   "todo_reminder",
   "todo_failure_recovery",
   "plan_followup_prompt",
+  "clarification_replan",
   "work_mode_plan_rerun",
   "active_skills",
   "execute_plan",
 ]);
 
+const LEGACY_SYNTHETIC_HUMAN_PREFIXES = [
+  "resolved planning request:\ncreate the plan mode draft from the original request",
+  "forced plan draft:\nthe previous planning attempt did not produce a plan",
+];
+
 export function isSyntheticHumanMessage(message: Message) {
-  return (
-    message.type === "human" &&
+  if (message.type !== "human") {
+    return false;
+  }
+  if (
     typeof message.name === "string" &&
     SYNTHETIC_HUMAN_MESSAGE_NAMES.has(message.name)
-  );
+  ) {
+    return true;
+  }
+  const text = extractTextFromMessage(message).toLowerCase();
+  return LEGACY_SYNTHETIC_HUMAN_PREFIXES.some((prefix) => text.startsWith(prefix));
 }
 
 type MessageGroup =

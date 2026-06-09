@@ -13,6 +13,7 @@ _SYNTHETIC_HUMAN_NAMES = {
     "todo_dag_reminder",
     "todo_failure_recovery",
     "plan_followup_prompt",
+    "clarification_replan",
     "work_mode_plan_rerun",
     "active_skills",
     "execute_plan",
@@ -27,6 +28,8 @@ _SYNTHETIC_REQUEST_PATTERNS = (
     "work mode detected this request is too complex for direct execution",
     "what was the content of the previous user request",
     "what is the original user request",
+    "resolved planning request:\ncreate the plan mode draft from the original request",
+    "forced plan draft:\nthe previous planning attempt did not produce a plan",
 )
 # The "continue the previous plan-mode answer in the background" pattern was
 # removed: that prompt is emitted by `pro_followup_middleware` as
@@ -72,13 +75,19 @@ def message_name(message: Any) -> str:
     return ""
 
 
+def message_content(message: Any) -> Any:
+    if isinstance(message, dict):
+        return message.get("content", "")
+    return getattr(message, "content", "")
+
+
 def is_synthetic_human_message(message: Any) -> bool:
     if message_type(message) != "human":
         return False
     name = message_name(message).strip()
     if name in _SYNTHETIC_HUMAN_NAMES:
         return True
-    text = extract_text(getattr(message, "content", "")).strip().lower()
+    text = extract_text(message_content(message)).strip().lower()
     return any(pattern in text for pattern in _SYNTHETIC_REQUEST_PATTERNS)
 
 
@@ -86,7 +95,7 @@ def original_user_prompt(messages: list[Any]) -> str:
     for message in reversed(messages):
         if message_type(message) != "human" or is_synthetic_human_message(message):
             continue
-        text = extract_text(getattr(message, "content", "")).strip()
+        text = extract_text(message_content(message)).strip()
         if text:
             return text
     return ""
@@ -98,7 +107,7 @@ def latest_message_text(messages: list[Any], *, msg_type: str, skip_synthetic_hu
             continue
         if skip_synthetic_human and msg_type == "human" and is_synthetic_human_message(message):
             continue
-        text = extract_text(getattr(message, "content", "")).strip()
+        text = extract_text(message_content(message)).strip()
         if text:
             return text
     return ""
@@ -110,7 +119,7 @@ def latest_real_ai_answer(messages: list[Any]) -> str:
             continue
         if getattr(message, "tool_calls", None):
             continue
-        text = extract_text(getattr(message, "content", "")).strip()
+        text = extract_text(message_content(message)).strip()
         if text:
             return text
     return ""

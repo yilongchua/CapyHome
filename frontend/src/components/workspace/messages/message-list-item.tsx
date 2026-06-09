@@ -1,7 +1,7 @@
 import type { Message } from "@langchain/langgraph-sdk";
 import { ChevronLeftIcon, ChevronRightIcon, FileIcon, GitBranchIcon, Loader2Icon } from "lucide-react";
 import { useParams } from "next/navigation";
-import { memo, useMemo, type ImgHTMLAttributes } from "react";
+import { memo, useCallback, useMemo, type AnchorHTMLAttributes, type ImgHTMLAttributes } from "react";
 import rehypeKatex from "rehype-katex";
 
 import {
@@ -30,6 +30,7 @@ import { useRehypeSplitWordsIntoSpans } from "@/core/rehype";
 import { humanMessagePlugins } from "@/core/streamdown";
 import { cn } from "@/lib/utils";
 
+import { useDirectory } from "../artifacts/context";
 import { CapyHomeRunner } from "../chat-ui/capyhome-runner";
 import { CopyButton } from "../copy-button";
 
@@ -153,6 +154,31 @@ function MessageImage({
   );
 }
 
+function ArtifactPreviewLink({
+  href,
+  children,
+  ...props
+}: AnchorHTMLAttributes<HTMLAnchorElement>) {
+  const { select, setOpen } = useDirectory();
+  const handleClick = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      if (!href?.startsWith("/mnt/")) {
+        return;
+      }
+      event.preventDefault();
+      select(href);
+      setOpen(true);
+    },
+    [href, select, setOpen],
+  );
+
+  return (
+    <a href={href} onClick={handleClick} {...props}>
+      {children}
+    </a>
+  );
+}
+
 function MessageContent_({
   className,
   message,
@@ -169,6 +195,9 @@ function MessageContent_({
     () => ({
       img: (props: ImgHTMLAttributes<HTMLImageElement>) => (
         <MessageImage {...props} threadId={thread_id} maxWidth="90%" />
+      ),
+      a: (props: AnchorHTMLAttributes<HTMLAnchorElement>) => (
+        <ArtifactPreviewLink {...props} />
       ),
     }),
     [thread_id],

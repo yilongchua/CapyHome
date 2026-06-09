@@ -148,34 +148,31 @@ def _build_replan_human_message(
     original_request: str,
     current_plan: dict[str, Any] | None,
     answered: list[dict[str, Any]],
-    forced: bool = False,
 ) -> dict[str, Any]:
-    """A fresh, NON-synthetic user message that re-triggers the planner.
+    """A fresh synthetic human message that re-triggers the planner.
 
-    Clarification answers are user input, so Plan Mode should reconsider the
-    plan from the original request plus these answers. The message deliberately
-    has no `name` so downstream user-prompt selection treats it as a real
-    planning request.
+    The message supplies the original request and settled answers as context,
+    then returns control to the normal Plan Mode workflow. It does not override
+    the system prompt's investigation and clarification policy.
     """
     answer_lines = "\n".join(f"- {(a.get('question') or 'Question').strip()}: {(a.get('answer') or '').strip()}" for a in answered)
-    header = (
-        "Forced Plan Draft:\n"
-        "The previous planning attempt did not produce a plan. Create a conservative executable plan now using only the resolved request below.\n"
-        "Do not ask clarifications. Do not call research, file, task, or browsing tools. Your only terminal action is `write_plan`."
-        if forced
-        else "Resolved planning request:\nCreate the Plan Mode draft from the original request and the settled clarification answers below."
-    )
-    sections = [
-        header,
-        "Use sensible assumptions for any remaining gaps and include them in the plan assumptions.",
-        "Call `write_plan` as your terminal action.",
-    ]
+    sections = ["Clarification response received."]
     if original_request:
-        sections.append(f"Original request:\n{original_request}")
-    sections.append(_plan_reference(current_plan))
-    sections.append(f"Resolved clarification(s):\n{answer_lines}")
-    sections.append("These are settled user constraints, not suggestions. Do not ask the same clarification again.")
-    return {"type": "human", "content": "\n\n".join(sections)}
+        sections.append(f"Original user request:\n{original_request}")
+    sections.append(f"Clarification question(s) and answer(s):\n{answer_lines}")
+    if isinstance(current_plan, dict):
+        sections.append(_plan_reference(current_plan))
+    sections.append(
+        "Treat these answers as settled user constraints and do not ask the same questions again. "
+        "Continue the standard Plan Mode workflow from the system prompt: investigate intent, "
+        "analyse scope with read-only tools where useful, decide whether any different unresolved "
+        "question is genuinely blocking, then call `write_plan` once the plan is well scoped."
+    )
+    return {
+        "type": "human",
+        "name": "clarification_replan",
+        "content": "\n\n".join(sections),
+    }
 
 
 def _should_start_plan_turn(values: dict[str, Any], *, clarification_pending: bool) -> bool:

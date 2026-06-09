@@ -8,7 +8,6 @@ import { toast } from "sonner";
 import { type PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { Badge } from "@/components/ui/badge";
 import { AdaptationNotice } from "@/components/workspace/adaptation-notice";
-import { useDirectory } from "@/components/workspace/artifacts/context";
 import {
   ChatBox,
   useThreadChat,
@@ -1262,13 +1261,6 @@ function ChatPageContent({
                       onDismiss={() => setAdaptationEvent(null)}
                     />
                   )}
-                  <PlanReviewBinding
-                    planPath={planReviewPath}
-                    planEventKey={effectivePlanEventKey}
-                    active={Boolean(
-                      effectivePlanCreatedEvent && !isNewThread && effectivePlanEventKey !== hiddenPlanEventKey,
-                    )}
-                  />
                   {/*
                     Mount the popup whenever clarifications are pending — no
                     longer gated on the plan-approval event. Work-mode runs
@@ -1347,31 +1339,4 @@ function ChatPageContent({
       </ChatBox>
     </ThreadContext.Provider>
   );
-}
-
-function PlanReviewBinding({
-  planPath,
-  planEventKey,
-  active,
-}: {
-  planPath: string;
-  planEventKey: string | null;
-  active: boolean;
-}) {
-  const { select, setOpen } = useDirectory();
-  const lastOpenedKeyRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!active || !planEventKey) {
-      return;
-    }
-    if (lastOpenedKeyRef.current === planEventKey) {
-      return;
-    }
-    lastOpenedKeyRef.current = planEventKey;
-    select(planPath);
-    setOpen(true);
-  }, [active, planEventKey, planPath, select, setOpen]);
-
-  return null;
 }

@@ -50,6 +50,21 @@ def test_write_plan_produces_draft_with_preserved_dependencies() -> None:
     nodes = {n["id"]: n for n in update["todo_graph"]["nodes"]}
     assert nodes["todo-2"]["depends_on"] == ["todo-1"]
     assert update["todo_graph"]["ready_ids"] == ["todo-1"]
+    summary_message = update["messages"][-1]
+    assert summary_message.type == "ai"
+    assert summary_message.name == "plan_summary"
+    assert "### Research Plan" in summary_message.content
+    assert "Research and synthesize findings." in summary_message.content
+    assert "[plan.md](/mnt/user-data/workspace/plan.md)" in summary_message.content
+
+
+def test_write_plan_caps_user_visible_summary_at_180_characters() -> None:
+    update = _call_write_plan(_runtime(), summary="x" * 220)
+
+    summary_message = update["messages"][-1]
+    summary_line = summary_message.content.splitlines()[2]
+    assert len(summary_line) == 180
+    assert summary_line.endswith("...")
 
 
 def test_write_plan_auto_mode_marks_approved() -> None:
@@ -57,6 +72,7 @@ def test_write_plan_auto_mode_marks_approved() -> None:
     assert update["plan"]["status"] == "approved"
     assert update["plan"].get("approved_at")
     assert update["plan"].get("awaiting_execution_approval") is False
+    assert all(message.type != "ai" for message in update["messages"])
 
 
 def test_write_plan_preserves_rich_todo_fields() -> None:
@@ -100,6 +116,7 @@ def test_write_plan_clarifications_normalize_recommended_first_and_capped() -> N
     options = update["plan"]["clarifications"][0]["options"]
     assert 2 <= len(options) <= 4
     assert options[0]["recommended"] is True
+    assert all(message.type != "ai" for message in update["messages"])
 
 
 def test_write_plan_auto_mode_answers_inline_clarifications_with_recommended() -> None:

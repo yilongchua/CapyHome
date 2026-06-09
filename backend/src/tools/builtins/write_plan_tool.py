@@ -27,7 +27,7 @@ from typing import Annotated, Any, Literal, NotRequired, TypedDict
 from uuid import uuid4
 
 from langchain.tools import InjectedToolCallId, ToolRuntime, tool
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.config import get_stream_writer
 from langgraph.types import Command
 from langgraph.typing import ContextT
@@ -106,6 +106,17 @@ class _PlanToolState(TypedDict, total=False):
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _plan_summary_message(title: str, summary: str) -> AIMessage:
+    normalized_summary = " ".join(str(summary or "").split())
+    if len(normalized_summary) > 180:
+        normalized_summary = f"{normalized_summary[:177].rstrip()}..."
+    content = f"### {title}"
+    if normalized_summary:
+        content += f"\n\n{normalized_summary}"
+    content += "\n\nPlease review [plan.md](/mnt/user-data/workspace/plan.md) before execution."
+    return AIMessage(content=content, name="plan_summary")
 
 
 def _clean_str_list(raw: Any) -> list[str]:
@@ -665,7 +676,12 @@ def write_plan_tool(
                     + "). plan.md saved."
                 ),
                 tool_call_id=tool_call_id,
-            )
+            ),
+            *(
+                [_plan_summary_message(title, summary)]
+                if plan_status == "draft" and not clarification_pending
+                else []
+            ),
         ],
     }
     if clarifications_payload:
