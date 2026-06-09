@@ -100,6 +100,7 @@ def get_available_tools(
     model_name: str | None = None,
     subagent_enabled: bool = False,
     mode: str | None = None,
+    forced_plan_draft: bool = False,
 ) -> list[BaseTool]:
     """Get all available tools from config.
 
@@ -116,10 +117,19 @@ def get_available_tools(
             LLM-facing tool descriptions can be tailored per mode and so
             mode-scoped community tools (knowledge_vault, etc.) are
             included only in the appropriate mode. Defaults to work when unset.
+        forced_plan_draft: When true, expose only `write_plan`. This is used by
+            Plan Mode recovery/fallback runs that must produce a conservative
+            plan immediately instead of asking clarifications or dispatching
+            investigation tools.
 
     Returns:
         List of available tools.
     """
+    if forced_plan_draft:
+        if (mode or "").strip().lower() == "plan" and _get_community_tool_enabled(write_plan_tool.name):
+            return [write_plan_tool]
+        return []
+
     config = get_app_config()
 
     # Config-defined tools (config.yaml `tools:` section), filtered by group, community override, and mode.

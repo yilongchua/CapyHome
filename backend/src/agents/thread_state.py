@@ -119,13 +119,11 @@ class ResumeMetaState(TypedDict, total=False):
     last_checkpoint_id: str | None
     last_completed_todo_id: str | None
     pending_ready_ids: list[str]
-    deferred_task_calls_count: int
     handoff_refs: list[str]
     # Fields added for interrupt-recovery: allow a fresh run to detect and fix stale
     # in-progress entries left over from an interrupted run.
     in_progress_todo_ids: list[str]  # todos marked in_progress at interrupt time
     retry_counts: dict[str, int]  # tool_call_id -> attempt count from retry_meta
-    running_subagent_ids: list[str]  # task IDs of deferred subagent calls in flight
 
 
 class ScratchpadEntry(TypedDict, total=False):
@@ -159,7 +157,6 @@ class ExecutionIntentState(TypedDict, total=False):
     mode: str
     plan_behavior: str
     allow_background_deepen: bool
-    max_primary_subagents: int
 
 
 class SteeringIntentState(TypedDict, total=False):
@@ -328,7 +325,6 @@ class ThreadState(AgentState):
     clarification_pending: Annotated[bool, replace_bool]
     eval_attempts: NotRequired[int]
     todo_graph: NotRequired[TodoGraphState | None]
-    deferred_task_calls: NotRequired[list[dict] | None]
     handoff_artifacts: Annotated[list[str], merge_artifacts]
     retry_meta: NotRequired[RetryRuntimeState | None]
     hooks_state: NotRequired[HooksRuntimeState | None]

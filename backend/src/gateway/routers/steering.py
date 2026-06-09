@@ -23,6 +23,7 @@ from src.agents.middlewares.plan_execution import (
     resolve_original_user_request,
 )
 from src.agents.steering_queue_store import enqueue_steering_intent
+from src.config.app_config import get_app_config
 
 router = APIRouter(prefix="/api", tags=["steering"])
 
@@ -230,6 +231,7 @@ async def _create_work_mode_run(
         thread_id,
         _WORK_MODE_ASSISTANT_ID,
         input={"messages": [trigger_message]},
+        config=get_app_config().get_default_run_config(),
         context=context,
         metadata={"trigger": "execute_plan"},
     )

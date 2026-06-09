@@ -42,6 +42,11 @@ class _Client:
         self.runs = runs or _RunsClient()
 
 
+class _AppConfig:
+    def get_default_run_config(self):
+        return {"recursion_limit": 1000}
+
+
 def _messages(count: int) -> list[dict]:
     rows: list[dict] = []
     for i in range(count):
@@ -200,6 +205,7 @@ def test_execute_plan_resolves_answered_clarification(monkeypatch):
     )
     runs = _RunsClient()
     monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads, runs))
+    monkeypatch.setattr("src.gateway.routers.steering.get_app_config", lambda: _AppConfig())
 
     response = asyncio.run(execute_plan("thread-1", ExecutePlanRequest(plan_id="plan-1")))
 
@@ -211,6 +217,7 @@ def test_execute_plan_resolves_answered_clarification(monkeypatch):
     assert updated_plan["clarification_pending"] is False
     assert isinstance(updated_plan["clarification_answered_at"], str)
     assert runs.create_calls[-1][0][:2] == ("thread-1", "work_agent")
+    assert runs.create_calls[-1][1]["config"] == {"recursion_limit": 1000}
 
 
 def test_execute_plan_accepts_draft_plan(monkeypatch):
@@ -222,6 +229,7 @@ def test_execute_plan_accepts_draft_plan(monkeypatch):
     )
     runs = _RunsClient()
     monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads, runs))
+    monkeypatch.setattr("src.gateway.routers.steering.get_app_config", lambda: _AppConfig())
 
     response = asyncio.run(execute_plan("thread-1", ExecutePlanRequest(plan_id="plan-1")))
     assert response.acknowledged is True
@@ -230,6 +238,7 @@ def test_execute_plan_accepts_draft_plan(monkeypatch):
     assert response.run_id == "run-work-1"
     assert threads.calls, "execute endpoint should persist approved plan state"
     assert runs.create_calls[-1][0][:2] == ("thread-1", "work_agent")
+    assert runs.create_calls[-1][1]["config"] == {"recursion_limit": 1000}
 
 
 def test_execute_plan_duplicate_for_already_approved(monkeypatch):

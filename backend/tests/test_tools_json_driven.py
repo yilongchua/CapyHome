@@ -91,6 +91,13 @@ def test_get_available_tools_flag_off_plan_mode_includes_write_plan_only() -> No
     assert "write_plan" in tools
 
 
+def test_forced_plan_draft_exposes_only_write_plan() -> None:
+    config = get_app_config()
+    config.json_driven_tools = True
+    tools = _names(get_available_tools(include_mcp=False, subagent_enabled=True, mode="plan", forced_plan_draft=True))
+    assert tools == {"write_plan"}
+
+
 def test_get_available_tools_flag_off_plan_mode_respects_write_plan_disable(monkeypatch) -> None:
     config = get_app_config()
     config.json_driven_tools = False

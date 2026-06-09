@@ -9,11 +9,10 @@ plan-mode overlay even when the runtime is in plan mode.
 
 from __future__ import annotations
 
-import pytest
-
 from src.agents.work_agent import agent as work_agent_module
 from src.config.app_config import AppConfig
 from src.config.model_config import ModelConfig
+from src.config.planner_config import PlannerConfig
 from src.config.sandbox_config import SandboxConfig
 
 
@@ -63,7 +62,66 @@ def test_make_work_agent_uses_plan_prompt_when_current_mode_is_plan(monkeypatch)
 
     rendered_prompt = result["system_prompt"]
     assert "<plan_mode>" in rendered_prompt, "plan-mode section missing when current_mode='plan'"
-    assert "Produce a plan.md that a Work Mode agent can execute faithfully" in rendered_prompt
+    assert "Your sole deliverable is a structured plan, authored via the" in rendered_prompt
+    assert "The plan belongs only in the" in rendered_prompt
+    assert "If you call any tool, keep assistant message content empty or under 200 words." in rendered_prompt
+
+
+def test_plan_prompt_injects_subagent_fanout_as_instruction(monkeypatch):
+    _patch_factory_deps(monkeypatch)
+
+    result = work_agent_module.make_work_agent(
+        {
+            "configurable": {
+                "model_name": "default-model",
+                "current_mode": "plan",
+                "subagent_enabled": True,
+                "max_concurrent_subagents": 2,
+            }
+        }
+    )
+
+    rendered_prompt = result["system_prompt"]
+    assert "emit at most 2 `task` calls in one response" in rendered_prompt
+    assert "runtime does not rewrite, defer, or queue excess tool calls" in rendered_prompt
+
+
+def test_plan_mode_caps_model_generation_tokens(monkeypatch):
+    _patch_factory_deps(monkeypatch)
+    captured_kwargs: dict = {}
+    monkeypatch.setattr(work_agent_module, "get_planner_config", lambda: PlannerConfig(max_generation_tokens=12345))
+    monkeypatch.setattr(work_agent_module, "create_chat_model", lambda **kwargs: captured_kwargs.update(kwargs) or object())
+
+    work_agent_module.make_work_agent(
+        {
+            "configurable": {
+                "model_name": "default-model",
+                "current_mode": "plan",
+                "subagent_enabled": False,
+            }
+        }
+    )
+
+    assert captured_kwargs["max_tokens"] == 12345
+
+
+def test_work_mode_does_not_apply_planner_generation_cap(monkeypatch):
+    _patch_factory_deps(monkeypatch)
+    captured_kwargs: dict = {}
+    monkeypatch.setattr(work_agent_module, "get_planner_config", lambda: PlannerConfig(max_generation_tokens=12345))
+    monkeypatch.setattr(work_agent_module, "create_chat_model", lambda **kwargs: captured_kwargs.update(kwargs) or object())
+
+    work_agent_module.make_work_agent(
+        {
+            "configurable": {
+                "model_name": "default-model",
+                "current_mode": "work",
+                "subagent_enabled": False,
+            }
+        }
+    )
+
+    assert "max_tokens" not in captured_kwargs
 
 
 def test_make_work_agent_omits_plan_prompt_when_current_mode_is_work(monkeypatch):

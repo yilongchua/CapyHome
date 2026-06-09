@@ -159,6 +159,9 @@ planner:
   # allowed; this only fires if no token arrives for this many seconds (wedged
   # provider). On timeout, planning is aborted and a planning_failed SSE is emitted.
   timeout_seconds: 120.0
+  # Hard cap for Plan Mode model output. The prompt still requires plans to be
+  # authored through write_plan, not emitted as long assistant prose.
+  max_generation_tokens: 20000
   research_fanout: true
   research_fanout_min_todos: 2
 
@@ -349,9 +352,9 @@ generation:
 
 subagents:
   timeout_seconds: 1800
-  min_concurrent_limit: 2
+  # Infrastructure worker capacity. Lead-agent fan-out is instructed by the
+  # per-run max_concurrent_subagents prompt value.
   max_concurrent_limit: 4
-  max_primary_per_turn: 3
   agents:
     bash:
       timeout_seconds: 600

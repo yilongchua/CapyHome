@@ -15,7 +15,6 @@ class ResumeState(AgentState):
     """State subset for resume metadata updates."""
 
     todo_graph: NotRequired[dict | None]
-    deferred_task_calls: NotRequired[list[dict] | None]
     handoff_artifacts: NotRequired[list[str] | None]
     resume_meta: NotRequired[dict | None]
     retry_meta: NotRequired[dict | None]
@@ -52,10 +51,6 @@ class ResumeStateMiddleware(AgentMiddleware[ResumeState]):
             return {}
         return {str(k): int(v) for k, v in attempts.items() if isinstance(v, int)}
 
-    def _extract_running_subagent_ids(self, state: ResumeState) -> list[str]:
-        deferred = state.get("deferred_task_calls") or []
-        return [str(item["id"]) for item in deferred if isinstance(item, dict) and item.get("id") and item.get("status") not in {"completed", "failed", "timed_out"}]
-
     @override
     def after_model(self, state: ResumeState, runtime: Runtime) -> dict | None:
         if not self._config.enabled:
@@ -75,11 +70,9 @@ class ResumeStateMiddleware(AgentMiddleware[ResumeState]):
             "last_checkpoint_id": checkpoint_id,
             "last_completed_todo_id": self._extract_last_completed_todo(state),
             "pending_ready_ids": [str(item) for item in ready_ids] if isinstance(ready_ids, list) else [],
-            "deferred_task_calls_count": len(state.get("deferred_task_calls") or []),
             "handoff_refs": list(dict.fromkeys([str(path) for path in (state.get("handoff_artifacts") or []) if str(path)])),
             "in_progress_todo_ids": self._extract_in_progress_todo_ids(state),
             "retry_counts": self._extract_retry_counts(state),
-            "running_subagent_ids": self._extract_running_subagent_ids(state),
         }
         if updated == current:
             return None

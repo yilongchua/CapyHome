@@ -35,20 +35,10 @@ class SubagentsAppConfig(BaseModel):
         ge=1,
         description="Default max agent turns (LangGraph recursion_limit) shared by all subagents. Per-agent overrides in `agents.<name>.max_turns` still win.",
     )
-    min_concurrent_limit: int = Field(
-        default=2,
-        ge=1,
-        description="Lower bound on the per-turn subagent concurrency (clamp floor).",
-    )
     max_concurrent_limit: int = Field(
         default=4,
         ge=1,
-        description="Upper bound on the per-turn subagent concurrency (clamp ceiling).",
-    )
-    max_primary_per_turn: int = Field(
-        default=2,
-        ge=1,
-        description="Maximum number of primary-endpoint task tool calls to execute per turn.",
+        description="Worker capacity for local subagent scheduling/execution pools. This does not rewrite or defer lead-agent task calls.",
     )
     agents: dict[str, SubagentOverrideConfig] = Field(
         default_factory=dict,

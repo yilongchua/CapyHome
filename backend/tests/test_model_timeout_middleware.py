@@ -32,6 +32,15 @@ def _model_request(stage: str | None = "generator"):
     )
 
 
+def _model_request_with_phase(model_call_phase: str, legacy_stage: str | None = None):
+    runtime = SimpleNamespace(context={"thread_id": "t1", "model_call_phase": model_call_phase, "stage": legacy_stage})
+    return SimpleNamespace(
+        runtime=runtime,
+        messages=[],
+        state={},
+    )
+
+
 def _tool_request(name: str = "write_todos"):
     runtime = SimpleNamespace(context={"thread_id": "t1"})
     return SimpleNamespace(
@@ -67,6 +76,19 @@ def test_model_call_under_budget_passes_through():
 
     result = asyncio.run(middleware.awrap_model_call(_model_request("generator"), fast_handler))
     assert result.result[0].content == "hi"
+
+
+def test_model_call_phase_takes_precedence_over_legacy_stage():
+    cfg = RoutingTimeoutsConfig(default=10, stages={"planner": 1, "synthesis": 10})
+    middleware = ModelTimeoutMiddleware(cfg)
+
+    async def slow_handler(_req):
+        await asyncio.sleep(3)
+        return ModelResponse(result=[AIMessage(content="never reached")])
+
+    result = asyncio.run(middleware.awrap_model_call(_model_request_with_phase("planner", "synthesis"), slow_handler))
+    assert TIMEOUT_MESSAGE_FINGERPRINT in result.result[0].content
+    assert "planner" in result.result[0].content
 
 
 def test_sync_model_call_timeout_returns_warning():

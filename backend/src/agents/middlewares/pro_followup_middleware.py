@@ -152,7 +152,6 @@ class PlanFollowupMiddleware(AgentMiddleware[PlanFollowupState]):
                     and self._has_plan_context(state)
                     and not self._has_incomplete_todos(state)
                 ),
-                "max_primary_subagents": 1,
             }
         }
 

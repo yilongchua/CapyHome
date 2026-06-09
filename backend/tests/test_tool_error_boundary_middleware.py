@@ -78,7 +78,7 @@ def test_boundary_sorts_outer_to_retry_and_inner_failure_wrappers():
     """The boundary must sort *before* (outer to) retry — so RetryPolicyMiddleware
     still sees raw exceptions and can retry first — and before the other
     failure-prone tool wrappers it is meant to backstop (model_timeout,
-    circuit_breaker, truncation, subagent_limit, web_search_*). Observers that
+    circuit_breaker, truncation, and web_search_*). Observers that
     legitimately stay outer (trajectory, dangling_tool_call, permissions, …) are
     not constrained here: when the boundary returns an error ToolMessage they see
     a normal result instead of a crashing exception."""
@@ -97,7 +97,6 @@ def test_boundary_sorts_outer_to_retry_and_inner_failure_wrappers():
         "model_timeout",
         "web_search_circuit_breaker",
         "tool_result_truncation",
-        "subagent_limit",
         "web_search_summary",
         "web_search_ingestion",
     ]

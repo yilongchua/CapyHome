@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 
 from src.agents.middlewares.message_selection import extract_text, is_synthetic_human_message, message_type
 from src.agents.middlewares.plan_execution import work_execution_underway
+from src.config.app_config import get_app_config
 
 router = APIRouter(prefix="/api", tags=["clarifications"])
 
@@ -147,6 +148,7 @@ def _build_replan_human_message(
     original_request: str,
     current_plan: dict[str, Any] | None,
     answered: list[dict[str, Any]],
+    forced: bool = False,
 ) -> dict[str, Any]:
     """A fresh, NON-synthetic user message that re-triggers the planner.
 
@@ -155,21 +157,24 @@ def _build_replan_human_message(
     has no `name` so downstream user-prompt selection treats it as a real
     planning request.
     """
-    answer_lines = "\n".join(f"- {(a.get('question') or 'Question').strip()} → {(a.get('answer') or '').strip()}" for a in answered)
+    answer_lines = "\n".join(f"- {(a.get('question') or 'Question').strip()}: {(a.get('answer') or '').strip()}" for a in answered)
+    header = (
+        "Forced Plan Draft:\n"
+        "The previous planning attempt did not produce a plan. Create a conservative executable plan now using only the resolved request below.\n"
+        "Do not ask clarifications. Do not call research, file, task, or browsing tools. Your only terminal action is `write_plan`."
+        if forced
+        else "Resolved planning request:\nCreate the Plan Mode draft from the original request and the settled clarification answers below."
+    )
     sections = [
-        "Please regenerate the Plan Mode draft using the original request, existing plan reference, and clarification answers below.",
-        "You must call `write_plan` as your terminal action.",
+        header,
+        "Use sensible assumptions for any remaining gaps and include them in the plan assumptions.",
+        "Call `write_plan` as your terminal action.",
     ]
     if original_request:
         sections.append(f"Original request:\n{original_request}")
     sections.append(_plan_reference(current_plan))
-    sections.append(f"Clarification answer(s):\n{answer_lines}")
-    sections.append(
-        "Prior planning context:\n"
-        "The previous planner turn may have already used read-only tools such as web search, file reads, grep, or recall. "
-        "Reuse relevant information visible in this thread. If needed, inspect plan.md or use available read-only tools, including recall when relevant, "
-        "to verify or recover context before calling `write_plan`."
-    )
+    sections.append(f"Resolved clarification(s):\n{answer_lines}")
+    sections.append("These are settled user constraints, not suggestions. Do not ask the same clarification again.")
     return {"type": "human", "content": "\n\n".join(sections)}
 
 
@@ -377,6 +382,8 @@ async def clarify_batch(thread_id: str, request: ClarifyBatchRequest) -> Clarify
                 "mode": "plan",
                 "is_plan_mode": True,
                 "plan_behavior": "plan_foreground",
+                "model_call_phase": "planner",
+                "stage": "planner",
                 "subagent_enabled": True,
                 "thinking_enabled": True,
                 "auto_mode": bool(values.get("auto_mode")),
@@ -396,6 +403,7 @@ async def clarify_batch(thread_id: str, request: ClarifyBatchRequest) -> Clarify
                         )
                     ]
                 },
+                config=get_app_config().get_default_run_config(),
                 context=context,
                 metadata={"trigger": "clarification_replan"},
             )
@@ -411,6 +419,7 @@ async def clarify_batch(thread_id: str, request: ClarifyBatchRequest) -> Clarify
                     thread_id,
                     assistant_id,
                     command={"resume": {"run_id": request.run_id}},
+                    config=get_app_config().get_default_run_config(),
                     metadata={"resumed_from_run_id": request.run_id, "resume_source": "clarification_batch"},
                 )
                 resumed_run_id = created.get("run_id") if isinstance(created, dict) else str(created)

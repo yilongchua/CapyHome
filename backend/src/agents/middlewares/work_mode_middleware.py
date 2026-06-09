@@ -110,7 +110,6 @@ class WorkModeMiddlewareState(AgentState):
     plan_history: NotRequired[list[dict] | None]
     work_mode: NotRequired[dict | None]
     phase_execution: NotRequired[dict | None]
-    deferred_task_calls: NotRequired[list[dict] | None]
 
 
 _KNOWN_PLAN_STATUSES = {"draft", "approved", "executing", "completed"}
@@ -237,11 +236,6 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
         # If a previous run was interrupted (reload/crash/manual stop), todos can
         # remain "in_progress" even though no subagent is currently running.
         # Re-queue them as pending so Work Mode can retry automatically.
-        deferred_calls = state.get("deferred_task_calls") or []
-        running_deferred = [
-            item for item in deferred_calls
-            if isinstance(item, dict) and item.get("status") not in {"completed", "failed", "timed_out"}
-        ]
         in_progress_started_at = existing_pe.get("in_progress_started_at") if isinstance(existing_pe.get("in_progress_started_at"), dict) else {}
         now = datetime.now(UTC)
         stale_in_progress_ids = []
@@ -252,7 +246,7 @@ class WorkModeMiddleware(AgentMiddleware[WorkModeMiddlewareState]):
             if _is_stale_timestamp(in_progress_started_at.get(node_id), now=now):
                 stale_in_progress_ids.append(node_id)
         can_self_heal_in_progress = plan_status in {"approved", "executing"}
-        if stale_in_progress_ids and not running_deferred and can_self_heal_in_progress:
+        if stale_in_progress_ids and can_self_heal_in_progress:
             repaired_nodes: list[dict] = []
             for node in nodes:
                 if not isinstance(node, dict):

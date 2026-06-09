@@ -31,10 +31,20 @@ class PlannerConfig(BaseModel):
             "On timeout, planning is aborted and a planning_failed SSE is emitted."
         ),
     )
+    max_generation_tokens: int = Field(
+        default=20000,
+        ge=1024,
+        le=64000,
+        description=(
+            "Maximum output tokens for Plan Mode lead-agent model calls. This is a hard ceiling "
+            "against runaway assistant prose; the prompt still requires plans to be authored via write_plan."
+        ),
+    )
     # Opt-in: when true and the planner's domain is "research", todos with no
     # depends_on edges are surfaced to the agent prompt as candidates for
     # parallel `task` subagent dispatch. The lead agent issues one `task` call
-    # per independent todo (capped by SubagentLimitMiddleware) and synthesizes
+    # per independent todo (bounded by the prompt's max_concurrent_subagents
+    # contract) and synthesizes
     # results in a final cycle. Default off — enabling changes the trajectory
     # shape and is materially faster for fan-out research workloads. Can also
     # be toggled per-thread via runtime config: `is_research_fanout=True`.

@@ -38,7 +38,6 @@ from src.agents.middlewares.retry_policy_middleware import RetryPolicyMiddleware
 from src.agents.middlewares.scratchpad_task_memory_middleware import ScratchpadTaskMemoryMiddleware
 from src.agents.middlewares.skill_disclosure_middleware import SkillDisclosureMiddleware
 from src.agents.middlewares.steering_middleware import SteeringMiddleware
-from src.agents.middlewares.subagent_limit_middleware import SubagentLimitMiddleware
 from src.agents.middlewares.summarization_middleware import CapyHomeSummarizationMiddleware
 from src.agents.middlewares.thread_data_middleware import ThreadDataMiddleware
 from src.agents.middlewares.title_middleware import TitleMiddleware
@@ -74,7 +73,6 @@ from src.config.recursion_pivot_config import get_recursion_pivot_config
 from src.config.resume_config import get_resume_config
 from src.config.retry_config import get_retry_config
 from src.config.scratchpad_config import get_scratchpad_config
-from src.config.subagents_config import get_subagents_app_config
 from src.config.summarization_config import get_summarization_config
 from src.config.task_memory_config import get_task_memory_config
 from src.config.todos_config import get_todos_config
@@ -313,7 +311,6 @@ class _RegistryContext:
     is_work_mode: bool
     subagent_enabled: bool
     max_concurrent_subagents: int
-    max_primary_per_turn: int
     model_name: str | None
     agent_name: str | None
     model_config: ModelConfig | None
@@ -377,17 +374,6 @@ def _create_view_image(ctx: _RegistryContext) -> AgentMiddleware | None:
     if ctx.model_config is not None and getattr(ctx.model_config, "supports_vision", False):
         return ViewImageMiddleware()
     return None
-
-
-def _create_subagent_limit(ctx: _RegistryContext) -> AgentMiddleware | None:
-    if not ctx.subagent_enabled:
-        return None
-    return SubagentLimitMiddleware(
-        max_concurrent=ctx.max_concurrent_subagents,
-        router=ctx.router,
-        requested_model=ctx.model_name,
-        max_primary_per_turn=ctx.max_primary_per_turn,
-    )
 
 
 def _create_hooks(_ctx: _RegistryContext) -> AgentMiddleware | None:
@@ -501,14 +487,12 @@ def _build_middleware_registry(
 ) -> list[MiddlewareSpec]:
     cfg = config.get("configurable") or {}
     app_config = get_app_config()
-    subagents_cfg = get_subagents_app_config()
     mode = _resolve_current_mode(cfg)
     ctx = _RegistryContext(
         is_plan_mode=mode == "plan",
         is_work_mode=(mode == "work"),
         subagent_enabled=cfg.get("subagent_enabled", False),
         max_concurrent_subagents=cfg.get("max_concurrent_subagents", 3),
-        max_primary_per_turn=int(getattr(subagents_cfg, "max_primary_per_turn", 2)),
         model_name=model_name,
         agent_name=agent_name,
         model_config=app_config.get_model_config(model_name) if model_name else None,
@@ -561,14 +545,13 @@ def _build_middleware_registry(
         # so RetryPolicyMiddleware still sees raw exceptions and can retry first.
         MiddlewareSpec("tool_error_boundary", lambda: ToolErrorBoundaryMiddleware(), after={"view_image"}, before={"retry"}),
         MiddlewareSpec("retry", bind(_create_retry), after={"view_image"}),
-        # Bound LLM call duration. Sits between retry (so retried calls are
-        # also bounded) and subagent_limit. See routing.timeouts in config.yaml.
+        # Bound LLM call duration. Sits after retry so retried calls are also
+        # bounded. See routing.timeouts in config.yaml.
         MiddlewareSpec("model_timeout", lambda: ModelTimeoutMiddleware(), after={"retry"}),
         MiddlewareSpec("web_search_circuit_breaker", lambda: WebSearchCircuitBreakerMiddleware(), after={"model_timeout"}),
         # Cap tool-result size so context can't balloon round over round.
         MiddlewareSpec("tool_result_truncation", lambda: ToolResultTruncationMiddleware(), after={"web_search_circuit_breaker"}),
-        MiddlewareSpec("subagent_limit", bind(_create_subagent_limit), after={"retry", "model_timeout", "tool_result_truncation"}),
-        MiddlewareSpec("evaluator", bind(_create_evaluator), after={"subagent_limit"}),
+        MiddlewareSpec("evaluator", bind(_create_evaluator), after={"tool_result_truncation"}),
         MiddlewareSpec("todo_failure_retry", bind(_create_todo_failure_retry), after={"evaluator"}),
         MiddlewareSpec("scratchpad_task_memory", bind(_create_scratchpad_task_memory), after={"todo_failure_retry"}),
         MiddlewareSpec("plan_file_sync", lambda: PlanFileSyncMiddleware(), after={"scratchpad_task_memory"}),
@@ -598,7 +581,7 @@ def _build_middleware_registry(
         MiddlewareSpec(
             "clarification",
             lambda: ClarificationMiddleware(),
-            after={"metrics", "permissions", "memory", "subagent_limit", "loop_detection", "recursion_pivot", "evaluator", "execution_trace", "activity_timeline"},
+            after={"metrics", "permissions", "memory", "loop_detection", "recursion_pivot", "evaluator", "execution_trace", "activity_timeline"},
         ),
     ]
 
@@ -657,7 +640,7 @@ class _RuntimeParams:
     is_plan_mode: bool
     subagent_enabled: bool
     max_concurrent_subagents: int
-    max_primary_per_turn: int
+    forced_plan_draft: bool
     is_bootstrap: bool
     agent_name: str | None
     agent_config: object | None  # AgentConfig | None — avoid circular import
@@ -670,7 +653,6 @@ def _extract_runtime_params(config: RunnableConfig) -> _RuntimeParams:
     agent_config = load_agent_config(agent_name) if not is_bootstrap else None
     mode = _resolve_current_mode(cfg)
     plan_behavior = str(cfg.get("plan_behavior", "") or "").strip().lower()
-    subagents_cfg = get_subagents_app_config()
     return _RuntimeParams(
         thinking_enabled=cfg.get("thinking_enabled", True),
         reasoning_effort=cfg.get("reasoning_effort", None),
@@ -681,7 +663,7 @@ def _extract_runtime_params(config: RunnableConfig) -> _RuntimeParams:
         is_plan_mode=mode == "plan",
         subagent_enabled=cfg.get("subagent_enabled", False),
         max_concurrent_subagents=cfg.get("max_concurrent_subagents", 3),
-        max_primary_per_turn=int(getattr(subagents_cfg, "max_primary_per_turn", 2)),
+        forced_plan_draft=bool(cfg.get("forced_plan_draft") or cfg.get("force_write_plan_only")),
         is_bootstrap=is_bootstrap,
         agent_name=agent_name,
         agent_config=agent_config,
@@ -734,6 +716,7 @@ def _inject_trace_metadata(
             "background_followup": params.background_followup,
             "is_plan_mode": params.is_plan_mode,
             "subagent_enabled": params.subagent_enabled,
+            "forced_plan_draft": params.forced_plan_draft,
         }
     )
 
@@ -811,11 +794,14 @@ def _build_work_agent(config: RunnableConfig, *, prompt_template_fn=None):
         reasoning_effort=reasoning_effort,
     )
 
-    chat_model = create_chat_model(
-        name=model_name,
-        thinking_enabled=thinking_enabled,
-        reasoning_effort=reasoning_effort,
-    )
+    chat_model_kwargs = {
+        "name": model_name,
+        "thinking_enabled": thinking_enabled,
+        "reasoning_effort": reasoning_effort,
+    }
+    if params.is_plan_mode:
+        chat_model_kwargs["max_tokens"] = get_planner_config().max_generation_tokens
+    chat_model = create_chat_model(**chat_model_kwargs)
 
     if params.is_bootstrap:
         # Bootstrap mode is the initial custom-agent-creation flow. We deliberately
@@ -842,6 +828,7 @@ def _build_work_agent(config: RunnableConfig, *, prompt_template_fn=None):
 
     # Default lead agent (unchanged behavior)
     agent_config = params.agent_config
+    prompt_subagent_enabled = params.subagent_enabled and not params.forced_plan_draft
     return create_agent(
         model=chat_model,
         tools=get_available_tools(
@@ -849,6 +836,7 @@ def _build_work_agent(config: RunnableConfig, *, prompt_template_fn=None):
             groups=agent_config.tool_groups if agent_config else None,
             subagent_enabled=params.subagent_enabled,
             mode=params.mode,
+            forced_plan_draft=params.forced_plan_draft,
         ),
         middleware=_build_middlewares(
             config,
@@ -857,7 +845,7 @@ def _build_work_agent(config: RunnableConfig, *, prompt_template_fn=None):
             model_router=router,
         ),
         system_prompt=prompt_template_fn(
-            subagent_enabled=params.subagent_enabled,
+            subagent_enabled=prompt_subagent_enabled,
             max_concurrent_subagents=params.max_concurrent_subagents,
             agent_name=params.agent_name,
             background_followup=params.background_followup,

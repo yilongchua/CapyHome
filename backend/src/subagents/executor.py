@@ -78,8 +78,8 @@ MAX_CONCURRENT_SUBAGENTS = max(1, int(get_subagents_app_config().max_concurrent_
 _scheduler_pool = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_SUBAGENTS, thread_name_prefix="subagent-scheduler-")
 
 # Thread pool for actual subagent execution (with timeout support)
-# Match the configured fan-out limit so executor capacity and middleware
-# scheduling make the same concurrency promise.
+# Infrastructure capacity only. The lead-agent prompt governs how many task
+# calls it should emit in one response; this pool does not rewrite tool calls.
 _execution_pool = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_SUBAGENTS, thread_name_prefix="subagent-exec-")
 
 

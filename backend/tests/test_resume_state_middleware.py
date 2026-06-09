@@ -16,7 +16,6 @@ def test_resume_state_tracks_continuity_markers():
             ],
             "ready_ids": ["todo-2"],
         },
-        "deferred_task_calls": [{"id": "tc-1"}],
         "handoff_artifacts": ["/tmp/.handoffs/plan.md", "/tmp/.handoffs/report.md"],
     }
     runtime = SimpleNamespace(context={"thread_id": "thread-1", "checkpoint_id": "ckpt-123"})
@@ -26,7 +25,6 @@ def test_resume_state_tracks_continuity_markers():
     assert resume_meta["last_checkpoint_id"] == "ckpt-123"
     assert resume_meta["last_completed_todo_id"] == "todo-1"
     assert resume_meta["pending_ready_ids"] == ["todo-2"]
-    assert resume_meta["deferred_task_calls_count"] == 1
     assert len(resume_meta["handoff_refs"]) == 2
 
 
@@ -63,27 +61,6 @@ def test_resume_state_tracks_retry_counts():
     update = middleware.after_model(state, runtime)
     assert update is not None
     assert update["resume_meta"]["retry_counts"] == {"call-abc": 2, "call-def": 1}
-
-
-def test_resume_state_tracks_running_subagent_ids():
-    """running_subagent_ids must include deferred tasks that are not yet terminal."""
-    middleware = ResumeStateMiddleware(ResumeConfig(enabled=True, require_checkpoint=True, max_resume_depth=3))
-    state = {
-        "deferred_task_calls": [
-            {"id": "sa-1", "status": "running"},
-            {"id": "sa-2", "status": "completed"},
-            {"id": "sa-3", "status": "pending"},
-            {"id": "sa-4", "status": "failed"},
-        ],
-    }
-    runtime = SimpleNamespace(context={"thread_id": "t1", "checkpoint_id": None})
-    update = middleware.after_model(state, runtime)
-    assert update is not None
-    running = update["resume_meta"]["running_subagent_ids"]
-    assert "sa-1" in running  # running → included
-    assert "sa-3" in running  # pending → included (not yet terminal)
-    assert "sa-2" not in running  # completed → excluded
-    assert "sa-4" not in running  # failed → excluded
 
 
 def test_resume_state_empty_when_no_in_progress_todos():

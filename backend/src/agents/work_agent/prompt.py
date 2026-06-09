@@ -17,12 +17,14 @@ def _build_subagent_section(max_concurrent: int) -> str:
 
     Returns:
         Formatted subagent section string.
+    Deprecated for testing
+    Hard limit: emit at most {n} `task` calls in one response. This is the only fan-out control:
+    the runtime does not rewrite, defer, or queue excess tool calls. If you identify more than
+    {n} sub-tasks, choose the most foundational {n}, wait for their results, then issue the next batch.
     """
     n = max_concurrent
     return f"""<subagent_system>
 Subagent mode is available for parallel work. Use it only when the request naturally splits into 2+ independent sub-tasks.
-
-Hard limit: at most {n} `task` calls in one response. If you identify more than {n} sub-tasks, launch only the most foundational batch now and continue with the next batch after results return.
 
 Available subagents:
 - `general-purpose`: web research, code exploration, file analysis, multi-source investigation.

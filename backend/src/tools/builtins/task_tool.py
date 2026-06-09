@@ -10,6 +10,7 @@ from langchain.tools import InjectedToolCallId, ToolRuntime, tool
 from langgraph.config import get_config, get_stream_writer
 from langgraph.typing import ContextT
 
+from src.agents.activity_timeline import create_activity_event, stream_activity_event
 from src.agents.execution_trace import (
     create_trace_event,
     extract_token_usage_from_message,
@@ -356,6 +357,32 @@ def task_tool(
             )
 
     group_title = _build_group_title(normalized_subagent_type, normalized_description)
+    dispatch_event = create_activity_event(
+        runtime,
+        actor="baby_capy",
+        kind="subagent_dispatch_started",
+        line=f"Baby Capy - {normalized_subagent_type} is dispatching {normalized_description}...",
+        task_id=str(tool_call_id),
+        group_id=str(tool_call_id),
+        group_kind="subagent_task",
+        group_title=group_title,
+        group_role="step",
+        subagent_type=normalized_subagent_type,
+        description=normalized_description,
+        payload={
+            "source": "task_tool",
+            "event": "subagent_dispatch_started",
+            "tool_call_id": str(tool_call_id),
+            "task_id": str(tool_call_id),
+            "description": normalized_description,
+            "subagent_type": normalized_subagent_type,
+            "group_id": str(tool_call_id),
+            "group_kind": "subagent_task",
+            "group_title": group_title,
+        },
+    )
+    stream_activity_event(dispatch_event)
+    append_runtime_event(runtime, {**dispatch_event["payload"], "activity_already_streamed": True})
 
     # Extract parent context from runtime
     sandbox_state = None

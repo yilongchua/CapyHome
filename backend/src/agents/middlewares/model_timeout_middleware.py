@@ -43,8 +43,9 @@ def _stage_for(request: ModelRequest) -> str | None:
     """Pick a per-call stage label so timeouts can scale with the work involved.
 
     Resolution order:
-    1. Explicit `runtime.context["stage"]` — set by callers that know which stage
-       they're in (e.g. PlannerMiddleware when it gains a wrap-style hook).
+    1. Explicit `runtime.context["model_call_phase"]` (preferred) or legacy
+       `runtime.context["stage"]` — set by callers that know which phase
+       they're in.
     2. Heuristic from request.messages — synthesis cycles (last message is a
        tool result) need a longer budget than a first-pass generator turn,
        because the model has just received tool output to digest.
@@ -54,7 +55,7 @@ def _stage_for(request: ModelRequest) -> str | None:
     runtime = getattr(request, "runtime", None)
     context = getattr(runtime, "context", None) or {}
     if isinstance(context, dict):
-        stage = context.get("stage")
+        stage = context.get("model_call_phase") or context.get("stage")
         if isinstance(stage, str) and stage:
             return stage
 

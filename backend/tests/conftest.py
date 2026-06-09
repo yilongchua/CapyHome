@@ -17,9 +17,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 #     -> .executor (SubagentExecutor, SubagentResult)
 #       -> src.agents.thread_state
 #         -> src.agents.__init__
-#           -> work_agent.agent
-#             -> subagent_limit_middleware
-#               -> src.subagents.executor  <-- circular!
+#           -> work_agent.agent / task tool loading
+#             -> src.subagents.executor  <-- circular!
 #
 # By injecting a mock for src.subagents.executor *before* any test module
 # triggers the import, __init__.py's "from .executor import ..." succeeds

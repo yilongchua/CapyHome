@@ -18,7 +18,6 @@ def _make_registry_ctx(*, is_plan_mode: bool, is_work_mode: bool) -> work_agent_
         is_work_mode=is_work_mode,
         subagent_enabled=False,
         max_concurrent_subagents=1,
-        max_primary_per_turn=1,
         model_name="default-model",
         agent_name=None,
         model_config=None,
@@ -125,7 +124,7 @@ def test_trajectory_wraps_inner_middlewares(monkeypatch):
     Spec order = wrap order: the spec appearing first in the topologically
     sorted list is the outermost wrapper. `trajectory` declares only
     `after={"thread_data"}`, so it must land before middlewares that wrap
-    model/tool calls (model_timeout, retry, subagent_limit, ...).
+    model/tool calls (model_timeout, retry, tool_result_truncation, ...).
     """
     monkeypatch.setattr(work_agent_module, "get_app_config", lambda: _make_app_config())
     monkeypatch.setattr(work_agent_module, "_create_summarization_middleware", lambda: None)
@@ -138,8 +137,9 @@ def test_trajectory_wraps_inner_middlewares(monkeypatch):
     ordered = work_agent_module.topological_sort_middleware_specs(registry)
     names = [spec.name for spec in ordered]
 
+    assert "subagent_limit" not in names
     trajectory_idx = names.index("trajectory")
-    for inner in ("model_timeout", "retry", "subagent_limit", "tool_result_truncation"):
+    for inner in ("model_timeout", "retry", "tool_result_truncation"):
         assert trajectory_idx < names.index(inner), (
             f"trajectory must wrap {inner}; got trajectory at {trajectory_idx} and {inner} at {names.index(inner)}"
         )

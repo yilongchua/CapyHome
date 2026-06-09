@@ -47,7 +47,6 @@ _SOURCE_STAGE: dict[str, str] = {
     "retry_policy_middleware": "harness",
     "permission_middleware": "harness",
     "hooks_middleware": "harness",
-    "subagent_limit_middleware": "harness",
     "tool_disclosure_middleware": "harness",
     "execution_trace_middleware": "harness",
     # Additional emitters that were defaulting to "harness" via fallback.

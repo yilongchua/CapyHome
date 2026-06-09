@@ -132,7 +132,7 @@ def test_task_tool_accepts_registered_research_subagents(monkeypatch, subagent_t
     assert output == "Task Succeeded. Result: research complete"
     assert captured["prompt"] == "research one dimension"
     assert captured["executor_kwargs"]["config"].name == subagent_type
-    non_trace_events = [e for e in events if e.get("type") != "trace_event.v1"]
+    non_trace_events = [e for e in events if e.get("type") not in {"trace_event.v1", "activity_event.v1"}]
     assert non_trace_events[0]["type"] == "task_started"
     assert non_trace_events[0]["description"] == "research task"
     assert non_trace_events[0]["subagent_type"] == subagent_type
@@ -198,22 +198,23 @@ def test_task_tool_emits_running_and_completed_events(monkeypatch):
 
     get_available_tools.assert_called_once_with(model_name="ark-model", groups=None, subagent_enabled=False)
 
-    event_types = [e["type"] for e in events if e.get("type") != "trace_event.v1"]
+    event_types = [e["type"] for e in events if e.get("type") not in {"trace_event.v1", "activity_event.v1"}]
     assert event_types == ["task_started", "task_running", "task_running", "task_completed"]
-    non_trace_events = [e for e in events if e.get("type") != "trace_event.v1"]
+    non_trace_events = [e for e in events if e.get("type") not in {"trace_event.v1", "activity_event.v1"}]
     assert non_trace_events[-1]["result"] == "all done"
     assert non_trace_events[0]["group_title"] == "general-purpose: 运行子任务"
     assert non_trace_events[1]["description"] == "运行子任务"
     assert non_trace_events[1]["subagent_type"] == "general-purpose"
     assert non_trace_events[-1]["group_title"] == "general-purpose: 运行子任务"
     assert [e["event"] for e in runtime_events] == [
+        "subagent_dispatch_started",
         "task_started",
         "task_running",
         "task_running",
         "task_completed",
     ]
-    assert all(isinstance(e.get("trace_event"), dict) for e in runtime_events)
-    assert all(e.get("trace_already_streamed") is True for e in runtime_events)
+    assert all(isinstance(e.get("trace_event"), dict) for e in runtime_events[1:])
+    assert all(e.get("trace_already_streamed") is True for e in runtime_events[1:])
 
 
 def test_knowledge_researcher_broad_prompt_is_rewritten_to_ready_todo(monkeypatch):
@@ -273,11 +274,11 @@ def test_knowledge_researcher_broad_prompt_is_rewritten_to_ready_todo(monkeypatc
 
     assert output == "Task Succeeded. Result: narrow research complete"
     assert "Objective: Analyze SG EV incentives only" in captured["prompt"]
-    non_trace_events = [event for event in events if event.get("type") != "trace_event.v1"]
+    non_trace_events = [event for event in events if event.get("type") not in {"trace_event.v1", "activity_event.v1"}]
     assert non_trace_events[0]["scope_rewritten"] is True
     assert non_trace_events[0]["description"].startswith("Analyze SG EV incentives only")
-    assert runtime_events[0]["description"] == "Analyze SG EV incentives only"
-    assert runtime_events[0]["original_description"] == "EV mega brief"
+    assert runtime_events[1]["description"] == "Analyze SG EV incentives only"
+    assert runtime_events[1]["original_description"] == "EV mega brief"
 
 
 def test_knowledge_researcher_rejects_broad_prompt_when_multiple_ready_todos_are_ambiguous(monkeypatch):
@@ -417,7 +418,7 @@ def test_task_tool_returns_failed_message(monkeypatch):
     )
 
     assert output == "Task failed. Error: subagent crashed"
-    non_trace_events = [e for e in events if e.get("type") != "trace_event.v1"]
+    non_trace_events = [e for e in events if e.get("type") not in {"trace_event.v1", "activity_event.v1"}]
     assert non_trace_events[-1]["type"] == "task_failed"
     assert non_trace_events[-1]["error"] == "subagent crashed"
     assert non_trace_events[-1]["description"] == "执行任务"
@@ -455,7 +456,7 @@ def test_task_tool_raises_timed_out_error(monkeypatch):
             tool_call_id="tc-timeout",
         )
 
-    non_trace_events = [e for e in events if e.get("type") != "trace_event.v1"]
+    non_trace_events = [e for e in events if e.get("type") not in {"trace_event.v1", "activity_event.v1"}]
     assert non_trace_events[-1]["type"] == "task_timed_out"
     assert non_trace_events[-1]["error"] == "timeout"
     assert non_trace_events[-1]["description"] == "执行任务"
