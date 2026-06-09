@@ -31,7 +31,6 @@ from src.config.metrics_config import MetricsConfig, load_metrics_config_from_di
 from src.config.model_config import ModelConfig
 from src.config.permissions_config import PermissionsConfig, load_permissions_config_from_dict
 from src.config.planner_config import PlannerConfig, load_planner_config_from_dict
-from src.config.prompt_config import PromptConfig, load_prompt_config_from_dict
 from src.config.quality_gate_config import QualityGateConfig, load_quality_gate_config_from_dict
 from src.config.question_generation_config import load_question_generation_config_from_dict
 from src.config.recursion_pivot_config import RecursionPivotConfig, load_recursion_pivot_config_from_dict
@@ -70,7 +69,6 @@ class AppConfig(BaseModel):
         description="When true (default), built-in/sandbox tool descriptions are sourced from per-mode catalogs (internal_tools_plan.json / internal_tools_work.json). Set false to fall back to hard-coded BUILTIN_TOOLS.",
     )
     skills: SkillsConfig = Field(default_factory=SkillsConfig, description="Skills configuration")
-    prompt: PromptConfig = Field(default_factory=PromptConfig, description="Prompt assembly configuration")
     permissions: PermissionsConfig = Field(default_factory=PermissionsConfig, description="Tool permission policy configuration")
     trajectory: TrajectoryConfig = Field(default_factory=TrajectoryConfig, description="Trajectory logging configuration")
     metrics: MetricsConfig = Field(default_factory=MetricsConfig, description="Runtime metrics configuration")
@@ -179,9 +177,6 @@ class AppConfig(BaseModel):
         # Load subagents config if present
         if "subagents" in config_data:
             load_subagents_config_from_dict(config_data["subagents"])
-
-        # Load prompt config
-        load_prompt_config_from_dict(config_data.get("prompt", {}))
 
         # Load permissions config
         load_permissions_config_from_dict(config_data.get("permissions", {}))

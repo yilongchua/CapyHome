@@ -23,7 +23,6 @@ def _patch_prompt_dependencies(monkeypatch, *, thread_id: str, memory_config: Si
     calls: list[tuple[str, str | None]] = []
 
     monkeypatch.setattr("src.config.get_app_config", lambda: SimpleNamespace(skills=SimpleNamespace(progressive_disclosure=False)))
-    monkeypatch.setattr(prompt_module, "get_prompt_config", lambda: SimpleNamespace(componentized=True))
     monkeypatch.setattr(prompt_module, "get_skills_prompt_section", lambda _available_skills=None: "")
     monkeypatch.setattr(prompt_module, "get_agent_soul", lambda _agent_name=None: "<soul>static soul</soul>")
     monkeypatch.setattr("src.config.memory_config.get_memory_config", lambda: memory_config)

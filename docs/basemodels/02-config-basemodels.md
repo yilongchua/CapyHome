@@ -25,7 +25,6 @@ All configuration nodes are already implemented as `pydantic.BaseModel`. This fi
 | `ToolConfig` | [src/config/tool_config.py](../../backend/src/config/tool_config.py) | 11 | `name`, `use`, `group`. |
 | `ToolGroupConfig` | [src/config/tool_config.py](../../backend/src/config/tool_config.py) | 4 | `name`, `description`. |
 | `SkillsConfig` | [src/config/skills_config.py](../../backend/src/config/skills_config.py) | 6 | `path`, `container_path`, `progressive_disclosure`, `active_body_token_budget`, `matcher_trigger_enabled`. |
-| `PromptConfig` | [src/config/prompt_config.py](../../backend/src/config/prompt_config.py) | 6 | `componentized`. |
 | `PermissionsConfig` | [src/config/permissions_config.py](../../backend/src/config/permissions_config.py) | 10 | `allow[]`, `deny[]`, `ask[]`, `default_mode`. |
 | `TrajectoryConfig` | [src/config/trajectory_config.py](../../backend/src/config/trajectory_config.py) | 6 | `enabled`, `directory`, `format`. |
 | `MetricsConfig` | [src/config/metrics_config.py](../../backend/src/config/metrics_config.py) | 6 | `enabled`. |

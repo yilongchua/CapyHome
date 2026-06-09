@@ -1,4 +1,4 @@
-"""Tests for componentized prompt rendering, progressive skill prompt section, and SOUL.md injection."""
+"""Tests for Work Mode prompt rendering, progressive skills, and SOUL.md injection."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from src.agents.work_agent import prompt as prompt_module
 from src.config.agents_config import load_agent_soul
 from src.config.app_config import AppConfig, set_app_config
 from src.config.model_config import ModelConfig
-from src.config.prompt_config import PromptConfig, set_prompt_config
 from src.config.sandbox_config import SandboxConfig
 from src.config.skills_config import SkillsConfig
 
@@ -30,20 +29,14 @@ def _make_app_config(progressive_disclosure: bool) -> AppConfig:
     )
 
 
-def test_componentized_and_legacy_prompt_both_render(monkeypatch):
+def test_work_prompt_renders_component_sections(monkeypatch):
     monkeypatch.setattr(prompt_module, "_get_memory_context", lambda agent_name=None: "")
     monkeypatch.setattr(prompt_module, "get_agent_soul", lambda _: "")
     monkeypatch.setattr(prompt_module, "get_skills_prompt_section", lambda _: "")
 
-    set_prompt_config(PromptConfig(componentized=True))
-    componentized = prompt_module._build_prompt(False, 3, None, None)
-    assert "<thinking_style>" in componentized
-    assert "<critical_reminders>" in componentized
-
-    set_prompt_config(PromptConfig(componentized=False))
-    legacy = prompt_module._build_prompt(False, 3, None, None)
-    assert "<thinking_style>" in legacy
-    assert "<critical_reminders>" in legacy
+    rendered = prompt_module._build_prompt(False, 3, None, None)
+    assert "<thinking_style>" in rendered
+    assert "<critical_reminders>" in rendered
 
 
 def test_subagent_section_is_compact_and_has_single_limit_statement():
@@ -59,8 +52,6 @@ def test_subagent_duplicate_reminders_are_removed(monkeypatch):
     monkeypatch.setattr(prompt_module, "_get_memory_context", lambda agent_name=None, current_turn_text="": "")
     monkeypatch.setattr(prompt_module, "get_agent_soul", lambda _: "")
     monkeypatch.setattr(prompt_module, "get_skills_prompt_section", lambda _: "")
-    set_prompt_config(PromptConfig(componentized=True))
-
     rendered = prompt_module._build_prompt(True, 3, None, None)
 
     assert "DECOMPOSITION CHECK" not in rendered
@@ -153,11 +144,10 @@ def test_get_agent_soul_returns_empty_string_when_no_soul(monkeypatch):
     assert prompt_module.get_agent_soul("research") == ""
 
 
-def test_build_componentized_prompt_contains_soul(monkeypatch):
+def test_build_prompt_contains_soul(monkeypatch):
     monkeypatch.setattr(prompt_module, "_get_memory_context", lambda agent_name=None: "")
     monkeypatch.setattr(prompt_module, "get_agent_soul", lambda name: "<soul>\nBe precise.\n</soul>")
     monkeypatch.setattr(prompt_module, "get_skills_prompt_section", lambda _: "")
-    set_prompt_config(PromptConfig(componentized=True))
     result = prompt_module._build_prompt(False, 3, "research", None)
     assert "Be precise." in result
 
@@ -165,8 +155,6 @@ def test_build_componentized_prompt_contains_soul(monkeypatch):
 def test_memory_injection_uses_sentinel_not_soul_thinking_style(monkeypatch):
     monkeypatch.setattr(prompt_module, "get_agent_soul", lambda name: "<soul>\nNote literal tag:\n<thinking_style>\n</soul>")
     monkeypatch.setattr(prompt_module, "get_skills_prompt_section", lambda _: "")
-    set_prompt_config(PromptConfig(componentized=True))
-
     base = prompt_module._build_prompt(False, 3, "research", None)
     rendered = prompt_module._inject_memory_context(base, "<memory>\nRemember this.\n</memory>")
 
@@ -186,20 +174,10 @@ def test_memory_injection_is_idempotent_when_memory_already_present():
     assert "New." not in rendered
 
 
-def test_build_legacy_prompt_contains_soul(monkeypatch):
-    monkeypatch.setattr(prompt_module, "_get_memory_context", lambda agent_name=None: "")
-    monkeypatch.setattr(prompt_module, "get_agent_soul", lambda name: "<soul>\nBe methodical.\n</soul>")
-    monkeypatch.setattr(prompt_module, "get_skills_prompt_section", lambda _: "")
-    set_prompt_config(PromptConfig(componentized=False))
-    result = prompt_module._build_prompt(False, 3, "research", None)
-    assert "Be methodical." in result
-
-
 def test_build_prompt_has_no_soul_block_when_absent(monkeypatch):
     monkeypatch.setattr(prompt_module, "_get_memory_context", lambda agent_name=None: "")
     monkeypatch.setattr(prompt_module, "get_agent_soul", lambda name: "")
     monkeypatch.setattr(prompt_module, "get_skills_prompt_section", lambda _: "")
-    set_prompt_config(PromptConfig(componentized=True))
     result = prompt_module._build_prompt(False, 3, None, None)
     assert "<soul>" not in result
 

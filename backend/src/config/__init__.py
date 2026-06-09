@@ -11,7 +11,6 @@ from .metrics_config import MetricsConfig, get_metrics_config
 from .paths import Paths, get_paths
 from .permissions_config import PermissionsConfig, get_permissions_config
 from .planner_config import PlannerConfig, get_planner_config
-from .prompt_config import PromptConfig, get_prompt_config
 from .resume_config import ResumeConfig, get_resume_config
 from .retry_config import RetryConfig, get_retry_config
 from .routing_config import RoutingConfig, get_routing_config
@@ -47,8 +46,6 @@ __all__ = [
     "get_loop_detection_config",
     "MemoryConfig",
     "get_memory_config",
-    "PromptConfig",
-    "get_prompt_config",
     "PermissionsConfig",
     "get_permissions_config",
     "PlannerConfig",

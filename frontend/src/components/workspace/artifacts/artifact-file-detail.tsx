@@ -790,9 +790,9 @@ export function ArtifactFilePreview({
 }) {
   if (language === "markdown") {
     return (
-      <div className="size-full px-4">
+      <div className="size-full overflow-auto px-4">
         <Streamdown
-          className="size-full"
+          className="min-h-full"
           {...streamdownSafePlugins}
           components={{ a: CitationLink }}
         >

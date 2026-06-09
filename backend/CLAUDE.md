@@ -438,7 +438,6 @@ Three knobs decide how much of a `websearch.search` result the lead agent sees, 
 - `sandbox.use` - Sandbox provider class path
 - `skills.path` / `skills.container_path` - Host and container paths to skills directory
 - `skills.progressive_disclosure` / `skills.active_body_token_budget` / `skills.matcher_trigger_enabled` - Progressive skill-body loading controls
-- `prompt.componentized` - Enable componentized prompt assembly path
 - `permissions` - Declarative tool permission policy (`allow`/`deny`/`ask` + `default_mode`)
 - `trajectory` - JSONL trajectory logging settings
 - `metrics` - Runtime metrics switch

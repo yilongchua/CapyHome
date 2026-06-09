@@ -104,11 +104,10 @@ def _cache_key(
     subagent_enabled: bool,
     max_concurrent_subagents: int,
     available_skills: set[str] | None,
-    prompt_componentized: bool,
     progressive_skills: bool,
 ) -> tuple[Any, ...]:
     skills_key = frozenset(available_skills) if available_skills is not None else None
-    return (agent_name, subagent_enabled, max_concurrent_subagents, skills_key, prompt_componentized, progressive_skills)
+    return (agent_name, subagent_enabled, max_concurrent_subagents, skills_key, progressive_skills)
 
 
 def get_cached_prompt(
@@ -117,7 +116,6 @@ def get_cached_prompt(
     subagent_enabled: bool,
     max_concurrent_subagents: int,
     available_skills: set[str] | None,
-    prompt_componentized: bool,
     progressive_skills: bool,
 ) -> str:
     """Return a cached system prompt, rebuilding only when source files change.
@@ -129,13 +127,12 @@ def get_cached_prompt(
         subagent_enabled: Whether subagent mode is on.
         max_concurrent_subagents: Concurrency limit (affects the subagent block).
         available_skills: Skill filter set, or None for all enabled skills.
-        prompt_componentized: Whether componentized prompt rendering is enabled.
         progressive_skills: Whether progressive skill disclosure is enabled.
 
     Returns:
         The rendered system prompt string.
     """
-    key = _cache_key(agent_name, subagent_enabled, max_concurrent_subagents, available_skills, prompt_componentized, progressive_skills)
+    key = _cache_key(agent_name, subagent_enabled, max_concurrent_subagents, available_skills, progressive_skills)
 
     with _lock:
         entry = _cache.get(key)
