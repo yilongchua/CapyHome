@@ -190,6 +190,76 @@ grep -E '"event":"(tool_call_timeout|tool_call_failed|after_model)"' "$TRAJ" | h
 The reference thread has one `tool_call_timeout` line — useful as a flag
 even when the final response looked fine.
 
+### 3.7.1 Detecting subagent (`task`) failures
+
+> **Authoritative signal:** use runtime/execution-trace `task_failed` and
+> `task_timed_out` events. Terminal tool results also use
+> `ToolMessage(status="error")` with `task_id`, `terminal_status`,
+> `subagent_type`, `error_type`, and `error` in the artifact.
+
+Historical threads may predate this contract. Their generic `tool_call_end`
+payload can under-report a subagent failure, so use the legacy prompt-log
+checks below only when auditing those older captures.
+
+For current runs, inspect the terminal lifecycle events directly:
+
+```bash
+TRACE="$TDIR/logs/execution-trace/"*.jsonl
+jq -rc 'select(.event=="task_failed" or .event=="task_timed_out")
+        | {event, task_id: .payload.task_id, subagent_type: .payload.subagent_type,
+           error: .payload.error}' $TRACE
+```
+
+For historical runs without terminal lifecycle events:
+
+```bash
+TRAJ="$TDIR/logs/trajectory/"*.jsonl
+
+# (a) How many subagents were dispatched, and how long each ran?
+#     Durations near subagents.timeout_seconds, or clustered just under a
+#     recursion ceiling, are suspicious.
+jq -rc 'select(.payload.tool=="task" and .event=="tool_call_end")
+        | "dur=\((.payload.duration_ms//0)/1000|floor)s timeout=\(.payload.timed_out) err=\(.payload.error)"' $TRAJ
+
+# (b) Retry tell: count task spans vs. the number of distinct subtasks the lead
+#     planned (todos / fan-out batches). MORE task spans than planned subtasks
+#     means at least one failed and was re-dispatched. Fan-out batches share an
+#     identical start ts:
+jq -rc 'select(.payload.tool=="task" and .event=="tool_call_start") | .ts|floor' $TRAJ | sort | uniq -c
+```
+
+Confirm legacy failures in `.prompts/` by grepping the lead-agent captures:
+
+```bash
+PD="$TDIR/user-data/workspace/.prompts"
+
+# Definitive subagent-failure markers (lead's tool-result messages):
+grep -rhoE 'Task failed\. Error: [^"]*' $PD/*.txt | sort | uniq -c
+
+# Common root causes that drive a subagent into a failure loop:
+grep -rhoE 'Recursion limit of [0-9]+ reached' $PD/*.txt | sort | uniq -c   # turn budget exhausted
+grep -rhc 'web_search_circuit_open' $PD/*.txt | awk -F: '$2{s+=$2}END{print s" circuit-open hits"}'
+grep -rhoE 'Tool `websearch\.search` failed[^.]*' $PD/*.txt | sort | uniq -c  # search transport errors
+```
+
+> **Count caveat:** a failed-task tool message persists in the lead's message
+> history, so it re-appears in *every* subsequent prompt capture. The grep
+> counts above reflect how many captures contain the message, **not** how many
+> distinct failures occurred. To count distinct failures, pair them with the
+> retry tell from Step 1(b), or read the unique `Recursion limit of N` values
+> (e.g. `50` and `30` = two distinct failed attempts on `a7629185`).
+
+**Subagent turn budget (why these fail) — see also §5.** A subagent's
+recursion/turn budget is **not** a normal chat budget. A normal lead/work-agent
+run gets `recursion_limit = 1000` (`DEFAULT_RECURSION_LIMIT`,
+[backend/src/config/app_config.py:57](../../backend/src/config/app_config.py#L57)).
+A subagent gets an exact LangGraph graph-step limit from
+`subagents.max_turns` in `config.yaml` (**default 50**) or the
+`subagents.agents.<name>.max_turns` override. The value is not a model-call
+count, has no hidden minimum, and cannot be supplied by the lead through the
+`task` tool. Historical captures may still contain the removed per-call
+`max_turns` argument.
+
 ### 3.8 Cross-reference checkpointer state (optional)
 
 For deeper audits you can dump per-turn state from the SQLite checkpointer:
@@ -272,7 +342,18 @@ When auditing for quality/regressions, look for:
   `WriteFileArtifactMiddleware` events. (Don't use an empty `outputs/` dir as
   the signal — it's almost always empty regardless of run success.)
 - **Subagent runs hidden from the timeline** — verify `task_*` events in the
-  trajectory and that `subagent_type` / `group_id` payload fields are set.
+  trajectory and that `subagent_type` / `group_id` payload fields are set. In
+  practice they currently are **not**: `task` spans carry only `tool_call_id`,
+  the end event drops even that, and the subagent's internal model/tool calls
+  never reach the trajectory (they live only in `.prompts/`).
+- **Subagent terminal failures** — use `task_failed` and `task_timed_out`
+  runtime/execution-trace events as the authoritative signal. For historical
+  runs created before structured terminal results, use the legacy checks in
+  §3.7.1.
+- **Subagent graph-step exhaustion** — a subagent gets
+  `subagents.max_turns` (default **50**) or its per-agent config override, not
+  the lead's 1000-step budget. Search-heavy work can still exhaust this exact
+  graph-step limit before answering.
 
 ---
 

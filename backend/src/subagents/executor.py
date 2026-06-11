@@ -23,7 +23,6 @@ from src.models import create_chat_model
 from src.subagents.config import SubagentConfig
 
 logger = logging.getLogger(__name__)
-MIN_SUBAGENT_RECURSION_LIMIT = 25
 
 
 class SubagentStatus(Enum):
@@ -287,13 +286,18 @@ class SubagentExecutor:
             state = self._build_initial_state(task)
 
             # Build config with thread_id for sandbox access and recursion limit
-            effective_recursion_limit = max(MIN_SUBAGENT_RECURSION_LIMIT, int(self.config.max_turns))
+            effective_recursion_limit = int(self.config.max_turns)
+            configurable = {
+                "subagent_type": self.config.name,
+                "subagent_task_id": result.task_id,
+            }
             run_config: RunnableConfig = {
                 "recursion_limit": effective_recursion_limit,
+                "configurable": configurable,
             }
             context = {}
             if self.thread_id:
-                run_config["configurable"] = {"thread_id": self.thread_id}
+                configurable["thread_id"] = self.thread_id
                 context["thread_id"] = self.thread_id
 
             logger.info(

@@ -46,6 +46,9 @@ def test_subagent_section_is_compact_and_has_single_limit_statement():
     assert section.count("at most 3 `task` calls") == 1
     assert "Usage Example 2" not in section
     assert "Counter-Example" not in section
+    assert "writes a Markdown report and returns the report path" in section
+    assert "split unrelated research topics" in section
+    assert "do not replay the identical brief" in section
 
 
 def test_subagent_duplicate_reminders_are_removed(monkeypatch):

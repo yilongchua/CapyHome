@@ -1,13 +1,14 @@
 """Task tool for delegating work to subagents."""
 
 import logging
-import re
 import time
 import uuid
 from typing import Annotated
 
 from langchain.tools import InjectedToolCallId, ToolRuntime, tool
+from langchain_core.messages import ToolMessage
 from langgraph.config import get_config, get_stream_writer
+from langgraph.types import Command
 from langgraph.typing import ContextT
 
 from src.agents.activity_timeline import create_activity_event, stream_activity_event
@@ -166,88 +167,49 @@ def _build_group_title(subagent_type: str, description: str) -> str:
     return f"{_normalize_subagent_label(subagent_type)}: {description}"
 
 
-def _source_research_prompt_is_broad(prompt: str) -> bool:
-    text = str(prompt or "").strip()
-    if not text:
-        return False
-    lowered = text.lower()
-    numbered_sections = len(re.findall(r"(?m)^\s*\d+\.\s+", text))
-    bullet_sections = len(re.findall(r"(?m)^\s*[-*]\s+", text))
-    scope_markers = sum(
-        1
-        for marker in (
-            "comprehensive",
-            "end-to-end",
-            "all of the following",
-            "focus on:",
-            "return a comprehensive",
-        )
-        if marker in lowered
-    )
-    return len(text) > 900 or numbered_sections >= 3 or bullet_sections >= 6 or scope_markers >= 2
+def _research_report_path(task_id: str) -> str:
+    return f"/mnt/user-data/workspace/research/{task_id}.md"
 
 
-def _tokens(value: str) -> set[str]:
-    return {token for token in re.findall(r"[a-z0-9]+", value.lower()) if len(token) > 2}
-
-
-def _ready_todo_scope_hint(runtime: ToolRuntime[ContextT, ThreadState] | None, *, description: str) -> str | None:
-    if runtime is None or not isinstance(getattr(runtime, "state", None), dict):
-        return None
-    todo_graph = runtime.state.get("todo_graph")
-    if not isinstance(todo_graph, dict):
-        return None
-    ready_ids = [str(item).strip() for item in (todo_graph.get("ready_ids") or []) if str(item).strip()]
-    nodes = todo_graph.get("nodes")
-    if not isinstance(nodes, list):
-        return None
-    nodes_by_id: dict[str, dict] = {}
-    for node in nodes:
-        if not isinstance(node, dict):
-            continue
-        node_id = str(node.get("id") or "").strip()
-        if node_id:
-            nodes_by_id[node_id] = node
-    candidates: list[str] = []
-    for todo_id in ready_ids:
-        node = nodes_by_id.get(todo_id)
-        if not node:
-            continue
-        status = str(node.get("status") or "").strip().lower()
-        if status == "completed":
-            continue
-        content = str(node.get("content") or "").strip()
-        if content:
-            candidates.append(content)
-    if len(candidates) == 1:
-        return candidates[0]
-    if len(candidates) == 0:
-        return None
-
-    # Multiple ready todos can be executed in parallel. Only rewrite a broad
-    # knowledge-researcher prompt when its short description clearly names one.
-    description_tokens = _tokens(description)
-    if not description_tokens:
-        return None
-    scored = [
-        (len(description_tokens & _tokens(candidate)), candidate)
-        for candidate in candidates
-    ]
-    scored.sort(key=lambda item: item[0], reverse=True)
-    best_score, best_candidate = scored[0]
-    second_score = scored[1][0] if len(scored) > 1 else 0
-    if best_score >= 2 and best_score >= second_score + 2:
-        return best_candidate
-    return None
-
-
-def _rewrite_source_research_prompt(prompt: str, objective: str) -> str:
-    objective_line = objective.strip()
+def _research_prompt(prompt: str, report_path: str) -> str:
     return (
-        "Research one narrow objective only.\n\n"
-        f"Objective: {objective_line}\n\n"
-        "Do not expand to adjacent objectives. Gather 3-5 high-signal sources and return concise source notes "
-        "with clear citations and freshness."
+        f"{prompt.rstrip()}\n\n"
+        "<research_report_contract>\n"
+        f"Write the completed research report to `{report_path}` using `write_file`.\n"
+        "Use `str_replace` only to refine that same report after it has been created.\n"
+        "Your final response must briefly state the status, report path, major findings, source count, and remaining uncertainty.\n"
+        "</research_report_contract>"
+    )
+
+
+def _terminal_error_command(
+    *,
+    tool_call_id: str,
+    task_id: str,
+    subagent_type: str,
+    terminal_status: str,
+    error_type: str,
+    error: str,
+) -> Command:
+    artifact = {
+        "task_id": task_id,
+        "terminal_status": terminal_status,
+        "subagent_type": subagent_type,
+        "error_type": error_type,
+        "error": error,
+    }
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(
+                    content=f"Task {terminal_status}. Error: {error}",
+                    tool_call_id=tool_call_id,
+                    name="task",
+                    status="error",
+                    artifact=artifact,
+                )
+            ]
+        }
     )
 
 
@@ -258,8 +220,7 @@ def task_tool(
     prompt: str,
     subagent_type: str,
     tool_call_id: Annotated[str, InjectedToolCallId],
-    max_turns: int | None = None,
-) -> str:
+) -> str | Command:
     """Delegate a task to a specialized subagent that runs in its own context.
 
     Subagents help you:
@@ -273,8 +234,8 @@ def task_tool(
       multiple dependent steps, or would benefit from isolated context.
     - **bash**: Command execution specialist for running bash commands. Use for
       git operations, build processes, or when command output would be verbose.
-    - **knowledge-researcher**: External source researcher for one narrow live-source,
-      RSS, or direct-source research objective.
+    - **knowledge-researcher**: Researches one coherent web/knowledge-vault topic,
+      writes a Markdown report, and returns the report path.
     - **docs-explorer**: Local corpus explorer for uploaded or mounted documents
       mirrored into `/mnt/user-data/workspace/.docs`.
     - **comparison-dimension-researcher**: Researches one comparison dimension
@@ -296,7 +257,6 @@ def task_tool(
         description: A short (3-5 word) description of the task for logging/display. ALWAYS PROVIDE THIS PARAMETER FIRST.
         prompt: The task description for the subagent. Be specific and clear about what needs to be done. ALWAYS PROVIDE THIS PARAMETER SECOND.
         subagent_type: The type of subagent to use. ALWAYS PROVIDE THIS PARAMETER THIRD.
-        max_turns: Optional maximum number of agent turns. Defaults to subagent's configured max.
     """
     # Get subagent configuration
     config = get_subagent_config(subagent_type)
@@ -328,33 +288,15 @@ def task_tool(
                 "Use the explicit execute-plan action first, then retry."
             )
 
-    # Build config overrides
-    overrides: dict = {}
-
     skills_section = get_skills_prompt_section()
     if skills_section:
-        overrides["system_prompt"] = config.system_prompt + "\n\n" + skills_section
-
-    if max_turns is not None:
-        overrides["max_turns"] = max_turns
-
-    if overrides:
-        config = config.model_copy(update=overrides)
+        config = config.model_copy(update={"system_prompt": config.system_prompt + "\n\n" + skills_section})
 
     normalized_description = _normalize_description(description)
     normalized_subagent_type = _normalize_subagent_label(subagent_type)
-    rewritten_scope = False
-    if normalized_subagent_type == "knowledge-researcher" and _source_research_prompt_is_broad(prompt):
-        scope_hint = _ready_todo_scope_hint(runtime, description=description)
-        if scope_hint:
-            prompt = _rewrite_source_research_prompt(prompt, scope_hint)
-            normalized_description = _normalize_description(scope_hint[:120])
-            rewritten_scope = True
-        else:
-            return (
-                "Task rejected: knowledge-researcher accepts one narrow objective only. "
-                "Split the request into smaller scoped task calls (one evidence dimension per task) and retry."
-            )
+    report_path = _research_report_path(str(tool_call_id)) if normalized_subagent_type == "knowledge-researcher" else None
+    if report_path:
+        prompt = _research_prompt(prompt, report_path)
 
     group_title = _build_group_title(normalized_subagent_type, normalized_description)
     dispatch_event = create_activity_event(
@@ -468,7 +410,7 @@ def task_tool(
             "group_id": str(task_id),
             "group_kind": "subagent_task",
             "group_title": group_title,
-            "scope_rewritten": rewritten_scope,
+            "report_path": report_path,
         },
         thinking={
             "source": "summary",
@@ -488,7 +430,7 @@ def task_tool(
             "task_id": task_id,
             "description": normalized_description,
             "subagent_type": normalized_subagent_type,
-            "scope_rewritten": rewritten_scope,
+            "report_path": report_path,
             "group_id": str(task_id),
             "group_kind": "subagent_task",
             "group_title": group_title,
@@ -508,7 +450,7 @@ def task_tool(
             "description": normalized_description,
             "original_description": description,
             "subagent_type": normalized_subagent_type,
-            "scope_rewritten": rewritten_scope,
+            "report_path": report_path,
             "group_id": str(task_id),
             "group_kind": "subagent_task",
             "group_title": group_title,
@@ -522,9 +464,55 @@ def task_tool(
 
         if result is None:
             logger.error(f"[trace={trace_id}] Task {task_id} not found in background tasks")
-            writer({"type": "task_failed", "task_id": task_id, "error": "Task disappeared from background tasks"})
+            error = "Task disappeared from background tasks"
+            writer({"type": "task_failed", "task_id": task_id, "error": error})
+            failed_trace = create_trace_event(
+                runtime,
+                stage="subagent",
+                event_type="task_failed",
+                status="failed",
+                payload={
+                    "error": error,
+                    "subagent_type": normalized_subagent_type,
+                    "description": normalized_description,
+                    "group_id": str(task_id),
+                    "group_kind": "subagent_task",
+                    "group_title": group_title,
+                },
+                thinking={"source": "summary", "content": make_summary_fallback(event_type="task_failed", payload={"subagent_type": subagent_type})},
+                turn_id=str(tool_call_id),
+                assistant_message_id=str(assistant_message_id) if assistant_message_id is not None else None,
+                task_id=str(task_id),
+            )
+            stream_trace_event(failed_trace)
+            append_runtime_event(
+                runtime,
+                {
+                    "source": "task_tool",
+                    "event": "task_failed",
+                    "status": "failed",
+                    "task_id": str(task_id),
+                    "turn_id": str(tool_call_id),
+                    "assistant_message_id": str(assistant_message_id) if assistant_message_id is not None else None,
+                    "error": error,
+                    "subagent_type": normalized_subagent_type,
+                    "description": normalized_description,
+                    "group_id": str(task_id),
+                    "group_kind": "subagent_task",
+                    "group_title": group_title,
+                    "trace_event": failed_trace,
+                    "trace_already_streamed": True,
+                },
+            )
             cleanup_background_task(task_id)
-            return f"Error: Task {task_id} disappeared from background tasks"
+            return _terminal_error_command(
+                tool_call_id=str(tool_call_id),
+                task_id=str(task_id),
+                subagent_type=normalized_subagent_type,
+                terminal_status="failed",
+                error_type="task_disappeared",
+                error=error,
+            )
 
         # Log status changes for debugging
         if result.status != last_status:
@@ -672,7 +660,8 @@ def task_tool(
             )
             logger.info(f"[trace={trace_id}] Task {task_id} completed after {poll_count} polls")
             cleanup_background_task(task_id)
-            return f"Task Succeeded. Result: {result.result}"
+            report_notice = f" Report: {report_path}." if report_path else ""
+            return f"Task Succeeded.{report_notice} Result: {result.result}"
         elif result.status == SubagentStatus.FAILED:
             failed_trace = create_trace_event(
                 runtime,
@@ -733,7 +722,14 @@ def task_tool(
             )
             logger.error(f"[trace={trace_id}] Task {task_id} failed: {result.error}")
             cleanup_background_task(task_id)
-            return f"Task failed. Error: {result.error}"
+            return _terminal_error_command(
+                tool_call_id=str(tool_call_id),
+                task_id=str(task_id),
+                subagent_type=normalized_subagent_type,
+                terminal_status="failed",
+                error_type="subagent_failed",
+                error=str(result.error or "Unknown subagent failure"),
+            )
         elif result.status == SubagentStatus.TIMED_OUT:
             timed_out_trace = create_trace_event(
                 runtime,
@@ -794,7 +790,14 @@ def task_tool(
             )
             logger.warning(f"[trace={trace_id}] Task {task_id} timed out: {result.error}")
             cleanup_background_task(task_id)
-            raise TimeoutError(f"Task timed out. Error: {result.error}")
+            return _terminal_error_command(
+                tool_call_id=str(tool_call_id),
+                task_id=str(task_id),
+                subagent_type=normalized_subagent_type,
+                terminal_status="timed_out",
+                error_type="execution_timeout",
+                error=str(result.error or "Task execution timed out"),
+            )
 
         # Still running, wait before next poll
         time.sleep(5)  # Poll every 5 seconds
@@ -865,7 +868,14 @@ def task_tool(
                     "trace_already_streamed": True,
                 },
             )
-            raise TimeoutError(
-                f"Task polling timed out after {timeout_minutes} minutes. "
-                f"This may indicate the background task is stuck. Status: {result.status.value}"
+            return _terminal_error_command(
+                tool_call_id=str(tool_call_id),
+                task_id=str(task_id),
+                subagent_type=normalized_subagent_type,
+                terminal_status="timed_out",
+                error_type="polling_timeout",
+                error=(
+                    f"Task polling timed out after {timeout_minutes} minutes. "
+                    f"This may indicate the background task is stuck. Status: {result.status.value}"
+                ),
             )

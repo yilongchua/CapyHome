@@ -223,14 +223,16 @@ Proxied through nginx: `/api/langgraph/*` → LangGraph, all other `/api/*` → 
 
 ### Subagent System (`src/subagents/`)
 
-**Built-in Agents**: `general-purpose` (all tools except `task`), `bash` (command specialist), `vault-source-researcher` (autoresearch loop helper that writes findings to the knowledge vault), and research-focused public subagents: `knowledge-researcher` (external source research; formerly `source-researcher`), `docs-explorer`, `comparison-dimension-researcher`, `synthesis-reviewer`. **Plan-Mode planning helpers** (read-only, `modes=["plan"]`): `scope-researcher` (web + `query_knowledge_vault` scope understanding) and `finder-agent` (`grep`/`ls`/`read_file` repo/folder mapping). These are the only subagents the plan_agent can spawn.
+**Built-in Agents**: `general-purpose` (mixed research/execution and local file analysis), `bash` (command specialist), `vault-source-researcher` (autoresearch loop helper that writes findings to the knowledge vault), and research-focused public subagents: `knowledge-researcher` (coherent web/knowledge-vault research that writes a Markdown report), `docs-explorer`, `comparison-dimension-researcher`, `synthesis-reviewer`. **Plan-Mode planning helpers** (read-only, `modes=["plan"]`): `scope-researcher` (web + `query_knowledge_vault` scope understanding) and `finder-agent` (`grep`/`ls`/`read_file` repo/folder mapping). These are the only subagents the plan_agent can spawn.
 
 **Mode gating** (`SubagentConfig.modes`): each subagent declares the runtime modes in which `task` may spawn it. Defaults to `["work", "auto"]` (execution-only); planning helpers set `["plan"]`. `task_tool` resolves the current mode (`resolve_current_mode`) and rejects out-of-mode delegations; it also exempts plan-allowed subagents from the draft-plan execution gate so finders can run *during* drafting. Plan vs work `task` availability is additionally enforced by the per-mode tool catalogs (the plan catalog's `task` enum lists only `scope-researcher`/`finder-agent`).
 **Execution**: Dual thread pool - `_scheduler_pool` + `_execution_pool`, sized from `subagents.max_concurrent_limit`
 **Concurrency**: the lead-agent prompt injects `max_concurrent_subagents` as the per-response fan-out contract. The runtime does not rewrite or defer excess `task` calls. Executor thread-pool size remains an infrastructure capacity bound, and each subagent has a cooperative timeout.
 **Flow**: `task()` tool → `SubagentExecutor` → background thread → poll 5s → SSE events → result
 **Events**: `task_started`, `task_running`, `task_completed`/`task_failed`/`task_timed_out`
-- **Turn budgets**: all subagents share a single `max_turns` (LangGraph `recursion_limit`), sourced from `subagents.max_turns` in config.yaml (default **50**). The per-agent `max_turns=` values were removed from the builtin configs so config.yaml is the single source of truth; `SubagentsAppConfig.get_max_turns_for(name)` returns the per-agent override (`subagents.agents.<name>.max_turns`) if present, else the shared global. Applied in `registry.get_subagent_config` alongside the `timeout_seconds` override
+- **Graph-step budgets**: `max_turns` is the exact LangGraph `recursion_limit`, not a model-call count. It is sourced only from `subagents.max_turns` (default **50**) or `subagents.agents.<name>.max_turns`; the `task` tool cannot override it and no hidden minimum is applied.
+- **Research reports**: `knowledge-researcher` receives `/mnt/user-data/workspace/research/<task-id>.md`, can use only `web_search`, `query_knowledge_vault`, `write_file`, and `str_replace`, and returns a concise handoff while the successful `task` result repeats the expected path.
+- **Terminal results**: failed, timed-out, disappeared, and polling-timeout tasks return `ToolMessage(status="error")` with structured terminal metadata. Runtime `task_failed` and `task_timed_out` events are the authoritative persisted terminal signals.
 - **UI labeling**: subagent lifecycle events now carry `subagent_type`, `description`, `group_id`, and `group_title`, and the activity timeline renders them as `Baby Capy - {subagent_type} ...` while preserving per-task grouping
 
 ### Tool System (`src/tools/`)
@@ -243,7 +245,7 @@ Proxied through nginx: `/api/langgraph/*` → LangGraph, all other `/api/*` → 
    - `ask_user_for_clarification` - Request clarification (intercepted by ClarificationMiddleware → interrupts)
    - `view_image` - Read image as base64 (added only if model supports vision)
 4. **Subagent tool** (if enabled):
-   - `task` - Delegate to subagent (description, prompt, subagent_type, max_turns)
+   - `task` - Delegate to subagent (description, prompt, subagent_type)
 
 **JSON-driven tool definitions** (`src/tools/internal_tools_plan.json`, `src/tools/internal_tools_work.json`, `src/tools/external_tools.json`):
 

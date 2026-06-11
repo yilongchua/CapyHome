@@ -23,6 +23,7 @@ Anything that ends up in front of a model is in scope:
 | 5 | [05-skill-metadata.md](05-skill-metadata.md) | All 20 `SKILL.md` descriptions + parser/loader/curation |
 | 6 | [06-summary-and-priorities.md](06-summary-and-priorities.md) | Cross-cutting findings, ranked priorities, suggested rollout order |
 | 7 | [07-additional-llm-call-sites.md](07-additional-llm-call-sites.md) | Final sweep: control plane (vault, autoresearch), gateway routers, plan-execution gate, config-resident templates |
+| 8 | [08-subagent-execution-and-observability.md](08-subagent-execution-and-observability.md) | Subagent *execution* (not prompt text): turn budgets, `max_turns` assignment, what the subagent receives, prompt-capture foldering, agent-type routing, failure observability |
 
 ## How to read each file
 

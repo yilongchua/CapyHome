@@ -18,7 +18,7 @@ class SubagentOverrideConfig(BaseModel):
     max_turns: int | None = Field(
         default=None,
         ge=1,
-        description="Max agent turns (LangGraph recursion_limit) for this subagent (None = use the subagent's own default)",
+        description="Maximum LangGraph graph steps for this subagent (None = use subagents.max_turns)",
     )
 
 
@@ -33,7 +33,7 @@ class SubagentsAppConfig(BaseModel):
     max_turns: int = Field(
         default=50,
         ge=1,
-        description="Default max agent turns (LangGraph recursion_limit) shared by all subagents. Per-agent overrides in `agents.<name>.max_turns` still win.",
+        description="Default LangGraph graph-step limit shared by all subagents. Per-agent overrides in `agents.<name>.max_turns` still win.",
     )
     max_concurrent_limit: int = Field(
         default=4,
@@ -60,7 +60,7 @@ class SubagentsAppConfig(BaseModel):
         return self.timeout_seconds
 
     def get_max_turns_for(self, agent_name: str) -> int:
-        """Get the effective max_turns for a specific agent.
+        """Get the effective LangGraph graph-step limit for a specific agent.
 
         Uses the per-agent override (`agents.<name>.max_turns`) if set, otherwise
         the shared global default (`subagents.max_turns`). All subagents therefore

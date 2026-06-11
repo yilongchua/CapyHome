@@ -15,6 +15,7 @@ the real implementation in isolation.
 import asyncio
 import sys
 from datetime import datetime
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,6 +25,7 @@ _MOCKED_MODULE_NAMES = [
     "src.agents",
     "src.agents.thread_state",
     "src.agents.middlewares",
+    "src.agents.middlewares.permission_middleware",
     "src.agents.middlewares.thread_data_middleware",
     "src.sandbox",
     "src.sandbox.middleware",
@@ -31,11 +33,11 @@ _MOCKED_MODULE_NAMES = [
 ]
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 def _setup_executor_classes():
     """Set up mocked modules and import real executor classes.
 
-    This fixture runs once per session and yields the executor classes.
+    This fixture runs once for this module and yields the executor classes.
     It handles module cleanup to avoid affecting other test files.
     """
     # Save original modules
@@ -49,6 +51,15 @@ def _setup_executor_classes():
     # Set up mocks
     for name in _MOCKED_MODULE_NAMES:
         sys.modules[name] = MagicMock()
+
+    permission_module = ModuleType("src.agents.middlewares.permission_middleware")
+
+    class PermissionMiddleware:
+        def _resolve_decision(self, request):
+            return "allow"
+
+    permission_module.PermissionMiddleware = PermissionMiddleware
+    sys.modules["src.agents.middlewares.permission_middleware"] = permission_module
 
     # Import real classes inside fixture
     from langchain_core.messages import AIMessage, HumanMessage
@@ -211,6 +222,35 @@ class TestAsyncExecutionPath:
         assert result.error is None
         assert result.started_at is not None
         assert result.completed_at is not None
+
+    @pytest.mark.anyio
+    async def test_aexecute_honors_configured_recursion_limit_and_sets_subagent_identity(self, classes, base_config, mock_agent, msg):
+        SubagentExecutor = classes["SubagentExecutor"]
+        SubagentResult = classes["SubagentResult"]
+        SubagentStatus = classes["SubagentStatus"]
+        captured = {}
+
+        async def capture_astream(*args, **kwargs):
+            captured.update(kwargs)
+            yield {"messages": [msg.human("Task"), msg.ai("Done", "msg-1")]}
+
+        mock_agent.astream = capture_astream
+        result_holder = SubagentResult(
+            task_id="task-10",
+            trace_id="trace-10",
+            status=SubagentStatus.RUNNING,
+        )
+        executor = SubagentExecutor(config=base_config, tools=[], thread_id="thread-10")
+
+        with patch.object(executor, "_create_agent", return_value=mock_agent):
+            await executor._aexecute("Task", result_holder=result_holder)
+
+        assert captured["config"]["recursion_limit"] == 10
+        assert captured["config"]["configurable"] == {
+            "thread_id": "thread-10",
+            "subagent_type": "test-agent",
+            "subagent_task_id": "task-10",
+        }
 
     @pytest.mark.anyio
     async def test_aexecute_collects_ai_messages(self, classes, base_config, mock_agent, msg):

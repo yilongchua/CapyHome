@@ -170,7 +170,7 @@
     "endpoint": "any",
     "requires_vision": false,
     "requires_subagent_enabled": true,
-    "returns": "String containing the subagent's final response (truncated if it exceeds ~20k tokens). Returns an error string if `subagent_type` is unknown, if called while a plan is still in `draft`, or if the subagent times out. Lifecycle events (`task_started`, `task_running`, `task_completed`, `task_failed`, `task_timed_out`) stream out-of-band to the client.",
+    "returns": "String containing the subagent's final response (truncated if it exceeds ~20k tokens). A dispatched task failure returns an error ToolMessage with structured terminal metadata. Lifecycle events (`task_started`, `task_running`, `task_completed`, `task_failed`, `task_timed_out`) stream out-of-band to the client.",
     "examples": [
       "task(description=\"Research async patterns\", prompt=\"Survey Python asyncio cancellation patterns in 2024-2025 sources. Return 3-5 sources with one-sentence summaries and direct URL citations. Focus on structured concurrency primitives (TaskGroup, anyio).\", subagent_type=\"knowledge-researcher\")",
       "task(description=\"Find weekend events\", prompt=\"Find 5-8 family-friendly events happening in Singapore between 2026-05-30 and 2026-06-01. For each event return: name, venue, time, one-line description, ticket/price info if any, and the source URL. Skip nightlife and 18+ events.\", subagent_type=\"knowledge-researcher\")",
@@ -192,11 +192,7 @@
         "subagent_type": {
           "type": "string",
           "enum": ["general-purpose", "bash", "knowledge-researcher", "docs-explorer", "comparison-dimension-researcher", "synthesis-reviewer", "vault-source-researcher"],
-          "description": "Which subagent to invoke. `general-purpose`: all-tool exploratory worker. `bash`: shell-command specialist for verbose output. `knowledge-researcher`: one narrow external/live-source objective; auto-narrows broad prompts. `docs-explorer`: searches the local corpus / mounted documents in `/mnt/user-data/workspace/.docs`. `comparison-dimension-researcher`: researches one comparison dimension across a fixed option set. `synthesis-reviewer`: reviews collected findings for coverage, contradictions, citations, and freshness. `vault-source-researcher`: autoresearch helper that writes findings into the knowledge vault. All subagents share `subagents.max_turns` (default 50) unless overridden per-agent in config.yaml."
-        },
-        "max_turns": {
-          "type": "integer",
-          "description": "Optional override for the subagent's recursion limit (LangGraph `recursion_limit`). Defaults to the shared `subagents.max_turns` (50) unless a per-agent override is set in config.yaml. Lower to bound cost on simple tasks; raise only if the default is provably too small."
+          "description": "Which subagent to invoke. `general-purpose`: mixed research and execution, local file analysis, or broad-tool exploration. `bash`: shell-command specialist for verbose output. `knowledge-researcher`: researches one coherent web/knowledge-vault topic, writes a Markdown report, and returns its path. `docs-explorer`: searches the local corpus / mounted documents in `/mnt/user-data/workspace/.docs`. `comparison-dimension-researcher`: researches one comparison dimension across a fixed option set. `synthesis-reviewer`: reviews collected findings for coverage, contradictions, citations, and freshness. `vault-source-researcher`: autoresearch helper that writes findings into the knowledge vault. Subagent graph-step budgets come only from config.yaml."
         }
       }
     }

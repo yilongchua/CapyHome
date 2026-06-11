@@ -69,14 +69,23 @@ def _messages_to_text(messages: list[BaseMessage]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _resolve_output_dir(thread_id: str | None) -> Path:
+def _resolve_output_dir(
+    thread_id: str | None,
+    *,
+    subagent_type: str | None = None,
+    subagent_task_id: str | None = None,
+) -> Path:
     default_virtual = Path("/mnt/user-data/workspace/.prompts")
     override = os.getenv("CAPYBARA_PROMPT_LOG_DIR", "").strip()
     if override:
-        return Path(override)
-    if thread_id:
-        return get_paths().sandbox_work_dir(thread_id) / ".prompts"
-    return default_virtual
+        output_dir = Path(override)
+    elif thread_id:
+        output_dir = get_paths().sandbox_work_dir(thread_id) / ".prompts"
+    else:
+        output_dir = default_virtual
+    if subagent_type and subagent_task_id:
+        return output_dir / "subagents" / _safe_name(subagent_type) / _safe_name(subagent_task_id)
+    return output_dir
 
 
 def write_prompt_log(
@@ -130,13 +139,23 @@ class PromptLoggingCallback(BaseCallbackHandler):
             configurable = cfg.get("configurable", {}) if isinstance(cfg, dict) else {}
             thread_id_value = configurable.get("thread_id")
             thread_id = str(thread_id_value) if thread_id_value else None
+            subagent_type_value = configurable.get("subagent_type")
+            subagent_task_id_value = configurable.get("subagent_task_id")
+            subagent_type = str(subagent_type_value) if subagent_type_value else None
+            subagent_task_id = str(subagent_task_id_value) if subagent_task_id_value else None
         except Exception:
             thread_id = None
+            subagent_type = None
+            subagent_task_id = None
 
         purpose = _safe_name(str(os.getenv("CAPYBARA_PROMPT_LOG_PURPOSE", "prompt_tuning")))
-        actor = _detect_actor(serialized if isinstance(serialized, dict) else {}, kwargs)
+        actor = "sub_agent" if subagent_type and subagent_task_id else _detect_actor(serialized if isinstance(serialized, dict) else {}, kwargs)
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%fZ")
-        output_dir = _resolve_output_dir(thread_id)
+        output_dir = _resolve_output_dir(
+            thread_id,
+            subagent_type=subagent_type,
+            subagent_task_id=subagent_task_id,
+        )
 
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -155,6 +174,8 @@ class PromptLoggingCallback(BaseCallbackHandler):
                     "purpose": purpose,
                     "actor": actor,
                     "thread_id": thread_id,
+                    "subagent_type": subagent_type,
+                    "task_id": subagent_task_id,
                     "model_name": (serialized or {}).get("name"),
                     "invocation_params": kwargs.get("invocation_params"),
                     "message_count": len(batch),

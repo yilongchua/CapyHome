@@ -611,7 +611,7 @@
     "endpoint": "any",
     "requires_vision": false,
     "requires_subagent_enabled": true,
-    "returns": "String containing the planning subagent's structured brief (truncated if it exceeds ~20k tokens). Returns an error string if `subagent_type` is unknown or not available in Plan Mode, or if the subagent times out. Lifecycle events (`task_started`, `task_running`, `task_completed`, `task_failed`, `task_timed_out`) stream out-of-band to the client.",
+    "returns": "String containing the planning subagent's structured brief (truncated if it exceeds ~20k tokens). A dispatched task failure returns an error ToolMessage with structured terminal metadata. Lifecycle events (`task_started`, `task_running`, `task_completed`, `task_failed`, `task_timed_out`) stream out-of-band to the client.",
     "examples": [
       "task(description=\"Map the repo structure\", prompt=\"Map and understand the backend at /mnt/user-data/workspace. Read the README and entrypoints (main.py/app.py), then report: top-level structure, where the HTTP layer / business logic / config live, how startup wires things together, and any constraints worth knowing before planning improvements. Do not propose changes.\", subagent_type=\"finder-agent\")",
       "task(description=\"Scope the comparison\", prompt=\"Understand the SCOPE of comparing managed Postgres providers for a small SaaS. Return: the sub-dimensions that matter (pricing model, regions, backups, connection limits, etc.), credible source types to consult during execution, and any ambiguities the planner should resolve. Do not pick a winner.\", subagent_type=\"scope-researcher\")",
@@ -639,11 +639,7 @@
             "scope-researcher",
             "finder-agent"
           ],
-          "description": "Which planning subagent to invoke. `scope-researcher`: understands the SCOPE of one facet using `web_search` + `query_knowledge_vault` (sub-topics, sources, ambiguities). `finder-agent`: FINDS AND UNDERSTANDS local files/directories using `grep`/`ls`/`read_file` (maps a repo/folder, reads README/entrypoints/configs, reports where things live)."
-        },
-        "max_turns": {
-          "type": "integer",
-          "description": "Optional override for the subagent's recursion limit (LangGraph `recursion_limit`). Defaults to the shared `subagents.max_turns` (50) unless a per-agent override is set in config.yaml `subagents.agents.<name>.max_turns`. Lower to bound cost; raise only if the default is provably too small."
+          "description": "Which planning subagent to invoke. `scope-researcher`: understands the SCOPE of one facet using `web_search` + `query_knowledge_vault` (sub-topics, sources, ambiguities). `finder-agent`: FINDS AND UNDERSTANDS local files/directories using `grep`/`ls`/`read_file` (maps a repo/folder, reads README/entrypoints/configs, reports where things live). Subagent graph-step budgets come only from config.yaml."
         }
       }
     }

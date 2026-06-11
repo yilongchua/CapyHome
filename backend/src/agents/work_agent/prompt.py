@@ -24,11 +24,12 @@ def _build_subagent_section(max_concurrent: int) -> str:
     n = max_concurrent
     return f"""<subagent_system>
 Subagent mode is available for parallel work. Use it only when the request naturally splits into 2+ independent sub-tasks.
+Hard limit: emit at most {n} `task` calls in one response. If more work remains, wait for the current batch before dispatching the next one.
 
 Available subagents:
-- `general-purpose`: web research, code exploration, file analysis, multi-source investigation.
+- `general-purpose`: mixed research and execution, code exploration, local file analysis, or work requiring a broad tool set.
 - `bash`: command execution such as git, builds, tests, deployments.
-- `knowledge-researcher`: one narrow live-source/RSS/direct-source research objective with structured source status.
+- `knowledge-researcher`: one coherent web/knowledge-vault research topic; it writes a Markdown report and returns the report path.
 - `docs-explorer`: read/search `/mnt/user-data/workspace/.docs` mirrored document corpora and return file-grounded evidence.
 - `comparison-dimension-researcher`: analyze one comparison dimension across a fixed set of options.
 - `synthesis-reviewer`: review collected findings or a draft for coverage, contradictions, citations, and freshness.
@@ -46,9 +47,9 @@ Do not use subagents when:
 Task quality bar:
 - One objective per subagent.
 - Keep each prompt to 3-5 concrete checks or deliverables.
-- Split any mega-brief with 6+ bullets or words like "comprehensive" / "end-to-end".
+- A `knowledge-researcher` may cover several related dimensions of one coherent topic; split unrelated research topics into separate calls.
 - Ask each subagent for a concise result format you can synthesize quickly.
-- Do not re-dispatch the same objective to the same subagent if a prior result already exists; use the partial result or ask a narrower follow-up.
+- After a failed research task, narrow the failing portion or use available partial evidence; do not replay the identical brief.
 
 Batching example: for "Compare 5 cloud providers", launch {n} provider analyses first, wait for results, then launch the remaining providers, then synthesize all results in the final answer.
 </subagent_system>"""

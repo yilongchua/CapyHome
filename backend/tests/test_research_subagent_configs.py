@@ -36,9 +36,12 @@ def test_knowledge_researcher_has_external_research_guidance():
     config = get_subagent_config("knowledge-researcher")
 
     assert config is not None
-    assert "web_search" in (config.tools or [])
+    assert set(config.tools or []) == {"web_search", "query_knowledge_vault", "write_file", "str_replace"}
     assert "task" in (config.disallowed_tools or [])
-    assert "Source status" in config.system_prompt
+    assert "recall" in (config.disallowed_tools or [])
+    assert "bash" in (config.disallowed_tools or [])
+    assert "Report path" in config.system_prompt
+    assert "one coherent delegated topic" in config.system_prompt
     assert "If web_search fails once" in config.system_prompt
 
 

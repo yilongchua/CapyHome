@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import ToolMessage
+from langgraph.types import Command
 
 from src.subagents.config import SubagentConfig
 
@@ -61,6 +63,15 @@ def _make_result(
         result=result,
         error=error,
     )
+
+
+def _command_message(result: Command) -> ToolMessage:
+    assert isinstance(result, Command)
+    messages = result.update["messages"]
+    assert len(messages) == 1
+    message = messages[0]
+    assert isinstance(message, ToolMessage)
+    return message
 
 
 def test_task_tool_returns_error_for_unknown_subagent(monkeypatch):
@@ -129,8 +140,13 @@ def test_task_tool_accepts_registered_research_subagents(monkeypatch, subagent_t
         tool_call_id="tc-research",
     )
 
-    assert output == "Task Succeeded. Result: research complete"
-    assert captured["prompt"] == "research one dimension"
+    if subagent_type == "knowledge-researcher":
+        assert output == "Task Succeeded. Report: /mnt/user-data/workspace/research/tc-research.md. Result: research complete"
+        assert "research one dimension" in captured["prompt"]
+        assert "/mnt/user-data/workspace/research/tc-research.md" in captured["prompt"]
+    else:
+        assert output == "Task Succeeded. Result: research complete"
+        assert captured["prompt"] == "research one dimension"
     assert captured["executor_kwargs"]["config"].name == subagent_type
     non_trace_events = [e for e in events if e.get("type") not in {"trace_event.v1", "activity_event.v1"}]
     assert non_trace_events[0]["type"] == "task_started"
@@ -185,7 +201,6 @@ def test_task_tool_emits_running_and_completed_events(monkeypatch):
         prompt="collect diagnostics",
         subagent_type="general-purpose",
         tool_call_id="tc-123",
-        max_turns=7,
     )
 
     assert output == "Task Succeeded. Result: all done"
@@ -193,7 +208,7 @@ def test_task_tool_emits_running_and_completed_events(monkeypatch):
     assert captured["task_id"] == "tc-123"
     assert captured["executor_kwargs"]["thread_id"] == "thread-1"
     assert captured["executor_kwargs"]["parent_model"] == "ark-model"
-    assert captured["executor_kwargs"]["config"].max_turns == 7
+    assert captured["executor_kwargs"]["config"].max_turns == 50
     assert "Skills Appendix" in captured["executor_kwargs"]["config"].system_prompt
 
     get_available_tools.assert_called_once_with(model_name="ark-model", groups=None, subagent_enabled=False)
@@ -217,7 +232,7 @@ def test_task_tool_emits_running_and_completed_events(monkeypatch):
     assert all(e.get("trace_already_streamed") is True for e in runtime_events[1:])
 
 
-def test_knowledge_researcher_broad_prompt_is_rewritten_to_ready_todo(monkeypatch):
+def test_knowledge_researcher_accepts_coherent_multi_dimension_topic_and_assigns_report(monkeypatch):
     config = SubagentConfig(
         name="knowledge-researcher",
         description="source researcher",
@@ -226,13 +241,6 @@ def test_knowledge_researcher_broad_prompt_is_rewritten_to_ready_todo(monkeypatc
         timeout_seconds=10,
     )
     runtime = _make_runtime()
-    runtime.state["todo_graph"] = {
-        "ready_ids": ["todo-2"],
-        "nodes": [
-            {"id": "todo-1", "content": "already done", "status": "completed"},
-            {"id": "todo-2", "content": "Analyze SG EV incentives only", "status": "pending"},
-        ],
-    }
     events = []
     runtime_events = []
     captured = {}
@@ -252,7 +260,7 @@ def test_knowledge_researcher_broad_prompt_is_rewritten_to_ready_todo(monkeypatc
     monkeypatch.setattr(
         task_tool_module,
         "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.COMPLETED, result="narrow research complete"),
+        lambda _: _make_result(FakeSubagentStatus.COMPLETED, result="report complete"),
     )
     monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
     monkeypatch.setattr(task_tool_module, "append_runtime_event", lambda _runtime, event: runtime_events.append(event))
@@ -272,76 +280,14 @@ def test_knowledge_researcher_broad_prompt_is_rewritten_to_ready_todo(monkeypatc
         tool_call_id="tc-rewrite",
     )
 
-    assert output == "Task Succeeded. Result: narrow research complete"
-    assert "Objective: Analyze SG EV incentives only" in captured["prompt"]
+    assert output == "Task Succeeded. Report: /mnt/user-data/workspace/research/tc-rewrite.md. Result: report complete"
+    assert broad_prompt in captured["prompt"]
+    assert "/mnt/user-data/workspace/research/tc-rewrite.md" in captured["prompt"]
+    assert "write_file" in captured["prompt"]
     non_trace_events = [event for event in events if event.get("type") not in {"trace_event.v1", "activity_event.v1"}]
-    assert non_trace_events[0]["scope_rewritten"] is True
-    assert non_trace_events[0]["description"].startswith("Analyze SG EV incentives only")
-    assert runtime_events[1]["description"] == "Analyze SG EV incentives only"
+    assert non_trace_events[0]["report_path"] == "/mnt/user-data/workspace/research/tc-rewrite.md"
+    assert runtime_events[1]["description"] == "EV mega brief"
     assert runtime_events[1]["original_description"] == "EV mega brief"
-
-
-def test_knowledge_researcher_rejects_broad_prompt_when_multiple_ready_todos_are_ambiguous(monkeypatch):
-    config = SubagentConfig(
-        name="knowledge-researcher",
-        description="source researcher",
-        system_prompt="Research prompt",
-        max_turns=5,
-        timeout_seconds=10,
-    )
-    runtime = _make_runtime()
-    runtime.state["todo_graph"] = {
-        "ready_ids": ["todo-1", "todo-2"],
-        "nodes": [
-            {"id": "todo-1", "content": "Research SG EV incentives", "status": "pending"},
-            {"id": "todo-2", "content": "Research SG EV charging", "status": "pending"},
-        ],
-    }
-
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-
-    broad_prompt = (
-        "Research EV in Singapore. Focus on:\n"
-        "1. Brands\n2. Models\n3. Battery\n4. Charging\n5. Incentives\n6. Used trap\n"
-        "Return a comprehensive report."
-    )
-    output = task_tool_module.task_tool.func(
-        runtime=runtime,
-        description="EV mega brief",
-        prompt=broad_prompt,
-        subagent_type="knowledge-researcher",
-        tool_call_id="tc-ambiguous",
-    )
-
-    assert output.startswith("Task rejected: knowledge-researcher accepts one narrow objective only.")
-
-
-def test_knowledge_researcher_rejects_broad_prompt_without_narrow_scope_hint(monkeypatch):
-    config = SubagentConfig(
-        name="knowledge-researcher",
-        description="source researcher",
-        system_prompt="Research prompt",
-        max_turns=5,
-        timeout_seconds=10,
-    )
-    runtime = _make_runtime()
-    runtime.state["todo_graph"] = {"ready_ids": [], "nodes": []}
-
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-
-    broad_prompt = (
-        "Focus on:\n1. brands\n2. models\n3. battery\n4. charging\n5. incentives\n6. verdict\n"
-        "Return a comprehensive report."
-    )
-    output = task_tool_module.task_tool.func(
-        runtime=runtime,
-        description="EV mega brief",
-        prompt=broad_prompt,
-        subagent_type="knowledge-researcher",
-        tool_call_id="tc-reject",
-    )
-
-    assert output.startswith("Task rejected: knowledge-researcher accepts one narrow objective only.")
 
 
 def test_task_tool_forwards_parent_agent_tool_groups(monkeypatch):
@@ -417,7 +363,15 @@ def test_task_tool_returns_failed_message(monkeypatch):
         tool_call_id="tc-fail",
     )
 
-    assert output == "Task failed. Error: subagent crashed"
+    message = _command_message(output)
+    assert message.status == "error"
+    assert message.artifact == {
+        "task_id": "tc-fail",
+        "terminal_status": "failed",
+        "subagent_type": "general-purpose",
+        "error_type": "subagent_failed",
+        "error": "subagent crashed",
+    }
     non_trace_events = [e for e in events if e.get("type") not in {"trace_event.v1", "activity_event.v1"}]
     assert non_trace_events[-1]["type"] == "task_failed"
     assert non_trace_events[-1]["error"] == "subagent crashed"
@@ -426,7 +380,40 @@ def test_task_tool_returns_failed_message(monkeypatch):
     assert non_trace_events[-1]["group_title"] == "general-purpose: 执行任务"
 
 
-def test_task_tool_raises_timed_out_error(monkeypatch):
+def test_task_tool_returns_structured_error_when_background_task_disappears(monkeypatch):
+    config = _make_subagent_config()
+    events = []
+    runtime_events = []
+
+    monkeypatch.setattr(
+        task_tool_module,
+        "SubagentExecutor",
+        type("DummyExecutor", (), {"__init__": lambda self, **kwargs: None, "execute_async": lambda self, prompt, task_id=None: task_id}),
+    )
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
+    monkeypatch.setattr(task_tool_module, "get_skills_prompt_section", lambda: "")
+    monkeypatch.setattr(task_tool_module, "get_background_task_result", lambda _: None)
+    monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
+    monkeypatch.setattr(task_tool_module, "append_runtime_event", lambda _runtime, event: runtime_events.append(event))
+    monkeypatch.setattr("src.tools.get_available_tools", lambda **kwargs: [])
+
+    output = task_tool_module.task_tool.func(
+        runtime=_make_runtime(),
+        description="missing task",
+        prompt="do work",
+        subagent_type="general-purpose",
+        tool_call_id="tc-missing",
+    )
+
+    message = _command_message(output)
+    assert message.artifact["error_type"] == "task_disappeared"
+    assert message.artifact["terminal_status"] == "failed"
+    non_trace_events = [event for event in events if event.get("type") not in {"trace_event.v1", "activity_event.v1"}]
+    assert non_trace_events[-1]["type"] == "task_failed"
+    assert runtime_events[-1]["event"] == "task_failed"
+
+
+def test_task_tool_returns_timed_out_error_message(monkeypatch):
     config = _make_subagent_config()
     events = []
 
@@ -447,14 +434,16 @@ def test_task_tool_raises_timed_out_error(monkeypatch):
     monkeypatch.setattr(task_tool_module.time, "sleep", lambda _: None)
     monkeypatch.setattr("src.tools.get_available_tools", lambda **kwargs: [])
 
-    with pytest.raises(TimeoutError, match="Task timed out. Error: timeout"):
-        task_tool_module.task_tool.func(
-            runtime=_make_runtime(),
-            description="执行任务",
-            prompt="do timeout",
-            subagent_type="general-purpose",
-            tool_call_id="tc-timeout",
-        )
+    output = task_tool_module.task_tool.func(
+        runtime=_make_runtime(),
+        description="执行任务",
+        prompt="do timeout",
+        subagent_type="general-purpose",
+        tool_call_id="tc-timeout",
+    )
+    message = _command_message(output)
+    assert message.artifact["terminal_status"] == "timed_out"
+    assert message.artifact["error_type"] == "execution_timeout"
 
     non_trace_events = [e for e in events if e.get("type") not in {"trace_event.v1", "activity_event.v1"}]
     assert non_trace_events[-1]["type"] == "task_timed_out"
@@ -485,14 +474,16 @@ def test_task_tool_polling_safety_timeout(monkeypatch):
     monkeypatch.setattr(task_tool_module.time, "sleep", lambda _: None)
     monkeypatch.setattr("src.tools.get_available_tools", lambda **kwargs: [])
 
-    with pytest.raises(TimeoutError, match="Task polling timed out"):
-        task_tool_module.task_tool.func(
-            runtime=_make_runtime(),
-            description="执行任务",
-            prompt="never finish",
-            subagent_type="general-purpose",
-            tool_call_id="tc-safety-timeout",
-        )
+    output = task_tool_module.task_tool.func(
+        runtime=_make_runtime(),
+        description="执行任务",
+        prompt="never finish",
+        subagent_type="general-purpose",
+        tool_call_id="tc-safety-timeout",
+    )
+    message = _command_message(output)
+    assert message.artifact["terminal_status"] == "timed_out"
+    assert message.artifact["error_type"] == "polling_timeout"
 
     non_trace_events = [e for e in events if e.get("type") != "trace_event.v1"]
     assert non_trace_events[0]["type"] == "task_started"
@@ -575,7 +566,7 @@ def test_cleanup_called_on_failed(monkeypatch):
         tool_call_id="tc-cleanup-failed",
     )
 
-    assert output == "Task failed. Error: error"
+    assert _command_message(output).artifact["error"] == "error"
     assert cleanup_calls == ["tc-cleanup-failed"]
 
 
@@ -607,14 +598,14 @@ def test_cleanup_called_on_timed_out(monkeypatch):
         lambda task_id: cleanup_calls.append(task_id),
     )
 
-    with pytest.raises(TimeoutError, match="Task timed out. Error: timeout"):
-        task_tool_module.task_tool.func(
-            runtime=_make_runtime(),
-            description="执行任务",
-            prompt="timeout task",
-            subagent_type="general-purpose",
-            tool_call_id="tc-cleanup-timedout",
-        )
+    output = task_tool_module.task_tool.func(
+        runtime=_make_runtime(),
+        description="执行任务",
+        prompt="timeout task",
+        subagent_type="general-purpose",
+        tool_call_id="tc-cleanup-timedout",
+    )
+    assert _command_message(output).artifact["terminal_status"] == "timed_out"
 
     assert cleanup_calls == ["tc-cleanup-timedout"]
 
@@ -654,14 +645,14 @@ def test_cleanup_not_called_on_polling_safety_timeout(monkeypatch):
         lambda task_id: cleanup_calls.append(task_id),
     )
 
-    with pytest.raises(TimeoutError, match="Task polling timed out"):
-        task_tool_module.task_tool.func(
-            runtime=_make_runtime(),
-            description="执行任务",
-            prompt="never finish",
-            subagent_type="general-purpose",
-            tool_call_id="tc-no-cleanup-safety-timeout",
-        )
+    output = task_tool_module.task_tool.func(
+        runtime=_make_runtime(),
+        description="执行任务",
+        prompt="never finish",
+        subagent_type="general-purpose",
+        tool_call_id="tc-no-cleanup-safety-timeout",
+    )
+    assert _command_message(output).artifact["error_type"] == "polling_timeout"
 
     # cleanup should NOT be called because the task is still RUNNING
     assert cleanup_calls == []

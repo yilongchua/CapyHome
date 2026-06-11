@@ -352,6 +352,9 @@ generation:
 
 subagents:
   timeout_seconds: 1800
+  # Shared LangGraph graph-step limit. This is not a model-call count and has no
+  # hidden minimum. Per-agent `agents.<name>.max_turns` overrides still win.
+  max_turns: 50
   # Infrastructure worker capacity. Lead-agent fan-out is instructed by the
   # per-run max_concurrent_subagents prompt value.
   max_concurrent_limit: 4
@@ -360,7 +363,7 @@ subagents:
       timeout_seconds: 600
     general-purpose:
       timeout_seconds: 1800
-    # Plan-Mode planning helpers — max_turns sourced here (not hard-coded).
+    # Plan-Mode planning helpers use exact graph-step overrides.
     scope-researcher:
       max_turns: 12
     finder-agent:

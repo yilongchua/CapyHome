@@ -122,3 +122,11 @@ def test_work_catalog_includes_execution_tools() -> None:
     present = {defn.name for defn in work_defns}
     missing = required - present
     assert not missing, f"Execution tools missing from work catalog: {sorted(missing)}"
+
+
+def test_task_budget_is_not_llm_configurable() -> None:
+    for path in CATALOG_PATHS:
+        definitions = {defn.name: defn for defn in load_tool_definitions(path)}
+        task_defn = definitions.get("task")
+        assert task_defn is not None
+        assert "max_turns" not in task_defn.parameters.properties
