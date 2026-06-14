@@ -19,15 +19,7 @@ checkpointer:
 # Models — LLM providers and endpoints
 # -----------------------------------------------------------------------------
 
-models:
-  - name: qwen3.6-local
-    display_name: Qwen3.6-local
-    use: langchain_openai:ChatOpenAI
-    model: qwen/qwen3.6-35b-a3b
-    base_url: $LOCAL_LLM_BASE_URL
-    api_key: lm-studio
-    supports_thinking: true
-    supports_vision: true
+models: []
 
 # -----------------------------------------------------------------------------
 # Tools & Permissions — tool definitions, groups, backends, access control
@@ -79,9 +71,8 @@ tool_backends:
     health_path: /system_stats
     timeout_seconds: 60
   websearch:
-    enabled: true
-    base_url: http://192.168.1.39:9000
-    # base_url: http://localhost:9000
+    enabled: false
+    base_url: http://localhost:9000
     health_path: /health
     # Must be <= routing.timeouts.tools.web_search (currently 30s). The HTTP client
     # timeout bounds individual requests; the routing timeout bounds the full tool
@@ -428,9 +419,4 @@ local_llm_policy:
     - http://localhost:1234/v1
     - http://localhost:8081/v1
     - http://127.0.0.1:4000/v1
-    - http://192.168.1.22:1234/v1
-    - http://192.168.1.21:1234/v1
-    - http://192.168.1.39:1234/v1
-    - http://192.168.1.21:4000/v1
-    - http://192.168.1.39:40114/olla/lmstudio/v1
     

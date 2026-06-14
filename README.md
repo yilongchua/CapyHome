@@ -105,58 +105,37 @@ Safe by default: `/analyse` stages work in `.docs`/`.analyse` first, and only `/
 
 ## 🚀 Quick Start
 
-```bash
-git clone https://github.com/CapyHome/CapyHome.git
-cd CapyHome
-make config
-```
+### Local production (recommended)
 
-Edit `config.yaml` and define at least one model:
-
-```yaml
-models:
-  - name: gpt-4
-    display_name: GPT-4
-    use: langchain_openai:ChatOpenAI
-    model: gpt-4
-    api_key: $OPENAI_API_KEY
-    max_tokens: 4096
-    temperature: 0.7
-```
-
-Drop your keys in `.env`:
+Download the release installer, then run:
 
 ```bash
-OPENAI_API_KEY=your-key
+bash ~/Downloads/install-capyhome.sh
 ```
 
-### 🐳 Docker (recommended)
+The installer manages both the CapyHome and WebSearch repositories, creates safe
+local configuration, starts Docker services, and opens:
 
-```bash
-make docker-init     # Pull sandbox image (first time only)
-make docker-start    # Start everything
-```
+→ **http://localhost:2026**
 
-→ Open **http://localhost:2026**
+Finish setup under **Settings → Setup**:
 
-### 💻 Local development
+- Configure an LLM provider.
+- Enable the eight-replica WebSearch stack with Docker or optional Podman.
+- Use **Update All** to fast-forward both managed repositories, rebuild, and restart.
+
+Docker failures are non-destructive. Start Docker Desktop and retry the action.
+
+### Contributor development
 
 ```bash
 make check           # Verify Node.js 22+, pnpm, uv, nginx
+make config          # Create local config files once
 make install         # Install all dependencies
 make dev             # All services, hot-reload
 ```
 
 → Open **http://localhost:2026**
-
-### 🔍 Fully local research stack
-
-Want zero cloud dependencies? Spin up SearXNG + Onyx + crawl4ai locally:
-
-```bash
-make local-stack-start
-make local-stack-status
-```
 
 ---
 

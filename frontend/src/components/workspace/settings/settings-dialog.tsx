@@ -12,6 +12,7 @@ import {
   GlobeIcon,
   PuzzleIcon,
   Share2Icon,
+  RocketIcon,
   LibraryIcon,
   SettingsIcon,
   MessageSquareIcon,
@@ -38,11 +39,13 @@ import { LlmSettingsPage } from "@/components/workspace/settings/llm-settings-pa
 import { MemorySettingsPage } from "@/components/workspace/settings/memory-settings-page";
 import { NotificationSettingsPage } from "@/components/workspace/settings/notification-settings-page";
 import { PipelineCleanupSettingsPage } from "@/components/workspace/settings/pipeline-cleanup-settings-page";
+import { SetupSettingsPage } from "@/components/workspace/settings/setup-settings-page";
 import { ToolSettingsPage } from "@/components/workspace/settings/tool-settings-page";
 import { useI18n } from "@/core/i18n/hooks";
 import { cn } from "@/lib/utils";
 
 type SettingsSection =
+  | "setup"
   | "general"
   | "appearance"
   | "memory"
@@ -78,6 +81,11 @@ export function SettingsDialog(props: SettingsDialogProps) {
 
   const sections = useMemo(
     () => [
+      {
+        id: "setup",
+        label: t.settings.sections.setup,
+        icon: RocketIcon,
+      },
       {
         id: "general",
         label: t.settings.sections.general,
@@ -135,6 +143,7 @@ export function SettingsDialog(props: SettingsDialogProps) {
     ],
     [
       t.settings.sections.general,
+      t.settings.sections.setup,
       t.settings.sections.appearance,
       t.settings.sections.memory,
       t.settings.sections.knowledgeVault,
@@ -192,6 +201,9 @@ export function SettingsDialog(props: SettingsDialogProps) {
           </nav>
           <ScrollArea className="h-full min-h-0 rounded-lg border">
             <div className="space-y-8 p-6">
+              {activeSection === "setup" && (
+                <SetupSettingsPage onOpenLlm={() => setActiveSection("llm")} />
+              )}
               {activeSection === "general" && <GeneralSettingsPage />}
               {activeSection === "appearance" && <AppearanceSettingsPage />}
               {activeSection === "memory" && <MemorySettingsPage />}

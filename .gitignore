@@ -52,6 +52,7 @@ web/
 graphify-out/*
 .opencode/*
 .local-stack/*
+.capyhome-managed.json
 capyhome-uat/*
 capyhome-uat-web/*
 capybara-uat/*

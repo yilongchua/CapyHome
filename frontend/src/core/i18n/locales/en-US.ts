@@ -328,6 +328,7 @@ export const enUS: Translations = {
     title: "Settings",
     description: "Adjust how CapyHome looks and behaves for you.",
     sections: {
+      setup: "Setup",
       general: "General",
       appearance: "Appearance",
       memory: "Memory",

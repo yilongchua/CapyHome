@@ -1,6 +1,6 @@
 # Capybara Home - Unified Development Environment
 
-.PHONY: help config check install dev dev-daemon start stop clean docker-init docker-start docker-stop docker-logs docker-logs-frontend docker-logs-gateway local-stack-start local-stack-stop local-stack-restart local-stack-status local-stack-logs e2e-workflow-modes
+.PHONY: help config check install dev dev-daemon start local-prod local-prod-stop local-prod-logs doctor websearch-enable websearch-enable-podman websearch-disable stop clean docker-init docker-start docker-stop docker-logs docker-logs-frontend docker-logs-gateway local-stack-start local-stack-stop local-stack-restart local-stack-status local-stack-logs e2e-workflow-modes
 
 help:
 	@echo "Capybara Home Development Commands:"
@@ -11,6 +11,12 @@ help:
 	@echo "  make dev             - Start all services in development mode (with hot-reloading)"
 	@echo "  make dev-daemon      - Start all services in background (daemon mode)"
 	@echo "  make start           - Start all services in production mode (optimized, no hot-reloading)"
+	@echo "  make local-prod      - Start the Docker local-production stack"
+	@echo "  make local-prod-stop - Stop the Docker local-production stack"
+	@echo "  make doctor          - Check local-production and WebSearch prerequisites"
+	@echo "  make websearch-enable  - Enable WebSearch with Docker"
+	@echo "  make websearch-enable-podman - Enable WebSearch with Podman"
+	@echo "  make websearch-disable - Stop WebSearch services"
 	@echo "  make stop            - Stop all running services"
 	@echo "  make clean           - Clean up processes and temporary files"
 	@echo ""
@@ -95,6 +101,27 @@ dev:
 # Start all services in production mode (with optimizations)
 start:
 	@./scripts/serve.sh --prod
+
+local-prod:
+	@./scripts/local-prod.sh start
+
+local-prod-stop:
+	@./scripts/local-prod.sh stop
+
+local-prod-logs:
+	@./scripts/local-prod.sh logs
+
+doctor:
+	@./scripts/local-prod.sh doctor
+
+websearch-enable:
+	@./scripts/local-prod.sh websearch-enable
+
+websearch-enable-podman:
+	@./scripts/local-prod.sh websearch-enable-podman
+
+websearch-disable:
+	@./scripts/local-prod.sh websearch-disable
 
 # Start all services in daemon mode (background)
 dev-daemon:

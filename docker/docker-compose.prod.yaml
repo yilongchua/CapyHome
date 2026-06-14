@@ -1,0 +1,91 @@
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "2026:2026"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      gateway:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+      langgraph:
+        condition: service_started
+    networks:
+      - capyhome
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile.prod
+      args:
+        BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+    environment:
+      NODE_ENV: production
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+    networks:
+      - capyhome
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    command: sh -c "cd backend && uv run uvicorn src.gateway.app:app --host 0.0.0.0 --port 8001"
+    volumes:
+      - ../config.yaml:/app/config.yaml:ro
+      - ../extensions_config.json:/app/extensions_config.json
+      - ../skills:/app/skills:ro
+      - ../.capyhome:/app/.capyhome
+      - ../.capyhome-managed.json:/app/.capyhome-managed.json:ro
+    environment:
+      CAPYHOME_ROOT: /app
+      CAPYHOME_SETUP_STATE_DIR: /app/.capyhome/setup
+      CAPYHOME_MANAGED_INSTALL_PATH: /app/.capyhome-managed.json
+      CAPYHOME_MANAGED_SETUP_ENABLED: "true"
+    env_file:
+      - ../.env
+    networks:
+      - capyhome
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  langgraph:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    command: sh -c "cd backend && BG_JOB_ISOLATED_LOOPS=true uv run langgraph dev --no-browser --allow-blocking --no-reload --host 0.0.0.0 --port 2024 --n-jobs-per-worker $${LANGGRAPH_WORKERS:-3}"
+    volumes:
+      - ../config.yaml:/app/config.yaml:ro
+      - ../extensions_config.json:/app/extensions_config.json
+      - ../skills:/app/skills:ro
+      - ../.capyhome:/app/.capyhome
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      LANGGRAPH_WORKERS: ${LANGGRAPH_WORKERS:-3}
+      CAPYBARA_HOME_HOST_BASE_DIR: ${CAPYHOME_ROOT}/.capyhome
+      CAPYBARA_HOME_HOST_SKILLS_PATH: ${CAPYHOME_ROOT}/skills
+    env_file:
+      - ../.env
+    networks:
+      - capyhome
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+networks:
+  capyhome:
+    name: capyhome

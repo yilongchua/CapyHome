@@ -270,6 +270,7 @@ export interface Translations {
     title: string;
     description: string;
     sections: {
+      setup: string;
       general: string;
       appearance: string;
       memory: string;

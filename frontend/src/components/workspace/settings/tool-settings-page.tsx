@@ -281,11 +281,13 @@ function MCPServersPanel() {
           />
         ))}
 
-      <AddMCPServerDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        initial={editingServer}
-      />
+      {dialogOpen && (
+        <AddMCPServerDialog
+          open
+          onOpenChange={setDialogOpen}
+          initial={editingServer}
+        />
+      )}
     </div>
   );
 }

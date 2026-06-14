@@ -1,0 +1,57 @@
+services:
+  websearch-proxy:
+    image: docker.io/library/nginx:alpine
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./websearch-nginx.podman.conf:/etc/nginx/nginx.conf:ro,Z
+    depends_on:
+      websearch:
+        condition: service_healthy
+    networks:
+      - websearch
+    restart: unless-stopped
+
+  websearch:
+    build:
+      context: ${WEBSEARCH_ROOT}
+      dockerfile: Dockerfile
+    image: localhost/capyhome-websearch:local
+    environment:
+      WEBSEARCH_CONFIG_PATH: /app/config.yaml
+      SEARXNG_SECRET_KEY: ${SEARXNG_SECRET_KEY:-}
+    volumes:
+      - ${WEBSEARCH_ROOT}/output:/app/output:Z
+      - ${WEBSEARCH_ROOT}/config.yaml:/app/config.yaml:ro,Z
+      - ${WEBSEARCH_ROOT}/searxng-settings.yml:/etc/searxng/settings.yml:ro,Z
+      - ${WEBSEARCH_ROOT}/prompt:/app/prompt:ro,Z
+    expose:
+      - "9000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - websearch
+    restart: unless-stopped
+
+  dashboard-logs:
+    image: localhost/capyhome-websearch:local
+    command: ["python", "/app/main.py", "dashboard-logs", "--output-dir", "/app/output", "--interval-seconds", "10", "--window-seconds", "10800", "--limit", "10", "--format", "table"]
+    environment:
+      WEBSEARCH_CONFIG_PATH: /app/config.yaml
+    volumes:
+      - ${WEBSEARCH_ROOT}/output:/app/output:Z
+      - ${WEBSEARCH_ROOT}/config.yaml:/app/config.yaml:ro,Z
+    depends_on:
+      websearch:
+        condition: service_healthy
+    networks:
+      - websearch
+    restart: unless-stopped
+
+networks:
+  websearch:
+    name: capyhome-websearch

@@ -1,77 +1,69 @@
-# Setup Guide
+# CapyHome Setup
 
-## Prerequisites
+## Local Production
 
-The following tools must be installed before running `make dev`:
+Prerequisites:
 
-| Tool | Purpose | Install |
-|------|---------|---------|
-| `pnpm` | Frontend package manager | `npm install -g pnpm` |
-| `uv` | Python package manager | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-| `nginx` | Reverse proxy (port 2026) | `brew install nginx` |
-| `docker` | Container sandbox (optional) | [https://www.docker.com/](https://www.docker.com/) |
+- Docker Desktop
+- Git
+- Python 3
 
-## Local Development
+Download the CapyHome installer and run one command:
 
 ```bash
-# 1. Install missing tools
-npm install -g pnpm
-curl -LsSf https://astral.sh/uv/install.sh | sh
-brew install nginx
-
-# 2. Generate config files
-cd /Volumes/ryan_chua/Desktop/CapyHome
-make config
-
-# 3. Edit config.yaml — add your model + API key
-#    Minimum required:
-#    models:
-#      - name: gpt-4
-#        display_name: GPT-4
-#        use: langchain_openai:ChatOpenAI
-#        model: gpt-4
-#        api_key: $OPENAI_API_KEY
-
-# 4. Set API keys in .env
-#    OPENAI_API_KEY=your-key
-
-# 5. Install frontend + backend dependencies
-make install
-
-# 6. Start all services
-make dev
+bash ~/Downloads/install-capyhome.sh
 ```
 
-Access at: **http://localhost:2026**
+The installer:
 
-## Docker (Alternative)
+1. Creates managed CapyHome and WebSearch checkouts on the Desktop.
+2. Creates missing local configuration without overwriting existing files.
+3. Starts CapyHome through Docker Compose.
+4. Starts the local setup daemon used by **Settings > Setup**.
 
-If you have Docker installed, you can skip pnpm/uv/nginx and use Docker instead:
+Open **http://localhost:2026**.
+
+Use **Settings > Setup** to configure an LLM, check Docker and WebSearch health,
+enable or repair WebSearch, and update both repositories.
+
+WebSearch starts when you choose either:
+
+- **Enable with Docker**
+- **Enable with Podman**
+
+Docker remains required for the CapyHome core stack. Podman is an optional
+WebSearch runtime. On macOS, install Podman Desktop, allocate at least 4-6 GB to
+the Podman machine, install `podman-compose` if the Compose provider is absent,
+and run `podman machine start` before choosing Podman. Linux bind mounts are
+configured with SELinux relabeling for rootless Podman.
+
+The recommended default is eight WebSearch replicas.
+
+If Docker is unavailable, setup stops without changing the running installation:
+
+```text
+Docker is not running. Start Docker Desktop and try again.
+```
+
+## Recovery
+
+Run these commands from the CapyHome checkout:
 
 ```bash
-make docker-init     # Pull sandbox image (first time only)
-make docker-start    # Start all services
+make doctor
+make local-prod
+make websearch-enable
+make websearch-enable-podman
+make local-prod-logs
 ```
 
-Access at: **http://localhost:2026**
-
-## Verify Tools Are Installed
+## Contributor Development
 
 ```bash
 make check
+make config
+make install
+make dev
 ```
 
-This checks Node.js 22+, pnpm, uv, and nginx are all available.
-
-## Service Ports
-
-| Service | Port |
-|---------|------|
-| Nginx (unified entry) | 2026 |
-| Frontend (Next.js) | 3000 |
-| Gateway API (FastAPI) | 8001 |
-| LangGraph Agent | 2024 |
-
-
-Arg Valid values in docstring not found in function signature.
-HTTP 400: {"detail":"Arg Valid values in docstring not found in function signature."}
+The contributor flow remains host-native and separate from local production.
