@@ -9,7 +9,7 @@ Give a single agent a big task and two things go wrong. It's **serial** — one 
 
 The fix is the one human teams discovered long ago: divide the work, and give each person a clean desk.
 
-> 🖼️ **[User add: image containing — the activity timeline with multiple live "Baby Capy — {type}" delegates running at once. Capture from a real fan-out task in the running app.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. One large cartoon capybara (the lead agent) sits at the centre at a laptop. Radiating outward from it, three smaller "baby capybara" characters are shown working independently: one holds a magnifying glass and searches the web (small globe icon), one reads from a tall stack of books, one writes on a notepad. Connecting lines radiate from the lead capybara to each baby. Activity labels float above each baby: "Baby Capy — source-researcher", etc. Warm cream background, busy and playful feel, fully illustrated.]**
 
 ## The lead-and-pack model
 
@@ -33,7 +33,7 @@ This ties straight to [Plan Mode's todo DAG](./03-plan-and-work-mode.md). Steps 
 
 "Research three competitors" becomes three Baby Capys working at once; "then synthesize" waits for all three. Speed of parallelism, none of the chaos.
 
-> 🖼️ **[User add: image containing — a labelled diagram or screenshot mapping a plan's parallel todos to the Baby Capys executing them. Could be a clean annotated version of Diagram 3.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A clean labelled diagram. On the left: a vertical plan list with three todo items labelled "Task A — Research competitor 1", "Task B — Research competitor 2", "Task C — Research competitor 3." Three arrows point right from the plan list to three small cartoon baby capybaras, each with a different tool: one at a tiny laptop, one with a magnifying glass, one with a stack of papers. At the top centre, a slightly larger capybara boss watches over the scene. Warm cream background, fully illustrated.]**
 
 ## Under the hood: how it's built
 

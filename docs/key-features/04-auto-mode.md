@@ -7,7 +7,7 @@
 
 Approval gates are a safety feature. They're also friction — and for tasks you trust, friction is just latency between you and the result. **Auto Mode** lets you choose, per task, where you sit on the trust-vs-control dial.
 
-> 🖼️ **[User add: image containing — the Auto Mode toggle in the input toolbar's privacy/auto menu, switched ON. Capture from the running app.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop giving a thumbs-up with one paw. Floating above the illustrated keyboard, a large pill-shaped toggle switch is shown switched firmly to the right and glowing purple, labelled "Auto Mode ON." The capybara's expression is confident and relaxed. Warm cream background, fully illustrated — no real UI screenshot.]**
 
 ## What it is (and isn't)
 
@@ -28,7 +28,7 @@ What it does **not** do: make Work Mode reckless, auto-escalate simple tasks, or
 
 This is the thoughtful part: Auto Mode doesn't flip a coin on genuinely open questions. It only auto-answers forks where the agent already has a defensible default.
 
-> 🖼️ **[User add: image containing — a transcript snippet showing a clarification auto-resolved, with the literal "[Auto Mode] Selected: <option>" marker visible. Capture from a real auto-mode run.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop, nodding with a satisfied expression. A speech bubble emerges from the illustrated laptop screen with a small robot icon, reading: "[Auto Mode] Selected: Option B — proceed with summarisation." A faint audit-log line below it reads "plan_auto_approved." Warm cream background, fully illustrated.]**
 
 ## Under the hood: how it's built
 

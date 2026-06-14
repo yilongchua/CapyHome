@@ -7,7 +7,7 @@
 
 Hand a vague goal to a typical AI agent and it charges off immediately, improvising — and you discover three steps in that it misunderstood the whole thing. CapyHome bakes in a senior's instinct with two distinct gears: a **Plan Mode** that maps the work first, and a **Work Mode** that executes it.
 
-> 🖼️ **[User add: image containing — the two mode chips side by side in the input toolbar (🛠️ Work / 🗺️ Plan). Reuse existing assets asset/CapyHome/Work_Mode.png and plan_mode-chat.png as a two-up comparison.]**
+> 🖼️ **[Generate: Split-panel illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. Left panel: a cartoon capybara wearing a tiny hard hat and holding a small wrench, sitting at a laptop with a glowing "🛠️ Work" chip in the illustrated toolbar — labelled "Get it done." Right panel: the same capybara holding a small map scroll, sitting at a laptop with a glowing "🗺️ Plan" chip — labelled "Think first." Warm cream background, subtle dividing line between panels.]**
 
 ## One agent, two gears
 
@@ -32,7 +32,7 @@ todo-1/-2/-3 have no dependencies — so they're **ready** and can fan out to [B
 
 ![Work Mode's phase loop](./diagrams/03-plan-and-work-mode-d3.png)
 
-> 🖼️ **[User add: image containing — a real screenshot of the live todo/phase list executing in the UI, with some todos checked and one "in progress." Capture during a Plan Mode run from the running app.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop, watching attentively with one paw raised. The illustrated laptop screen shows a vertical phase checklist: two items with green checkmarks (✓), one item highlighted in soft blue with a small spinning circle and the label "In Progress", and two items below greyed out as pending. Warm cream background, fully illustrated — no real UI screenshot.]**
 
 ## A plan you can read — and edit
 

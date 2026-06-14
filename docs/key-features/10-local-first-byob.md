@@ -7,7 +7,7 @@
 
 The most valuable work — proprietary code, client documents, financial models, legal research — is exactly the work you *can't* paste into someone else's cloud. That's the ceiling most AI tools hit. CapyHome doesn't have that ceiling.
 
-> 🖼️ **[User add: image containing — a "data never leaves the machine" diagram: a laptop outline containing the model + research stack + vault, with a struck-through cloud outside it. Strong LinkedIn hero image.]**
+> 🖼️ **[Generate: Hero illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits inside a large laptop-shaped border (the device boundary). Inside the border: three small icons connected by arrows — "Model 🧠", "Research Stack 🔍", "Vault 📚" — all contained within. A bold label reads "Your data stays here." Outside the laptop border, a grey cloud icon has a large red ✕ through it. The capybara looks calm and confident. Warm cream background, clean hero-image layout, no real UI elements.]**
 
 ## Bring your own brain
 
@@ -50,7 +50,7 @@ Pair a local model with the local stack and you have a complete, capable agent t
 
 ![One sandbox, three runtimes](./diagrams/10-local-first-byob-d3.png)
 
-> 🖼️ **[User add: image containing — a real screenshot of config.yaml with multiple models defined (one cloud, one local llama.cpp). A clean editor screenshot.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop, pointing at the screen with one paw. The illustrated screen shows a YAML config file with two model entries: one labelled "cloud-model: gpt-4o" with a small cloud ☁️ icon beside it, and one labelled "local-model: llama3" with a small laptop 💻 icon beside it. The capybara's pointing paw gestures toward the local-model entry. Warm cream background, fully illustrated.]**
 
 ## Self-hosted and MIT-licensed
 

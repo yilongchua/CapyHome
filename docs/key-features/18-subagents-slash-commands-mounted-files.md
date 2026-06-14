@@ -47,7 +47,7 @@ The virtual path gives tools a stable location while the middleware maps access 
 
 This is a better interaction for large projects than uploading files one by one. Folder structure is evidence. Imports, neighboring documents, configuration, and naming conventions all help an agent understand how the work fits together.
 
-> **[User add: split screenshot with the native folder picker on the left and `/mnt/user-data/mounted` visible in the CapyHome file tree on the right.]**
+> **[Generate: Split-panel illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. Left panel: a cute cartoon capybara clicks on a native macOS-style folder picker dialog — a folder named "my-project/" is highlighted in blue, with an "Open" button in the bottom-right corner. Right panel: the same capybara's illustrated laptop screen shows a CapyHome sidebar file tree with a pinned node at the top labelled "/mnt/user-data/mounted" with a 📌 pin icon, expanding to show two child folders. Warm cream background, fully illustrated.]**
 
 ## Slash commands make the safety contract memorable
 

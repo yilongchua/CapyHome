@@ -7,7 +7,7 @@
 
 Deep research is mostly about asking the *right sequence* of questions and remembering which ones you've already answered. Tedious for a human; chaotic for an LLM left unsupervised. CapyHome's **Autoresearch Loop** turns it into a disciplined, self-terminating, fully-auditable process — and the thing that keeps it from spinning in circles is a **question ledger**.
 
-> 🖼️ **[User add: image containing — a rendered ledger.md showing a tree of questions with statuses (answered / duplicate / pending). Capture from a real autoresearch objective's ledger, or mock it as a carousel slide.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop, surrounded by stacks of books on both sides to evoke deep research. Above the capybara's head, a large thought bubble contains a tree diagram of research questions: one root question at the top branching into four child questions, each with a coloured status chip — green "✓ answered", yellow "⟳ pending", or grey "= duplicate." Internet/globe icons float in the background to suggest web-sourced knowledge. Warm cream background, fully illustrated.]**
 
 ## The idea
 
@@ -45,7 +45,7 @@ The taxonomy lives in the vault as an **editable file** — reshape what "thorou
 
 It stops when it stops *learning*, not when it runs out of money.
 
-> 🖼️ **[User add: image containing — the entity-browser or autoresearch trigger UI (e.g. an entity page with an "autoresearch" action). Capture from the running app's vault.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop, hovering a paw over the trackpad with anticipation. The illustrated screen shows an entity card with a title, a short description paragraph, and a prominent purple "⟳ Autoresearch" action button centred beneath the text. A small glowing sparkle icon next to the button suggests the loop is about to begin. Warm cream background, fully illustrated.]**
 
 ## Under the hood: how it's built
 

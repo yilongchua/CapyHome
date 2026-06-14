@@ -9,7 +9,7 @@ Imagine teaching someone to cook by reading them the *entire cookbook* — every
 
 **Skills** solve this like a good reference library: the knowledge exists, but you only pull the relevant book off the shelf when you need it.
 
-> 🖼️ **[User add: image containing — a "bloated prompt vs. progressive skills" comparison graphic. Left: one giant scroll. Right: a shelf of small skill cards with one glowing as "loaded now." LinkedIn carousel material.]**
+> 🖼️ **[Generate: Split-panel illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. Left panel labelled "Without Skills": a cartoon capybara slumped under the weight of a single enormous scrolling text prompt spilling off the desk — looking exhausted. Right panel labelled "With Skills": the same capybara sitting upright and happy at a laptop, with a tidy bookshelf of small rounded skill cards beside it — each card shows a name and icon (e.g. "deep-research 🔍", "ppt-generation 📊") and one card glows purple labelled "Loaded now." Warm cream background, strong contrast between left and right.]**
 
 ### Diagram 1 — Progressive loading vs. the monolith
 
@@ -38,7 +38,7 @@ Imagine teaching someone to cook by reading them the *entire cookbook* — every
 
 ![Skills compose (and write themselves)](./diagrams/09-skills-d3.png)
 
-> 🖼️ **[User add: image containing — a real skill file open in an editor (YAML frontmatter + markdown body), e.g. skills/.../ppt-generation. A clean screenshot of the file.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop, studying the screen thoughtfully with one paw on chin. The illustrated screen shows a code editor with a skill file open: visible YAML frontmatter at the top (keys: "name:", "description:", "tools:") separated by "---" from a markdown body below containing a short workflow instruction paragraph. The file is titled "ppt-generation.md" in a small tab at the top. Warm cream background, fully illustrated.]**
 
 ## Under the hood: how it's built
 

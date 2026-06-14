@@ -7,7 +7,7 @@
 
 A library is only as good as your ability to find the right book six months later — when you've forgotten exactly how you phrased things. That's the moment most knowledge bases fail you. CapyHome's vault search is built for *that* moment.
 
-> 🖼️ **[User add: image containing — a search bar with a fuzzy query like "staff freedom" returning a top result titled "Employee Autonomy." Annotate it: "different words, right answer." Good as a LinkedIn carousel slide.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop holding a magnifying glass. Above the capybara's head, a large thought bubble shows a search bar with the typed query "staff freedom" and a single highlighted result card beneath it titled "Employee Autonomy" with a green match badge. A small speech arrow from the result reads "different words, right answer." Warm cream background, fully illustrated — no real UI screenshot.]**
 
 ## Two kinds of search, and why you want both
 
@@ -38,7 +38,7 @@ Every result returns a fused score, its category (source / entity / concept / sy
 
 ![The agent searches before it reaches for the web](./diagrams/02-hybrid-vault-search-d3.png)
 
-> 🖼️ **[User add: image containing — a real screenshot of vault search results in the UI, showing the score, category chips, and snippet. Capture from the running app's vault search box.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara peers at a laptop screen, looking pleased. The illustrated screen shows a vault search results list: three result cards, each with a bold relevance score badge (e.g. "0.91"), two small purple category chips (e.g. "entity", "concept"), and a one-line snippet of text. The capybara points at the top result with one paw. Warm cream background, fully illustrated.]**
 
 ## What we considered (and the trade-offs we made)
 

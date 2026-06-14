@@ -9,7 +9,7 @@ Most AI tools perform web search, remember bits and pieces, and maybe generate a
 
 CapyHome's **Knowledge Vault** is built on the opposite bet: that the value of an agent grows with what it can preserve from useful sources — and that durable knowledge should be organized the way *you* think, around **things** (entities) and **ideas** (concepts), not around transcripts of who said what.
 
-> 🖼️ **[User add: image containing — a split "before/after" graphic. Left: a messy chat history list labelled "what everyone else stores." Right: a clean grid of entity/concept cards labelled "what CapyHome stores." Make it screenshot-able for the LinkedIn carousel.]**
+> 🖼️ **[Generate: Split-panel illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. Left panel labelled "What everyone else stores": a cute cartoon capybara (warm brown fur, rounded body) looking overwhelmed at a messy pile of overlapping chat bubbles and duplicate sticky notes. Right panel labelled "What CapyHome stores": the same capybara smiling at a clean grid of rounded entity/concept cards — each card shows a small icon, a bold title, and a purple category chip. Warm cream background, no real UI screenshot — fully illustrated.]**
 
 ## Entities and concepts, not conversations
 
@@ -38,7 +38,7 @@ Turn on the search-to-vault pipeline and **eligible enriched web results are aut
 
 ![Knowledge flows in from three on-ramps](./diagrams/01-knowledge-vault-d3.png)
 
-> 🖼️ **[User add: image containing — a real screenshot of the vault explorer in the workspace UI (left tree of entities/concepts, a compiled page open on the right). Capture it from http://localhost:2026 → workspace → vault tab after running one research task.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop. Above the capybara's head, a large thought bubble shows a two-panel vault explorer: the left side is a tree of entity and concept names with folder icons; the right side shows an open compiled page with titled sections and a short paragraph. The capybara points at the thought bubble with one paw, looking curious and pleased. Stacks of books sit beside the desk to evoke depth of knowledge. Warm cream background, fully illustrated.]**
 
 ## Under the hood: how it's built
 
@@ -83,7 +83,7 @@ ComfyUI can't render your actual UI — the screen segments are real screen reco
 - **Model picks (early 2026):** *Wan 2.2* (~5s, highest quality) or *LTX-Video* (faster, lighter, longer clips) for the hook; *SVD* if you're animating a still you already have. Add a *RIFE/FILM* interpolation node to smooth to 24–30fps.
 - **Export 9:16** (e.g. 832×1216 → upscale) so the b-roll matches the vertical frame without cropping.
 
-> 🖼️ **[User add: 2–3s hook clip rendered in ComfyUI (memory-wipe visual, 9:16) + a matching end card. Drop both into the editor around the screen-recording segments above.]**
+> 🖼️ **[Generate: 9:16 vertical illustration end card using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara holds its head with both paws, eyes wide and swirling (memory-wipe visual). Above its head, a large thought bubble shows a glowing brain icon with an eraser wiping it clean — dust particles flying off. Bold caption at the bottom: "No memory? No problem." Warm cream background, vertical 1080×1920 crop.]**
 
 ## Try it
 

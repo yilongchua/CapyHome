@@ -7,7 +7,7 @@
 
 The [Knowledge Vault](./01-knowledge-vault.md) remembers the **world** — the things you research. **Persistent Memory** remembers **you** — how you work, what you prefer, what you're focused on this month. It's the difference between an assistant you re-brief every morning and one that already knows the drill.
 
-> 🖼️ **[User add: image containing — a real screenshot of the memory panel in the UI showing extracted facts with categories + confidence scores, and a behavior rule. Capture from the running app's memory view.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop, tapping the side of its head knowingly. The illustrated screen shows a memory panel with three fact cards stacked vertically: each card has a short fact sentence, a purple category chip (e.g. "Preference", "Expertise", "Goal"), and a small horizontal confidence bar labelled e.g. "92%." A fourth card at the bottom is labelled "Behaviour Rule" in a distinct amber colour. Warm cream background, fully illustrated.]**
 
 ## It learns by itself
 
@@ -41,7 +41,7 @@ Memory you can't inspect or delete is a liability. CapyHome's memory is a **loca
 
 A forgotten fact is genuinely gone — not just hidden — and optional **append-only versioning** records each change with a reason and a hash chain for audit-grade accountability.
 
-> 🖼️ **[User add: image containing — the redact/forget controls in the memory UI, or a snippet of memory.json on disk showing facts + confidence. Capture from the running app or the file.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop, holding a small eraser in one paw, ready to act. The illustrated screen shows a single memory fact card highlighted with a red border, and two action buttons beneath it: a red "🗑 Forget" button and an orange "✏️ Redact" button. A small confirmation tooltip floats above the Forget button: "Removed from file and index." Warm cream background, fully illustrated — no real UI screenshot.]**
 
 ## Under the hood: how it's built
 

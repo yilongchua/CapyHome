@@ -18,7 +18,7 @@ CapyHome's setup is built around a simpler mental model:
 
 Once those four pieces are healthy, the user should be thinking about research questions, not ports.
 
-> **[User add: hero image containing a laptop with four labelled blocks: CapyHome, LM Studio/Ollama, WebSearch, and Docker. Arrows converge on `http://localhost:2026`.]**
+> **[Generate: Hero illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at the centre holding a laptop. Four rounded-corner illustrated cards float around the capybara connected by arrows pointing inward toward the laptop: top-left "CapyHome" (capybara icon), top-right "WebSearch" (magnifying glass icon), bottom-left "LM Studio / Ollama" (llama icon), bottom-right "Docker" (whale icon). Warm cream background, subtle leaf accents. Fully illustrated — no screenshot.]**
 
 ## What you are installing
 
@@ -65,7 +65,7 @@ make local-prod
 
 `make doctor` checks Docker, configuration, and the expected sibling WebSearch checkout before starting anything. This is intentionally boring. A setup command should fail early with a useful explanation, not leave seven containers running in a mysterious half-state.
 
-> **[User add: terminal screenshot showing both sibling folders, a successful `make doctor`, and "CapyHome is starting at http://localhost:2026".]**
+> **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop, pumping a fist in celebration. The illustrated laptop screen shows a dark terminal window with three sections: two sibling folder names listed at the top ("CapyHome/" and "websearch/"), then a series of green checkmark lines for `make doctor` checks (e.g. "✓ Docker running", "✓ WebSearch found", "✓ Config valid"), and a final bold green line: "✓ CapyHome is starting at http://localhost:2026". Warm cream background, fully illustrated.]**
 
 ## Step 3: connect the model
 

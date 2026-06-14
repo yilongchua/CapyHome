@@ -7,7 +7,7 @@
 
 The throwaway nature of normal agent search is a hidden tax: every session re-discovers the same things. CapyHome treats each search as a small, permanent contribution to a growing library — and the unglamorous plumbing that makes that possible is one decision: **every search writes markdown.**
 
-> 🖼️ **[User add: image containing — a file tree showing timestamped websearch packages (result.md + result.json) on disk, next to a rendered result.md. Capture from the workspace files after a search.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop, looking organised and happy. The illustrated screen is split: the left side shows a file tree with timestamped folders (e.g. "2026-06-14_research/") expanding to show "result.md" and "result.json"; the right side shows an open result.md with a short paragraph and two source citation lines ending in URLs. A small globe icon floats near the file tree to evoke web retrieval. Warm cream background, fully illustrated.]**
 
 ## A search stack that runs on your machine
 
@@ -48,7 +48,7 @@ Follow one search all the way through and you can see a small machine running:
 
 ![Why it's a "cache for in-depth analysis"](./diagrams/06-websearch-markdown-d3.png)
 
-> 🖼️ **[User add: image containing — the vault idle auto-run clock control in the top banner (Off / 15 / 30 min selector). Capture from the running app's vault view.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop pointing at the top of the illustrated screen with one paw. In a narrow top banner of the illustrated UI, a clock icon sits next to a three-option pill selector: "Off" | "15 min" | "30 min" — the "15 min" option is selected and highlighted in purple. The capybara has a relaxed, "I'll let it run" expression. Warm cream background, fully illustrated.]**
 
 ## Under the hood: how it's built
 

@@ -78,6 +78,6 @@ else
     echo "  ✗ Some dependencies are missing"
     echo "=========================================="
     echo ""
-    echo "Please install the missing tools and run 'make check' again."
+    echo "Run 'make install' to auto-install missing tools, or install them manually above."
     exit 1
 fi

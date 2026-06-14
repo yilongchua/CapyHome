@@ -18,7 +18,7 @@ The chat box is a command line. Type `/` in the workspace and the verbs you need
 /rename        Rename the thread
 ```
 
-> 🖼️ **[User add: image containing — the `/` command menu open in the input box, showing the command list. Capture from the running app by typing "/".]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara types a "/" on a laptop keyboard, looking excited. On the illustrated screen, a floating dropdown command menu appears with five rows — each row has a slash command name (e.g. "/mount", "/analyse", "/publishdocs", "/handoff", "/compact") paired with a small icon and a one-line description. The top row "/mount" is highlighted in purple. Warm cream background, fully illustrated — no real UI screenshot.]**
 
 ## The safety contract, in one diagram
 
@@ -36,7 +36,7 @@ The agent **cannot** sneak changes into your folder. `/analyse` only stages into
 
 ![What `/analyse` produces (4-stage, read-only)](./diagrams/05-slash-commands-mount-analyse-d3.png)
 
-> 🖼️ **[User add: image containing — a real screenshot of a generated repo_overview.md open in the workspace, showing the architecture summary + critical files. Capture after running /analyse on a project.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop, pointing at the screen with one paw, looking impressed. The illustrated screen shows an open markdown document titled "repo_overview.md": a small architecture diagram at the top (three labelled boxes connected by arrows), followed by a bullet list headed "Critical Files" with three short file-path entries. A stack of books sits beside the desk. Warm cream background, fully illustrated.]**
 
 ## Under the hood: how it's built
 

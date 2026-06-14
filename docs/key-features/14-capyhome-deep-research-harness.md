@@ -20,7 +20,7 @@ The distinction matters because research quality is rarely limited by whether a 
 
 CapyHome is built around those questions.
 
-> **[User add: hero graphic comparing "chatbot: prompt -> answer" with "research harness: goal -> plan -> parallel research -> evidence -> synthesis -> vault".]**
+> **[Generate: Hero split-panel illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. Left panel labelled "Chatbot": a simple cartoon capybara at a laptop — one arrow from a speech bubble "Prompt" to a small card "Answer." Right panel labelled "Research Harness": the same capybara at a laptop orchestrating a richer illustrated flow — "Goal" → "Plan" → three parallel arrows each pointing to a small baby capybara (one with a magnifying glass, one with books, one with a notepad) → arrows converge at "Evidence" → "Synthesis" → "Vault 📚." Warm cream background, clear contrast between left and right panels.]**
 
 ## The model is the reasoner, not the whole product
 

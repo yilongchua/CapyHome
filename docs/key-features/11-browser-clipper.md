@@ -7,7 +7,7 @@
 
 You're reading a great article. You know future-you will want it. So you do the dance: copy the URL, paste it somewhere, promise to file it properly later. You never do. The **Knowledge Vault Clipper** removes the dance: see something worth keeping, and it's in your [vault](./01-knowledge-vault.md) — as clean, indexed markdown — before you've finished the thought.
 
-> 🖼️ **[User add: image containing — the extension popup open in a browser toolbar, showing the three clip modes + the "✓ Queued for ingestion" confirmation. Capture from Chrome with the extension loaded.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop with a browser open on screen. In the top-right corner of the illustrated browser, a small extension popup is shown floating open: three illustrated clip-mode buttons stacked vertically ("📄 Clip Page", "✂️ Clip Selection", "🔗 Clip Link"), and below them a green confirmation banner reading "✓ Queued for ingestion." The capybara looks at the popup with a satisfied expression. Warm cream background, fully illustrated.]**
 
 ## Three ways to clip
 
@@ -40,7 +40,7 @@ Toggle it off anytime from the popup.
 
 Three on-ramps, one library: what the agent **searches**, what it **researches on its own**, and what *you* **read**.
 
-> 🖼️ **[User add: image containing — the chrome://extensions "Load unpacked" flow with the knowledge-vault-clipper folder selected. A screenshot of the install step for the how-to section.]**
+> 🖼️ **[Generate: Illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A cute cartoon capybara sits at a laptop, pointing at the screen with one paw. The illustrated screen shows a Chrome-style extensions settings page with a "Developer mode" toggle switched on and a highlighted "Load unpacked" button. A folder selection dialog overlays the screen with a folder named "knowledge-vault-clipper" selected and highlighted in blue. The capybara gestures toward the folder. Warm cream background, fully illustrated.]**
 
 ## Under the hood: how it's built
 

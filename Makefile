@@ -49,8 +49,9 @@ config:
 check:
 	@./scripts/check.sh
 
-# Install all dependencies
+# Install all dependencies (bootstraps system tools if missing, then installs project deps)
 install:
+	@./scripts/install-tools.sh
 	@echo "Installing backend dependencies..."
 	@cd backend && uv sync
 	@echo "Installing frontend dependencies..."
