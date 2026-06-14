@@ -20,6 +20,12 @@ This folder is a series of **LinkedIn → Medium** articles, one per key feature
 | 10 | [Local-First & Bring Your Own Brain](./10-local-first-byob.md) | Any model, fully local if you want — data never has to leave. |
 | 11 | [The Browser Clipper](./11-browser-clipper.md) | A browser extension that feeds the vault — one click or automatic. |
 | 12 | [Persistent Memory](./12-persistent-memory.md) | An assistant that remembers *you* across every session. |
+| 13 | [Set Up CapyHome Locally](./13-setup-capyhome-locally.md) | Docker + LM Studio/Ollama + CapyHome + WebSearch, from zero to a working research stack. |
+| 14 | [CapyHome as a Deep-Research Harness](./14-capyhome-deep-research-harness.md) | Why the product is an agent workspace, not another chatbot. |
+| 15 | [The Knowledge Vault as a Research Cache](./15-knowledge-vault-research-cache.md) | Reuse evidence instead of repeatedly crawling the same sources. |
+| 16 | [Plan, Work, and Auto Modes](./16-plan-work-auto-modes.md) | Choose control based on the task's ambiguity, cost, and trust. |
+| 17 | [Autoresearch + Browser Clipper](./17-autoresearch-browser-clipper-loop.md) | Agent searches, human reading, and gap-filling feed one evidence base. |
+| 18 | [Subagents + Slash Commands + Mounted Files](./18-subagents-slash-commands-mounted-files.md) | Parallel research grounded in the real folders on your machine. |
 
 ---
 
@@ -41,7 +47,7 @@ Each article follows the same structure so the series is consistent and easy to 
 - A captured landing-page screenshot lives in [`_screenshots/landing.png`](./_screenshots/landing.png) (1440×900, grabbed headlessly from the running app).
 - For deeper UI shots (vault explorer, plan phases, memory panel, the clipper popup), the `[User add: …]` markers describe exactly what to capture. Start the app (`make docker-start` → http://localhost:2026) and grab them, or reuse existing assets in [`asset/CapyHome/`](../../asset/CapyHome/) (Work_Mode.png, plan_mode-chat.png, Main_Landing.png, etc.).
 
-### All 12 LinkedIn hooks (copy/paste for scheduling)
+### All 18 LinkedIn hooks (copy/paste for scheduling)
 
 | # | Hook line |
 |---|-----------|
@@ -57,6 +63,12 @@ Each article follows the same structure so the series is consistent and easy to 
 | 10 | Two questions decide if you can trust an AI with real work: whose model is this, and where does my data go? Our answer: yours, and nowhere you don't choose. |
 | 11 | The best knowledge base is the one that fills itself. I stopped bookmarking — my browser clips what I read into my AI's memory automatically. |
 | 12 | Every fresh chat with a normal assistant starts from amnesia. We built memory that learns *you* and carries it across every session. |
+| 13 | The hardest part of local AI should not be connecting five half-documented tools. Here is the complete path from a blank laptop to a private deep-research workspace. |
+| 14 | A chatbot gives you an answer. A research harness gives an AI a place to plan, search, delegate, use files, preserve evidence, and finish the work. |
+| 15 | AI research feels fast until you notice it keeps paying to rediscover the same articles. We built a cache for knowledge, not just web pages. |
+| 16 | Simple tasks need momentum. Complex research needs a plan. Trusted workflows need autonomy. One AI mode should not pretend those are the same problem. |
+| 17 | The agent searches one part of the web. You read another. A useful knowledge system should learn from both, then investigate the gaps neither of you noticed. |
+| 18 | Parallel AI agents are a demo until they can inspect the same project, divide the work cleanly, and return something you can actually use. |
 
 ---
 
