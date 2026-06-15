@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowUpRightIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -221,6 +222,7 @@ function ChatPageContent({
   isMock: boolean;
 }) {
   const { t } = useI18n();
+  const router = useRouter();
   const [settings, setSettings] = useLocalSettings();
   const asset = useThemeAssets();
   const selectedModelName =
@@ -329,6 +331,14 @@ function ChatPageContent({
         "",
         `/workspace/chats/${threadId}`,
       );
+      // Synchronize Next's internal route after one browser paint. Without
+      // this, a later New Chat navigation can be treated as a same-route no-op
+      // because usePathname/useParams still point at `/workspace/chats/new`.
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          router.replace(`/workspace/chats/${threadId}`);
+        });
+      });
     },
     onFinish,
     onPlanCreated: (event) => {
