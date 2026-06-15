@@ -54,11 +54,6 @@ tools:
     name: bash
     use: src.sandbox.tools:bash_tool
 
-  # Media tools (media)
-  - group: media
-    name: comfyui_generate
-    use: src.community.comfyui.tools:comfyui_generate_tool
-
   # Vault tools (vault)
   - group: vault
     name: query_knowledge_vault

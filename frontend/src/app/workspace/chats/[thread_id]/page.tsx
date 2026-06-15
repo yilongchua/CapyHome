@@ -1,7 +1,6 @@
 "use client";
 
 import { ArrowUpRightIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -45,7 +44,6 @@ import type { PlanAdaptedEvent, PlanCreatedEvent } from "@/core/threads/hooks";
 import { useRenameThread, useThreadStream } from "@/core/threads/hooks";
 import { useContextTokens } from "@/core/threads/use-context-tokens";
 import {
-  markLocalThreadStream,
   THREAD_RUN_STREAM_MODES,
   useRejoinRunningRun,
 } from "@/core/threads/use-rejoin-running-run";
@@ -223,7 +221,6 @@ function ChatPageContent({
   isMock: boolean;
 }) {
   const { t } = useI18n();
-  const router = useRouter();
   const [settings, setSettings] = useLocalSettings();
   const asset = useThemeAssets();
   const selectedModelName =
@@ -321,16 +318,17 @@ function ChatPageContent({
     isMock,
     onContextTokens: ({ tokenCount }) => onContextTokens(tokenCount),
     onCompaction: onCompaction,
-    onStart: (startedThreadId) => {
-      if (isNewThread) {
-        markLocalThreadStream(startedThreadId);
-      }
+    onStart: () => {
       setIsNewThread(false);
-      // Use router.replace so Next.js Router's internal state is updated.
-      // This ensures subsequent "New Chat" clicks are treated as a real
-      // cross-route navigation (actual-id → "new") rather than a no-op
-      // same-path navigation, which was causing stale content to persist.
-      router.replace(`/workspace/chats/${threadId}`);
+      // Keep the first optimistic message mounted while the SDK performs its
+      // create-thread request followed by the run stream request. A Next.js
+      // router transition here can delay the optimistic paint until history
+      // loads, making the first message appear only after a refresh.
+      window.history.replaceState(
+        null,
+        "",
+        `/workspace/chats/${threadId}`,
+      );
     },
     onFinish,
     onPlanCreated: (event) => {

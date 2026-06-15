@@ -31,7 +31,6 @@ import { useLocalSettings } from "@/core/settings";
 import type { ForkDraft } from "@/core/threads/fork";
 import { useThreadStream } from "@/core/threads/hooks";
 import {
-  markLocalThreadStream,
   THREAD_RUN_STREAM_MODES,
   useRejoinRunningRun,
 } from "@/core/threads/use-rejoin-running-run";
@@ -164,10 +163,7 @@ function AgentChatPageContent({
   const [thread, sendMessage, , queueControls] = useThreadStream({
     threadId: isNewThread ? undefined : threadId,
     context: { ...settings.context, agent_name: agentName },
-    onStart: (startedThreadId) => {
-      if (isNewThread) {
-        markLocalThreadStream(startedThreadId);
-      }
+    onStart: () => {
       setIsNewThread(false);
       history.replaceState(
         null,

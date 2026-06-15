@@ -10,18 +10,15 @@ const defaults = {
   pollFailed: false,
   runId: "run-1",
   streamLoading: false,
-  streamError: false,
-  ownsLocalStream: false,
   lastJoinedRunId: null,
 };
 
-void test("does not clear local ownership before initial polling completes", () => {
+void test("does not clear rejoin state before initial polling completes", () => {
   assert.equal(
     decideRejoinAction({
       ...defaults,
       pollLoading: true,
       runId: null,
-      ownsLocalStream: true,
     }),
     "wait",
   );
@@ -37,18 +34,17 @@ void test("does not mark or join a discovered run while another stream is loadin
   );
 });
 
-void test("does not immediately retry an already attempted run after an error", () => {
+void test("does not immediately retry an already attempted run", () => {
   assert.equal(
     decideRejoinAction({
       ...defaults,
-      streamError: true,
       lastJoinedRunId: "run-1",
     }),
     "wait",
   );
 });
 
-void test("joins an unowned running stream and clears ownership after a successful empty poll", () => {
+void test("joins a running stream and clears rejoin state after a successful empty poll", () => {
   assert.equal(decideRejoinAction(defaults), "join");
   assert.equal(
     decideRejoinAction({
@@ -56,5 +52,16 @@ void test("joins an unowned running stream and clears ownership after a successf
       runId: null,
     }),
     "clear-local-owner",
+  );
+});
+
+void test("rejoins a running stream after a route remount", () => {
+  assert.equal(
+    decideRejoinAction({
+      ...defaults,
+      streamLoading: false,
+      lastJoinedRunId: null,
+    }),
+    "join",
   );
 });

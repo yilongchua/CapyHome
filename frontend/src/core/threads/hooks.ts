@@ -50,7 +50,6 @@ import {
   setCachedThreadMessages,
 } from "./thread-message-cache";
 import type { AgentThread, AgentThreadState, PlanState } from "./types";
-import { clearLocalThreadStream } from "./use-rejoin-running-run";
 
 const FALLBACK_RUN_CONFIG: Record<string, unknown> = { recursion_limit: 1000 };
 let cachedDefaultRunConfig: Record<string, unknown> | null = null;
@@ -1195,7 +1194,6 @@ export function useThreadStream({
         setCachedThreadMessages(queryClient, finishedThreadId, finalMessages);
       }
       if (finishedThreadId) {
-        clearLocalThreadStream(finishedThreadId);
         patchThreadInSearchList(queryClient, finishedThreadId, {
           ...(state.values?.title ? { title: state.values.title } : {}),
           updated_at: new Date().toISOString(),
@@ -1469,7 +1467,6 @@ export function useThreadStream({
       } catch (error) {
         setOptimisticMessages([]);
         firstResponseTimingRef.current = null;
-        clearLocalThreadStream(threadId);
         throw error;
       } finally {
         isSubmittingRef.current = false;

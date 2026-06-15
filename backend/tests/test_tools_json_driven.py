@@ -17,6 +17,8 @@ Notes on the surface area:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from src.config import get_app_config
@@ -115,6 +117,26 @@ def test_get_available_tools_flag_off_work_mode_does_not_include_write_plan() ->
     config.json_driven_tools = False
     tools = _names(get_available_tools(include_mcp=False, subagent_enabled=False, mode="work"))
     assert "write_plan" not in tools
+
+
+def test_get_available_tools_skips_configured_tool_with_missing_module(caplog) -> None:
+    config = get_app_config()
+    original_tools = config.tools
+    config.tools = [
+        SimpleNamespace(
+            group="media",
+            name="missing_optional_tool",
+            use="src.community.missing_optional_tool:tool",
+        )
+    ]
+
+    try:
+        tools = _names(get_available_tools(include_mcp=False, subagent_enabled=False))
+    finally:
+        config.tools = original_tools
+
+    assert "missing_optional_tool" not in tools
+    assert "Skipping unavailable configured tool 'missing_optional_tool'" in caplog.text
 
 
 def test_get_available_tools_flag_on_keeps_all_legacy_surface() -> None:

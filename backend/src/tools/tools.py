@@ -92,6 +92,21 @@ def _get_community_tool_enabled(tool_name: str) -> bool:
         return True
 
 
+def _load_configured_tools(config_tools: list, groups: list[str] | None, mode: str | None) -> list[BaseTool]:
+    """Resolve config-defined tools without letting a missing optional module break the agent."""
+    loaded_tools: list[BaseTool] = []
+    for tool in config_tools:
+        if groups is not None and tool.group not in groups:
+            continue
+        if not _get_community_tool_enabled(tool.name) or not _community_tool_allowed_in_mode(tool.name, mode):
+            continue
+        try:
+            loaded_tools.append(resolve_variable(tool.use, BaseTool))
+        except ImportError as exc:
+            logger.warning("Skipping unavailable configured tool '%s' (%s): %s", tool.name, tool.use, exc)
+    return loaded_tools
+
+
 
 
 def get_available_tools(
@@ -133,13 +148,7 @@ def get_available_tools(
     config = get_app_config()
 
     # Config-defined tools (config.yaml `tools:` section), filtered by group, community override, and mode.
-    loaded_tools = [
-        resolve_variable(tool.use, BaseTool)
-        for tool in config.tools
-        if (groups is None or tool.group in groups)
-        and _get_community_tool_enabled(tool.name)
-        and _community_tool_allowed_in_mode(tool.name, mode)
-    ]
+    loaded_tools = _load_configured_tools(config.tools, groups, mode)
 
     # Get cached MCP tools if enabled
     # NOTE: We use ExtensionsConfig.from_file() instead of config.extensions

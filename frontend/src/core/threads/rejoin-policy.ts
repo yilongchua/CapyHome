@@ -5,16 +5,12 @@ export function decideRejoinAction({
   pollFailed,
   runId,
   streamLoading,
-  streamError,
-  ownsLocalStream,
   lastJoinedRunId,
 }: {
   pollLoading: boolean;
   pollFailed: boolean;
   runId: string | null;
   streamLoading: boolean;
-  streamError: boolean;
-  ownsLocalStream: boolean;
   lastJoinedRunId: string | null;
 }): RejoinAction {
   if (pollLoading || pollFailed) {
@@ -24,9 +20,6 @@ export function decideRejoinAction({
     return "clear-local-owner";
   }
   if (streamLoading) {
-    return "wait";
-  }
-  if (!streamError && ownsLocalStream) {
     return "wait";
   }
   if (lastJoinedRunId === runId) {
