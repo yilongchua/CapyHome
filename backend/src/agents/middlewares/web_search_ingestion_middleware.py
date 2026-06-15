@@ -1,7 +1,7 @@
 """Web search → vault ingestion-queue bridge middleware.
 
 Restores the enqueue that used to live inside the in-backend ``web_search``
-community tool. When web search moved out to the standalone ``websearch.search``
+community tool. When web search moved out to the standalone ``websearch_search``
 MCP server (``http://localhost:9000/mcp``), the tool kept producing markdown but
 lost all coupling to the knowledge vault — the external service has no knowledge
 of ``search_results_ingestion_queue.json``. As a result the queue stopped
@@ -9,7 +9,7 @@ receiving rows after the cutover (its newest ``web_search`` row predates the
 migration).
 
 This middleware re-establishes the link without re-coupling the external
-service: it observes the ``websearch.search`` (or any web-search) tool result as
+service: it observes the ``websearch_search`` (or any web-search) tool result as
 it passes back through the backend, re-renders each result to markdown via the
 canonical ``_render_result_markdown`` helper, and appends rows to the ingestion
 queue via ``enqueue_search_results``. It is a pure side effect — the
@@ -76,7 +76,7 @@ def _coerce_content_text(content: Any) -> str | None:
 
 
 class WebSearchIngestionMiddleware(AgentMiddleware[AgentState]):
-    """Append ``websearch.search`` results to the vault ingestion queue.
+    """Append ``websearch_search`` results to the vault ingestion queue.
 
     Activates when:
     - the tool name matches a web-search tool (``_is_web_search_tool``)
@@ -131,7 +131,7 @@ class WebSearchIngestionMiddleware(AgentMiddleware[AgentState]):
                 "extracted_content": markdown_content,
                 # Distinguish from the legacy in-backend tool so queue provenance
                 # is honest about which tool produced the row.
-                "source_tool": "websearch.search",
+                "source_tool": "websearch_search",
             }
             if package_markdown_path:
                 queue_item["source_markdown_path"] = package_markdown_path

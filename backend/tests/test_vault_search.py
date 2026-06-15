@@ -374,6 +374,7 @@ class TestQueryKnowledgeVaultTool:
 
         mock_searcher = MagicMock()
         mock_searcher.search.return_value = results
+        mock_searcher.vector_status.return_value = {"enabled": True, "current": False, "status_reason": "stale_metadata"}
         monkeypatch.setattr(tool_module, "_get_searcher", lambda: mock_searcher)
         monkeypatch.setattr(tool_module, "_searcher", None)
 
@@ -391,13 +392,46 @@ class TestQueryKnowledgeVaultTool:
         parsed = json.loads(raw)
         assert parsed["ok"] is True
         assert len(parsed["results"]) == 1
+        assert parsed["vector_status"]["status_reason"] == "stale_metadata"
 
     def test_ok_true_empty_results(self, monkeypatch, tmp_path):
         raw = self._invoke(monkeypatch, [])
         parsed = json.loads(raw)
         assert parsed["ok"] is True
         assert parsed["results"] == []
+        assert parsed["vector_status"]["current"] is False
         assert "message" in parsed
+
+    def test_vector_status_is_build_free(self, monkeypatch):
+        from src.community.knowledge_vault_search import tool as tool_module
+
+        mock_searcher = MagicMock()
+        mock_searcher.search.return_value = []
+        mock_searcher.vector_status.return_value = {"enabled": True, "current": False}
+        monkeypatch.setattr(tool_module, "_get_searcher", lambda: mock_searcher)
+
+        from src.community.knowledge_vault_search.tool import query_knowledge_vault_tool
+
+        query_knowledge_vault_tool.invoke({"query": "test"})
+
+        mock_searcher.vector_status.assert_called_once_with(build_if_stale=False)
+        mock_searcher.ensure_vector_ready.assert_not_called()
+
+    def test_vector_status_failure_preserves_search_results(self, monkeypatch):
+        from src.community.knowledge_vault_search import tool as tool_module
+
+        mock_searcher = MagicMock()
+        mock_searcher.search.return_value = [{"title": "Saved result"}]
+        mock_searcher.vector_status.side_effect = RuntimeError("status read failed")
+        monkeypatch.setattr(tool_module, "_get_searcher", lambda: mock_searcher)
+
+        from src.community.knowledge_vault_search.tool import query_knowledge_vault_tool
+
+        parsed = json.loads(query_knowledge_vault_tool.invoke({"query": "test"}))
+
+        assert parsed["ok"] is True
+        assert parsed["results"] == [{"title": "Saved result"}]
+        assert parsed["vector_status"]["status_reason"] == "status_unavailable"
 
     def test_invalid_category_returns_error(self, monkeypatch, tmp_path):
         from src.community.knowledge_vault_search import tool as tool_module
@@ -417,6 +451,7 @@ class TestQueryKnowledgeVaultTool:
 
         mock_searcher = MagicMock()
         mock_searcher.search.return_value = []
+        mock_searcher.vector_status.return_value = {"enabled": True}
         monkeypatch.setattr(tool_module, "_get_searcher", lambda: mock_searcher)
 
         from src.community.knowledge_vault_search.tool import query_knowledge_vault_tool
@@ -431,6 +466,7 @@ class TestQueryKnowledgeVaultTool:
 
         mock_searcher = MagicMock()
         mock_searcher.search.return_value = []
+        mock_searcher.vector_status.return_value = {"enabled": True}
         monkeypatch.setattr(tool_module, "_get_searcher", lambda: mock_searcher)
 
         from src.community.knowledge_vault_search.tool import query_knowledge_vault_tool

@@ -74,6 +74,20 @@ def test_legacy_unnamed_replan_message_is_synthetic():
     assert is_synthetic_human_message(message)
 
 
+def test_legacy_conversation_summary_is_synthetic_but_user_comment_is_not():
+    summary = {
+        "type": "human",
+        "content": "Here is a summary of the conversation to date:\n\n## Goal\nContinue the task.",
+    }
+    user_comment = {
+        "type": "human",
+        "content": 'Why did the UI say "Here is a summary of the conversation to date:"?',
+    }
+
+    assert is_synthetic_human_message(summary)
+    assert not is_synthetic_human_message(user_comment)
+
+
 def test_clarify_batch_starts_plan_turn_when_no_plan_exists(monkeypatch):
     threads = _ThreadsClient(
         {

@@ -195,7 +195,7 @@ def _tool_label(tool_name: str) -> str:
         "write_file": "Writing file",
         "str_replace": "Editing file",
         "web_search": "Searching the web",
-        "query_knowledge_vault": "Searching knowledge vault",
+        "query_knowledge_vault": "Searching saved knowledge vault",
         "task": "Starting delegated task",
         "write_todos": "Updating todo list",
         "present_files": "Preparing files",

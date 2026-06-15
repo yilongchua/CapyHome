@@ -7,7 +7,7 @@ longer crashes the entire run.
 Why this exists
 ---------------
 A real incident (thread ``937911b9``): the agent fired parallel
-``websearch.search`` MCP calls; one exceeded the websearch container's 120s
+``websearch_search`` MCP calls; one exceeded the websearch container's 120s
 gateway timeout, so the server returned ``504 Gateway Time-out``. The MCP
 streamable-HTTP client calls ``response.raise_for_status()`` and raises
 ``httpx.HTTPStatusError``. Nothing caught it — ``RetryPolicyMiddleware`` only

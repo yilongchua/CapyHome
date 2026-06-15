@@ -247,6 +247,38 @@ def test_tool_wrap_surfaces_file_operation_progress_without_adding_messages(monk
     assert len(streamed) == len(events)
 
 
+def test_query_knowledge_vault_activity_says_saved_vault(monkeypatch) -> None:
+    runtime = _runtime()
+    middleware = ActivityTimelineMiddleware()
+    request = ToolCallRequest(
+        tool_call={
+            "name": "query_knowledge_vault",
+            "args": {"query": "latest sg news"},
+            "id": "call-vault",
+            "type": "tool_call",
+        },
+        tool=None,
+        runtime=runtime,
+        state={},
+    )
+
+    def _handler(_req: ToolCallRequest) -> Command:
+        return Command(update={})
+
+    streamed: list[dict] = []
+    import src.agents.middlewares.activity_timeline_middleware as module
+
+    monkeypatch.setattr(module, "stream_activity_event", lambda event: streamed.append(event))
+
+    result = middleware.wrap_tool_call(request, _handler)
+    assert isinstance(result, Command)
+    update = result.update or {}
+    events = update.get("activity_timeline", {}).get("events", [])
+    lines = [event.get("line") for event in events]
+    assert any(line and line.startswith("Searching saved knowledge vault") for line in lines)
+    assert len(streamed) == len(events)
+
+
 def test_after_agent_clears_orphaned_tool_inputs(monkeypatch) -> None:
     runtime = _runtime()
     middleware = ActivityTimelineMiddleware()

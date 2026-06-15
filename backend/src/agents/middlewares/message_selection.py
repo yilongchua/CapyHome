@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 _SYNTHETIC_HUMAN_NAMES = {
+    "conversation_summary",
     "planner_handoff",
     "planner_clarification_required",
     "system_reminder",
@@ -22,6 +23,10 @@ _SYNTHETIC_HUMAN_NAMES = {
 # `frontend/src/core/messages/utils.ts` — both halves of the rendering contract
 # must agree on which `HumanMessage(name=...)` values are agent-internal and
 # should be hidden from the chat timeline.
+
+_SYNTHETIC_REQUEST_PREFIXES = (
+    "here is a summary of the conversation to date:",
+)
 
 _SYNTHETIC_REQUEST_PATTERNS = (
     "generate a detailed structured plan for the previous user request",
@@ -88,7 +93,7 @@ def is_synthetic_human_message(message: Any) -> bool:
     if name in _SYNTHETIC_HUMAN_NAMES:
         return True
     text = extract_text(message_content(message)).strip().lower()
-    return any(pattern in text for pattern in _SYNTHETIC_REQUEST_PATTERNS)
+    return any(text.startswith(prefix) for prefix in _SYNTHETIC_REQUEST_PREFIXES) or any(pattern in text for pattern in _SYNTHETIC_REQUEST_PATTERNS)
 
 
 def original_user_prompt(messages: list[Any]) -> str:

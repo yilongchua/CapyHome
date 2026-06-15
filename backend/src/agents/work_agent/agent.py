@@ -532,7 +532,7 @@ def _build_middleware_registry(
         # Inner to web_search_summary so it sees the raw, full search result
         # (before summary may replace the content) and feeds it to the vault
         # ingestion queue. Restores the enqueue stranded in the deprecated
-        # in-backend web_search tool after the websearch.search MCP migration.
+        # in-backend web_search tool after the websearch_search MCP migration.
         MiddlewareSpec("web_search_ingestion", bind(_create_web_search_ingestion), after={"web_search_summary"}),
         MiddlewareSpec("todo", bind(_create_todo), after={"plan_evaluator"}),
         MiddlewareSpec("title", bind(_create_title), after={"todo"}),

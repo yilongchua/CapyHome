@@ -23,6 +23,13 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useI18n } from "@/core/i18n/hooks";
 import {
   useLlmEndpoints,
@@ -36,6 +43,12 @@ import { cn } from "@/lib/utils";
 import { SettingsSection } from "./settings-section";
 
 type ProviderType = "ollama" | "lm-studio" | "custom";
+type CustomProviderPreset =
+  | "manual"
+  | "anthropic"
+  | "openai"
+  | "gemini"
+  | "deepseek";
 
 const PROVIDER_DEFAULTS: Record<
   ProviderType,
@@ -58,10 +71,53 @@ const PROVIDER_DEFAULTS: Record<
   },
 };
 
+const CUSTOM_PROVIDER_PRESETS: Record<
+  CustomProviderPreset,
+  {
+    apiKeyPlaceholder: string;
+    baseUrl: string;
+    displayName: string;
+    label: string;
+  }
+> = {
+  openai: {
+    apiKeyPlaceholder: "sk-...",
+    baseUrl: "https://api.openai.com/v1",
+    displayName: "OpenAI",
+    label: "ChatGPT / OpenAI API",
+  },
+  anthropic: {
+    apiKeyPlaceholder: "sk-ant-...",
+    baseUrl: "https://api.anthropic.com/v1/",
+    displayName: "Claude",
+    label: "Claude API",
+  },
+  gemini: {
+    apiKeyPlaceholder: "AIza...",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    displayName: "Gemini",
+    label: "Gemini API",
+  },
+  deepseek: {
+    apiKeyPlaceholder: "sk-...",
+    baseUrl: "https://api.deepseek.com/v1",
+    displayName: "DeepSeek",
+    label: "DeepSeek API",
+  },
+  manual: {
+    apiKeyPlaceholder: "sk-...",
+    baseUrl: "",
+    displayName: "",
+    label: "Other OpenAI-compatible",
+  },
+};
+
 export function LlmSettingsPage() {
   const { t } = useI18n();
 
   const [provider, setProvider] = useState<ProviderType>("ollama");
+  const [customPreset, setCustomPreset] =
+    useState<CustomProviderPreset>("manual");
   const [displayName, setDisplayName] = useState("");
   const [baseUrl, setBaseUrl] = useState(PROVIDER_DEFAULTS.ollama.baseUrl);
   const [apiKey, setApiKey] = useState("");
@@ -105,6 +161,16 @@ export function LlmSettingsPage() {
   function handleProviderChange(p: ProviderType) {
     setProvider(p);
     setBaseUrl(PROVIDER_DEFAULTS[p].baseUrl);
+    setCustomPreset("manual");
+    resetTest();
+    setSelectedModels([]);
+  }
+
+  function handleCustomPresetChange(preset: CustomProviderPreset) {
+    const cfg = CUSTOM_PROVIDER_PRESETS[preset];
+    setCustomPreset(preset);
+    setDisplayName(cfg.displayName);
+    setBaseUrl(cfg.baseUrl);
     resetTest();
     setSelectedModels([]);
   }
@@ -172,6 +238,7 @@ export function LlmSettingsPage() {
 
   function resetForm() {
     setProvider("ollama");
+    setCustomPreset("manual");
     setDisplayName("");
     setBaseUrl(PROVIDER_DEFAULTS.ollama.baseUrl);
     setApiKey("");
@@ -183,6 +250,7 @@ export function LlmSettingsPage() {
   function handleEdit(key: string, ep: UserLlmEndpoint) {
     setEditingKey(key);
     setProvider(ep.provider as ProviderType);
+    setCustomPreset("manual");
     setDisplayName(ep.display_name);
     setBaseUrl(ep.base_url);
     setApiKey(ep.api_key);
@@ -354,24 +422,48 @@ export function LlmSettingsPage() {
         <label className="text-sm font-medium mb-2 block">
           {t.settings.llm.providerType}
         </label>
-        <div className="flex gap-2">
-          {(Object.entries(PROVIDER_DEFAULTS) as [ProviderType, typeof PROVIDER_DEFAULTS[ProviderType]][]).map(
-            ([key, cfg]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => handleProviderChange(key)}
-                className={cn(
-                  "flex items-center gap-2 rounded-md border px-4 py-2.5 text-sm font-medium transition-colors",
-                  provider === key
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-border hover:bg-muted text-muted-foreground",
-                )}
-              >
-                {cfg.icon}
-                {cfg.label}
-              </button>
-            ),
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex flex-wrap gap-2">
+            {(Object.entries(PROVIDER_DEFAULTS) as [ProviderType, typeof PROVIDER_DEFAULTS[ProviderType]][]).map(
+              ([key, cfg]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => handleProviderChange(key)}
+                  className={cn(
+                    "flex items-center gap-2 rounded-md border px-4 py-2.5 text-sm font-medium transition-colors",
+                    provider === key
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border hover:bg-muted text-muted-foreground",
+                  )}
+                >
+                  {cfg.icon}
+                  {cfg.label}
+                </button>
+              ),
+            )}
+          </div>
+          {provider === "custom" && (
+            <Select
+              value={customPreset}
+              onValueChange={(value) =>
+                handleCustomPresetChange(value as CustomProviderPreset)
+              }
+            >
+              <SelectTrigger className="w-full sm:w-64">
+                <SelectValue placeholder={t.settings.llm.customPreset} />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.entries(CUSTOM_PROVIDER_PRESETS) as [
+                  CustomProviderPreset,
+                  (typeof CUSTOM_PROVIDER_PRESETS)[CustomProviderPreset],
+                ][]).map(([key, cfg]) => (
+                  <SelectItem key={key} value={key}>
+                    {cfg.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
         </div>
       </div>
@@ -408,7 +500,11 @@ export function LlmSettingsPage() {
           <label className="text-sm font-medium">{t.settings.llm.apiKey}</label>
           <input
             className="border-input bg-background focus-visible:ring-ring w-full rounded-md border px-3 py-1.5 text-sm focus-visible:ring-1 focus-visible:outline-none"
-            placeholder={t.settings.llm.apiKeyPlaceholder}
+            placeholder={
+              provider === "custom"
+                ? CUSTOM_PROVIDER_PRESETS[customPreset].apiKeyPlaceholder
+                : t.settings.llm.apiKeyPlaceholder
+            }
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}

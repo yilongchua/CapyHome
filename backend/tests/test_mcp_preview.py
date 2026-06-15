@@ -30,6 +30,24 @@ def test_preview_returns_tool_list_on_success():
     assert result["tools"][0]["description"] == "Read a file"
 
 
+def test_preview_normalizes_websearch_tool_name():
+    mock_tool = MagicMock()
+    mock_tool.name = "websearch" + ".search"
+    mock_tool.description = "Run web search"
+    mock_tool.args_schema = None
+
+    mock_client = AsyncMock()
+    mock_client.get_tools = AsyncMock(return_value=[mock_tool])
+
+    config = McpServerConfig(type="stdio", command="npx", args=["-y", "websearch"])
+
+    with patch("src.mcp.tools.MultiServerMCPClient", return_value=mock_client):
+        result = asyncio.run(preview_mcp_server(config))
+
+    assert result["ok"] is True
+    assert result["tools"][0]["name"] == "websearch_search"
+
+
 def test_preview_returns_error_on_connection_failure():
     mock_client = AsyncMock()
     mock_client.get_tools = AsyncMock(side_effect=ConnectionRefusedError("refused"))
@@ -103,6 +121,20 @@ def test_get_tools_no_exclusions_returns_all():
     assert len(result) == 3
 
 
+def test_get_tools_normalizes_websearch_tool_name():
+    tool = MagicMock()
+    tool.name = "websearch" + ".search"
+
+    mock_client = AsyncMock()
+    mock_client.get_tools = AsyncMock(return_value=[tool])
+
+    with patch("src.mcp.tools.MultiServerMCPClient", return_value=mock_client):
+        result = asyncio.run(_get_tools_for_server("srv", {"transport": "stdio", "command": "x"}, excluded_tools=[]))
+
+    assert len(result) == 1
+    assert result[0].name == "websearch_search"
+
+
 def test_get_tools_filters_excluded():
     tools = [MagicMock() for _ in range(3)]
     for i, n in enumerate(["tool_a", "tool_b", "tool_c"]):
@@ -124,6 +156,25 @@ def test_get_tools_filters_excluded():
     assert "tool_a" in names
     assert "tool_b" not in names
     assert "tool_c" in names
+
+
+def test_get_tools_excludes_old_dotted_websearch_name():
+    tool = MagicMock()
+    tool.name = "websearch" + ".search"
+
+    mock_client = AsyncMock()
+    mock_client.get_tools = AsyncMock(return_value=[tool])
+
+    with patch("src.mcp.tools.MultiServerMCPClient", return_value=mock_client):
+        result = asyncio.run(
+            _get_tools_for_server(
+                "srv",
+                {"transport": "stdio", "command": "x"},
+                excluded_tools=["websearch" + ".search"],
+            )
+        )
+
+    assert result == []
 
 
 def test_get_tools_excludes_all():

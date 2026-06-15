@@ -221,7 +221,7 @@ class SubagentExecutor:
         from src.sandbox.middleware import SandboxMiddleware
 
         middlewares = [
-            # Outermost: a single tool exception (e.g. an MCP 504 from websearch.search)
+            # Outermost: a single tool exception (e.g. an MCP 504 from websearch_search)
             # becomes a recoverable error ToolMessage instead of failing the whole subagent run.
             ToolErrorBoundaryMiddleware(),
             ThreadDataMiddleware(lazy_init=True),  # Compute thread paths

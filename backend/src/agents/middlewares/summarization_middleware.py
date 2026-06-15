@@ -452,6 +452,11 @@ class CapyHomeSummarizationMiddleware(SummarizationMiddleware):
     # Phase A — structured deterministic fallback
     # ------------------------------------------------------------------
 
+    def _build_new_messages(self, summary: str) -> list[HumanMessage]:  # type: ignore[override]
+        msg = HumanMessage(content=f"Here is a summary of the conversation to date:\n\n{summary}")
+        msg.name = "conversation_summary"
+        return [msg]
+
     def _deterministic_fallback_summary(self, messages: list[AnyMessage]) -> str:
         state = self._summary_state_snapshot or {}
         parts: list[str] = [
@@ -533,7 +538,10 @@ class CapyHomeSummarizationMiddleware(SummarizationMiddleware):
                 break
 
         parts.append("## Latest Intent")
-        parts.append(f"- User: {(latest_user[:500] or 'N/A')}")
+        if latest_user:
+            parts.append(f"- User: {latest_user[:500]}")
+        else:
+            parts.append("- User: No user message was compressed; see preserved recent messages.")
         parts.append(f"- Assistant: {(latest_ai[:500] or 'N/A')}")
 
         return "\n".join(parts)

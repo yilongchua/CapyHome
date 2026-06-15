@@ -52,6 +52,8 @@ def query_knowledge_vault_tool(
     - ``tags``: frontmatter tags list
     - ``source_url``: original source URL (may be empty for synthesised pages)
     - ``path``: absolute path to the vault markdown file
+    - ``vector_status``: build-free status for vector search; stale/missing
+      indexes may be rebuilt asynchronously while lexical results are returned
 
     Args:
         query: Natural language description of what to search for.
@@ -75,19 +77,30 @@ def query_knowledge_vault_tool(
                     ensure_ascii=False,
                 )
 
-        results = _get_searcher().search(query, categories=categories, limit=limit)
+        searcher = _get_searcher()
+        results = searcher.search(query, categories=categories, limit=limit)
+        try:
+            vector_status = searcher.vector_status(build_if_stale=False)
+        except Exception as exc:
+            logger.warning("query_knowledge_vault vector status unavailable: %s", exc)
+            vector_status = {
+                "enabled": False,
+                "available": False,
+                "status_reason": "status_unavailable",
+            }
 
         if not results:
             return json.dumps(
                 {
                     "ok": True,
                     "results": [],
+                    "vector_status": vector_status,
                     "message": "No matching pages found in the knowledge vault.",
                 },
                 ensure_ascii=False,
             )
 
-        return json.dumps({"ok": True, "results": results}, ensure_ascii=False, indent=2)
+        return json.dumps({"ok": True, "results": results, "vector_status": vector_status}, ensure_ascii=False, indent=2)
 
     except Exception as exc:
         logger.exception("query_knowledge_vault failed")

@@ -1,7 +1,7 @@
 """Tests for ToolErrorBoundaryMiddleware.
 
 Covers the regression from thread 937911b9: an unhandled MCP transport error
-(e.g. a 504 from websearch.search) must become a recoverable error ToolMessage
+(e.g. a 504 from websearch_search) must become a recoverable error ToolMessage
 rather than crashing the whole run. Also pins the ordering invariant that the
 boundary is the *outermost* tool-call wrapper (outer to retry).
 """
@@ -17,7 +17,7 @@ from langgraph.errors import GraphInterrupt
 from src.agents.middlewares.tool_error_boundary_middleware import ToolErrorBoundaryMiddleware
 
 
-def _request(name: str = "websearch.search", call_id: str = "call-1"):
+def _request(name: str = "websearch_search", call_id: str = "call-1"):
     return SimpleNamespace(
         tool_call={"name": name, "id": call_id},
         runtime=SimpleNamespace(context={}),
@@ -34,7 +34,7 @@ def test_unhandled_exception_becomes_error_tool_message():
 
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
-    assert result.name == "websearch.search"
+    assert result.name == "websearch_search"
     assert result.tool_call_id == "call-1"
     assert "504 Gateway Time-out" in result.content
     assert "RuntimeError" in result.content
@@ -42,7 +42,7 @@ def test_unhandled_exception_becomes_error_tool_message():
 
 def test_successful_tool_call_passes_through_unchanged():
     middleware = ToolErrorBoundaryMiddleware()
-    ok = ToolMessage(content="fine", tool_call_id="call-1", name="websearch.search")
+    ok = ToolMessage(content="fine", tool_call_id="call-1", name="websearch_search")
 
     result = middleware.wrap_tool_call(_request(), lambda _r: ok)
 

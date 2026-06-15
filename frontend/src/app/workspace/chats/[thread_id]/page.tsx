@@ -44,7 +44,11 @@ import type { ForkDraft } from "@/core/threads/fork";
 import type { PlanAdaptedEvent, PlanCreatedEvent } from "@/core/threads/hooks";
 import { useRenameThread, useThreadStream } from "@/core/threads/hooks";
 import { useContextTokens } from "@/core/threads/use-context-tokens";
-import { useRejoinRunningRun } from "@/core/threads/use-rejoin-running-run";
+import {
+  markLocalThreadStream,
+  THREAD_RUN_STREAM_MODES,
+  useRejoinRunningRun,
+} from "@/core/threads/use-rejoin-running-run";
 import { useThreadNotification } from "@/core/threads/use-thread-notification";
 import { api } from "@/core/workspace-io/api";
 import { useMountedFolder } from "@/core/workspace-io/hooks/use-mounted-folder";
@@ -245,10 +249,6 @@ function ChatPageContent({
     new Set([...generationArtifacts, ...mountedArtifacts]),
   );
 
-  // Probe for an in-flight run so we can label resume situations. The
-  // langgraph-sdk `useStream` already auto-joins via reconnectOnMount, so this
-  // is observation-only — it lets the UI distinguish "fresh open" from
-  // "resuming a still-running answer that started in another tab/session."
   const { onFinish } = useThreadNotification();
 
   const [planCreatedEvent, setPlanCreatedEvent] = useState<PlanCreatedEvent | null>(null);
@@ -321,7 +321,10 @@ function ChatPageContent({
     isMock,
     onContextTokens: ({ tokenCount }) => onContextTokens(tokenCount),
     onCompaction: onCompaction,
-    onStart: () => {
+    onStart: (startedThreadId) => {
+      if (isNewThread) {
+        markLocalThreadStream(startedThreadId);
+      }
       setIsNewThread(false);
       // Use router.replace so Next.js Router's internal state is updated.
       // This ensures subsequent "New Chat" clicks are treated as a real
@@ -588,7 +591,9 @@ function ChatPageContent({
         // Join its SSE stream immediately so the chat starts updating without
         // waiting up to 15s for `useRunningRun` polling to discover it.
         if (typeof result.run_id === "string" && result.run_id) {
-          void thread.joinStream(result.run_id).catch((error) => {
+          void thread.joinStream(result.run_id, undefined, {
+            streamMode: THREAD_RUN_STREAM_MODES,
+          }).catch((error) => {
             console.warn("Failed to join Work Mode run stream directly:", error);
           });
         }

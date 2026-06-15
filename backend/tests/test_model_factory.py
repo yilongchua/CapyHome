@@ -288,52 +288,6 @@ def test_reasoning_effort_preserved_when_supported(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# local_llm_policy
-# ---------------------------------------------------------------------------
-
-
-def test_local_llm_policy_accepts_allowed_base_url(monkeypatch):
-    cfg = AppConfig(
-        models=[_make_model("local-ok", base_url="http://localhost:1234/v1")],
-        sandbox=SandboxConfig(use="src.sandbox.local:LocalSandboxProvider"),
-        local_llm_policy={
-            "enabled": True,
-            "allowed_base_urls": ["http://localhost:1234/v1", "http://192.168.1.22:1234/v1"],
-        },
-    )
-    _patch_factory(monkeypatch, cfg)
-    factory_module.create_chat_model(name="local-ok", thinking_enabled=False)
-
-
-def test_local_llm_policy_rejects_disallowed_base_url(monkeypatch):
-    cfg = AppConfig(
-        models=[_make_model("local-bad", base_url="https://api.openai.com/v1")],
-        sandbox=SandboxConfig(use="src.sandbox.local:LocalSandboxProvider"),
-        local_llm_policy={
-            "enabled": True,
-            "allowed_base_urls": ["http://localhost:1234/v1", "http://192.168.1.22:1234/v1"],
-        },
-    )
-    _patch_factory(monkeypatch, cfg)
-    with pytest.raises(ValueError, match="local_llm_policy rejected model base URL"):
-        factory_module.create_chat_model(name="local-bad", thinking_enabled=False)
-
-
-def test_local_llm_policy_rejects_non_openai_provider(monkeypatch):
-    cfg = AppConfig(
-        models=[_make_model("anthropic", use="langchain_anthropic:ChatAnthropic", base_url="http://localhost:1234/v1")],
-        sandbox=SandboxConfig(use="src.sandbox.local:LocalSandboxProvider"),
-        local_llm_policy={
-            "enabled": True,
-            "allowed_base_urls": ["http://localhost:1234/v1", "http://192.168.1.22:1234/v1"],
-        },
-    )
-    _patch_factory(monkeypatch, cfg)
-    with pytest.raises(ValueError, match="configured model provider is not OpenAI-compatible"):
-        factory_module.create_chat_model(name="anthropic", thinking_enabled=False)
-
-
-# ---------------------------------------------------------------------------
 # thinking shortcut field
 # ---------------------------------------------------------------------------
 

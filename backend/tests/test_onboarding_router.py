@@ -99,6 +99,51 @@ def test_test_llm_does_not_double_v1():
     assert captured["url"] == "http://localhost:11434/v1/models"
 
 
+def test_test_llm_uses_existing_versioned_openai_compatible_path():
+    """base_url with a versioned compatibility path should be probed directly."""
+    captured: dict[str, Any] = {}
+
+    class _Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, Any]:
+            return {"data": [{"id": "gemini-3.5-flash"}]}
+
+    class _Client:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> _Client:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            pass
+
+        async def get(self, url: str, headers: dict | None = None) -> _Response:
+            captured["url"] = url
+            return _Response()
+
+    with patch("src.gateway.routers.onboarding.httpx.AsyncClient", _Client):
+        result = asyncio.run(
+            onboarding.test_llm_endpoint(
+                onboarding.TestLlmRequest(
+                    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                    api_key="",
+                )
+            )
+        )
+
+    assert result.ok is True
+    assert result.models == ["gemini-3.5-flash"]
+    assert (
+        captured["url"]
+        == "https://generativelanguage.googleapis.com/v1beta/openai/models"
+    )
+
+
 # ─── save_user_models preserves on-disk extras ───────────────────────────────
 
 

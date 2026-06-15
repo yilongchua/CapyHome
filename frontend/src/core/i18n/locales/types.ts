@@ -406,6 +406,7 @@ export interface Translations {
       providerOllama: string;
       providerLmStudio: string;
       providerCustom: string;
+      customPreset: string;
       displayName: string;
       displayNamePlaceholder: string;
       baseUrl: string;

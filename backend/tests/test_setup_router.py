@@ -177,7 +177,7 @@ def test_websearch_connection_checks_health_and_mcp_tool(monkeypatch: pytest.Mon
     client = _FakeHttpClient(
         get_response=_FakeResponse({"ok": "true"}),
         post_response=_FakeResponse(
-            {"result": {"tools": [{"name": "websearch.search"}]}}
+            {"result": {"tools": [{"name": "websearch_search"}]}}
         ),
     )
     monkeypatch.setattr(setup.httpx, "AsyncClient", lambda **_kwargs: client)

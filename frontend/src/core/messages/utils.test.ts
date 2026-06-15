@@ -4,6 +4,9 @@ import test from "node:test";
 const { hasPendingToolResultsInCurrentTurn } = await import(
   new URL("./utils.ts", import.meta.url).href
 );
+const { isSyntheticHumanMessage } = await import(
+  new URL("./utils.ts", import.meta.url).href
+);
 
 void test("detects unresolved tool calls in the current real user turn", () => {
   const messages = [
@@ -64,4 +67,46 @@ void test("ignores terminal UI tool calls and older turns", () => {
   ];
 
   assert.equal(hasPendingToolResultsInCurrentTurn(messages), false);
+});
+
+void test("hides named and legacy compaction summary messages", () => {
+  assert.equal(
+    isSyntheticHumanMessage({
+      id: "summary-1",
+      type: "human",
+      name: "conversation_summary",
+      content: "Here is a summary of the conversation to date:\n\nSummary",
+    }),
+    true,
+  );
+
+  assert.equal(
+    isSyntheticHumanMessage({
+      id: "summary-2",
+      type: "human",
+      content:
+        "Here is a summary of the conversation to date:\n\n[summary_quality:fallback]\n[summary_source:deterministic_state]",
+    }),
+    true,
+  );
+
+  assert.equal(
+    isSyntheticHumanMessage({
+      id: "summary-3",
+      type: "human",
+      content:
+        "Here is a summary of the conversation to date:\n\n## Goal\nContinue the previous implementation.",
+    }),
+    true,
+  );
+
+  assert.equal(
+    isSyntheticHumanMessage({
+      id: "user-comment",
+      type: "human",
+      content:
+        'Why did the UI say "Here is a summary of the conversation to date:"?',
+    }),
+    false,
+  );
 });

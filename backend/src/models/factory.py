@@ -1,5 +1,4 @@
 import logging
-from urllib.parse import urlparse
 
 from langchain.chat_models import BaseChatModel
 
@@ -8,52 +7,6 @@ from src.models.prompt_logging import PromptLoggingCallback
 from src.reflection import resolve_class
 
 logger = logging.getLogger(__name__)
-
-
-def _normalize_base_url(url: str) -> str:
-    parsed = urlparse(url.strip())
-    if not parsed.scheme or not parsed.netloc:
-        return url.strip().rstrip("/")
-    return f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/")
-
-
-def _enforce_local_llm_policy(config, model_config, model_settings_from_config: dict, kwargs: dict) -> None:
-    """Optionally enforce that all model calls use a local OpenAI-compatible backend."""
-    policy = config.model_extra.get("local_llm_policy", {}) if config.model_extra else {}
-    if not isinstance(policy, dict) or not bool(policy.get("enabled", False)):
-        return
-
-    allowed_base_urls_raw = policy.get(
-        "allowed_base_urls",
-        [
-            "http://localhost:1234/v1",
-            "http://192.168.1.22:1234/v1",
-        ],
-    )
-    if not isinstance(allowed_base_urls_raw, list) or len(allowed_base_urls_raw) == 0:
-        raise ValueError("local_llm_policy.enabled=true requires a non-empty local_llm_policy.allowed_base_urls list.")
-
-    allowed_base_urls = {_normalize_base_url(str(url)) for url in allowed_base_urls_raw}
-
-    if model_config.use != "langchain_openai:ChatOpenAI":
-        raise ValueError(
-            "local_llm_policy is enabled, but configured model provider is not OpenAI-compatible. "
-            f"Expected 'langchain_openai:ChatOpenAI', got '{model_config.use}'."
-        )
-
-    base_url = kwargs.get("base_url") or kwargs.get("api_base") or model_settings_from_config.get("base_url") or model_settings_from_config.get("api_base")
-    if not isinstance(base_url, str) or not base_url.strip():
-        raise ValueError(
-            "local_llm_policy is enabled, but model base URL is missing. "
-            f"Allowed base URLs: {sorted(allowed_base_urls)}"
-        )
-
-    normalized_base_url = _normalize_base_url(base_url)
-    if normalized_base_url not in allowed_base_urls:
-        raise ValueError(
-            "local_llm_policy rejected model base URL "
-            f"'{base_url}'. Allowed: {sorted(allowed_base_urls)}"
-        )
 
 
 def create_chat_model(name: str | None = None, thinking_enabled: bool = False, **kwargs) -> BaseChatModel:
@@ -121,8 +74,6 @@ def create_chat_model(name: str | None = None, thinking_enabled: bool = False, *
     if isinstance(endpoints, list) and endpoints:
         import random as _random
         model_settings_from_config["base_url"] = _random.choice(endpoints)
-
-    _enforce_local_llm_policy(config, model_config, model_settings_from_config, kwargs)
 
     # Merge kwargs on top of model_settings_from_config so that caller-provided
     # values (e.g. base_url) take precedence over the config dump, avoiding

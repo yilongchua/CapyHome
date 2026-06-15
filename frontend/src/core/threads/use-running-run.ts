@@ -2,16 +2,12 @@
 
 // Detect whether the current thread has a run already in flight on the server.
 //
-// `useStream({ reconnectOnMount: true, streamResumable: true })` already does
-// the heavy lifting — when the user reopens a chat with a live run, the SDK
-// joins its SSE. This hook is a thin diagnostic + safety-net: it polls the
-// server's `runs.list({ status: "running" })` when the page mounts and exposes
-// the running run id (if any) so the chat UI can label the experience as
-// "resuming" and so we have a fallback path if SDK reconnect ever silently
-// no-ops (e.g., localStorage cleared, cross-device session).
-//
-// We deliberately avoid kicking off a second joinStream here — that risks
-// double-consumption of the SSE. Treat this as observation only.
+// Chat streams use an explicit resume path instead of the SDK's sessionStorage
+// reconnect. The SDK reconnect can double-join the same run during /new -> /id
+// route transitions while the original submit stream is still open. This hook
+// polls the server's `runs.list({ status: "running" })` when the page mounts and
+// exposes the running run id so `useRejoinRunningRun` can join real resumed or
+// out-of-band runs exactly once.
 
 import { useEffect, useState } from "react";
 
@@ -28,14 +24,17 @@ export function useRunningRun(
 ): {
   runningRun: RunningRunInfo | null;
   loading: boolean;
+  pollFailed: boolean;
 } {
   const [runningRun, setRunningRun] = useState<RunningRunInfo | null>(null);
   const [loading, setLoading] = useState<boolean>(Boolean(threadId));
+  const [pollFailed, setPollFailed] = useState(false);
 
   useEffect(() => {
     if (!threadId) {
       setRunningRun(null);
       setLoading(false);
+      setPollFailed(false);
       return;
     }
     const client = getAPIClient();
@@ -47,6 +46,7 @@ export function useRunningRun(
       try {
         const runs = await client.runs.list(threadId, { status: "running", limit: 1 });
         if (cancelled) return;
+        setPollFailed(false);
         const first = runs?.[0];
         if (first) {
           setRunningRun({
@@ -59,7 +59,7 @@ export function useRunningRun(
         }
       } catch {
         if (cancelled) return;
-        setRunningRun(null);
+        setPollFailed(true);
       } finally {
         if (isInitial && !cancelled) {
           setLoading(false);
@@ -90,5 +90,5 @@ export function useRunningRun(
     };
   }, [pollBump, threadId]);
 
-  return { runningRun, loading };
+  return { runningRun, loading, pollFailed };
 }

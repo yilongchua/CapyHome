@@ -243,7 +243,6 @@ Place in project root. Config values starting with `$` resolve as environment va
 
 Key sections:
 - `models` - LLM configurations with class paths, API keys, thinking/vision flags
-- `local_llm_policy` - Optional runtime guard to force allowed local OpenAI-compatible base URLs
 - `tools` - Tool definitions with module paths and groups
 - `tool_groups` - Logical tool groupings
 - `cid_guardrails` - Reserved config block for optional future safe-search mode (not enforced by default providers)

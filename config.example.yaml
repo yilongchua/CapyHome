@@ -4,7 +4,7 @@
 # Sections: Core, Models, Tools & Permissions, Sandbox, Channels,
 #           Agent Behavior (Middleware), Memory & Context, Skills,
 #           Knowledge & Search, Generation, Subagents, Observability,
-#           Dreamy Workflow, Routing & Scheduling, Local LLM Policy
+#           Dreamy Workflow, Routing & Scheduling
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -408,15 +408,3 @@ routing:
 scheduler:
   enabled: true
   poll_interval_seconds: 60
-
-# -----------------------------------------------------------------------------
-# Local LLM Policy — allowed local/edge LLM base URLs
-# -----------------------------------------------------------------------------
-
-local_llm_policy:
-  enabled: true
-  allowed_base_urls:
-    - http://localhost:1234/v1
-    - http://localhost:8081/v1
-    - http://127.0.0.1:4000/v1
-    

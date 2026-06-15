@@ -175,8 +175,8 @@ async def test_websearch_connection() -> WebSearchTestResponse:
             tools_response.raise_for_status()
         tools_payload = tools_response.json()
         tools = tools_payload.get("result", {}).get("tools", [])
-        if not any(tool.get("name") == "websearch.search" for tool in tools):
-            raise HTTPException(status_code=502, detail="WebSearch responded, but the websearch.search MCP tool is missing.")
+        if not any(str(tool.get("name") or "").replace(".", "_") == "websearch_search" for tool in tools):
+            raise HTTPException(status_code=502, detail="WebSearch responded, but the websearch_search MCP tool is missing.")
         return WebSearchTestResponse(ok=True, message="Health endpoint and MCP tool discovery succeeded.")
     except HTTPException:
         raise
@@ -192,6 +192,21 @@ async def run_websearch_live_test() -> WebSearchTestResponse:
     query = "latest news today"
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
+            tools_response = await client.post(
+                config.url,
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+            )
+            tools_response.raise_for_status()
+            tools_payload = tools_response.json()
+            tools = tools_payload.get("result", {}).get("tools", [])
+            websearch_tool_name = next(
+                (
+                    str(tool.get("name") or "")
+                    for tool in tools
+                    if str(tool.get("name") or "").replace(".", "_") == "websearch_search"
+                ),
+                "websearch_search",
+            )
             response = await client.post(
                 config.url,
                 json={
@@ -199,7 +214,7 @@ async def run_websearch_live_test() -> WebSearchTestResponse:
                     "id": 1,
                     "method": "tools/call",
                     "params": {
-                        "name": "websearch.search",
+                        "name": websearch_tool_name,
                         "arguments": {"query": query},
                     },
                 },

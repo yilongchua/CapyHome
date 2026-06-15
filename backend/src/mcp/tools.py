@@ -62,7 +62,7 @@ async def preview_mcp_server(server_config: McpServerConfig, server_name: str = 
             "ok": True,
             "tools": [
                 {
-                    "name": t.name,
+                    "name": "websearch_search" if t.name.replace(".", "_") == "websearch_search" else t.name,
                     "description": t.description or "",
                     "input_schema": _extract_input_schema(t),
                 }
@@ -81,11 +81,22 @@ async def _get_tools_for_server(server_name: str, params: dict[str, Any], exclud
     client = MultiServerMCPClient({server_name: params})
     tools = await client.get_tools()
     if not excluded_tools:
+        for tool in tools:
+            if tool.name.replace(".", "_") == "websearch_search":
+                tool.name = "websearch_search"
         return tools
-    excluded = set(excluded_tools)
-    filtered = [t for t in tools if t.name not in excluded]
+    excluded = {name.replace(".", "_") for name in excluded_tools}
+    filtered = []
+    excluded_names = set()
+    for tool in tools:
+        if tool.name.replace(".", "_") == "websearch_search":
+            tool.name = "websearch_search"
+        if tool.name in excluded:
+            excluded_names.add(tool.name)
+            continue
+        filtered.append(tool)
     if len(filtered) != len(tools):
-        logger.info("Server '%s': excluded %d tool(s) %s", server_name, len(tools) - len(filtered), sorted(excluded & {t.name for t in tools}))
+        logger.info("Server '%s': excluded %d tool(s) %s", server_name, len(tools) - len(filtered), sorted(excluded_names))
     return filtered
 
 
@@ -162,6 +173,10 @@ async def get_mcp_tools() -> list[BaseTool]:
             logger.error("Failed to load MCP tools from '%s': %s", server_name, exc, exc_info=True)
 
     logger.info("Total MCP tools loaded: %d", len(all_tools))
+
+    for tool in all_tools:
+        if tool.name.replace(".", "_") == "websearch_search":
+            tool.name = "websearch_search"
 
     indexed_search_tool = next((t for t in all_tools if t.name == "search_indexed_documents"), None)
     register_internal_search_target(indexed_search_tool)

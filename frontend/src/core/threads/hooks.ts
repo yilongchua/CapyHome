@@ -50,6 +50,7 @@ import {
   setCachedThreadMessages,
 } from "./thread-message-cache";
 import type { AgentThread, AgentThreadState, PlanState } from "./types";
+import { clearLocalThreadStream } from "./use-rejoin-running-run";
 
 const FALLBACK_RUN_CONFIG: Record<string, unknown> = { recursion_limit: 1000 };
 let cachedDefaultRunConfig: Record<string, unknown> | null = null;
@@ -142,6 +143,8 @@ export type ThreadStreamOptions = {
   onPhaseCompleted?: (event: PhaseCompletedEvent) => void;
   onPlanAdapted?: (event: PlanAdaptedEvent) => void;
 };
+
+export const CHAT_FIRST_RESPONSE_EVENT = "capyhome:chat-first-response";
 
 export type SendMessageOptions = {
   planMode?: boolean;
@@ -578,6 +581,12 @@ export function useThreadStream({
   const pendingTraceEventsRef = useRef<ExecutionTraceEvent[]>([]);
   const flushTimerRef = useRef<number | null>(null);
   const latestMessagesRef = useRef<Message[]>([]);
+  const firstResponseTimingRef = useRef<{
+    threadId: string;
+    startedAt: number;
+    baselineMessageCount: number;
+    knownMessageIds: Set<string>;
+  } | null>(null);
   const fetchStateHistory = true;
   const thinkingSignalEmittedRef = useRef(false);
 
@@ -1096,7 +1105,10 @@ export function useThreadStream({
     client: getAPIClient(isMock),
     assistantId: "work_agent",
     threadId: onStreamThreadId,
-    reconnectOnMount: true,
+    // Use our explicit running-run poller/rejoin path for resumes. The SDK's
+    // sessionStorage reconnect can double-join the same run during /new -> /id
+    // route transitions while the original submit stream is still open.
+    reconnectOnMount: false,
     // Guard: history-backed SDK APIs throw if this is false.
     // Keep this explicit and immutable for chat pages.
     fetchStateHistory,
@@ -1183,15 +1195,47 @@ export function useThreadStream({
         setCachedThreadMessages(queryClient, finishedThreadId, finalMessages);
       }
       if (finishedThreadId) {
+        clearLocalThreadStream(finishedThreadId);
         patchThreadInSearchList(queryClient, finishedThreadId, {
           ...(state.values?.title ? { title: state.values.title } : {}),
           updated_at: new Date().toISOString(),
         });
         publishThreadRefresh(finishedThreadId);
       }
+      firstResponseTimingRef.current = null;
       processQueueRef.current();
     },
   });
+
+  useEffect(() => {
+    const timing = firstResponseTimingRef.current;
+    if (!timing) {
+      return;
+    }
+    const firstNewAssistantMessage = thread.messages.find((message, index) => {
+      if (message.type !== "ai") {
+        return false;
+      }
+      if (message.id) {
+        return !timing.knownMessageIds.has(message.id);
+      }
+      return index >= timing.baselineMessageCount;
+    });
+    if (!firstNewAssistantMessage) {
+      return;
+    }
+    const latencyMs = Math.max(0, performance.now() - timing.startedAt);
+    window.dispatchEvent(
+      new CustomEvent(CHAT_FIRST_RESPONSE_EVENT, {
+        detail: {
+          threadId: timing.threadId,
+          latencyMs,
+          messageId: firstNewAssistantMessage.id ?? null,
+        },
+      }),
+    );
+    firstResponseTimingRef.current = null;
+  }, [thread.messages]);
 
   // Optimistic messages shown before the server stream responds
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
@@ -1385,6 +1429,14 @@ export function useThreadStream({
         };
         const runConfig = await getDefaultRunConfig();
 
+        firstResponseTimingRef.current = {
+          threadId,
+          startedAt: performance.now(),
+          baselineMessageCount: thread.messages.length,
+          knownMessageIds: new Set(
+            thread.messages.flatMap((message) => (message.id ? [message.id] : [])),
+          ),
+        };
         await thread.submit(
           {
             messages: outboundMessages,
@@ -1416,6 +1468,8 @@ export function useThreadStream({
         );
       } catch (error) {
         setOptimisticMessages([]);
+        firstResponseTimingRef.current = null;
+        clearLocalThreadStream(threadId);
         throw error;
       } finally {
         isSubmittingRef.current = false;

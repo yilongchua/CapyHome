@@ -130,7 +130,7 @@ budget.
 Mechanically this is one line: `subagents.max_turns: 200`. Caveats:
 
 - **The real cap shifts to `timeout_seconds: 1800` (30 min), not turns.** The
-  Tromsø "activities and tours" subagent was looping on `websearch.search`
+  Tromsø "activities and tours" subagent was looping on `websearch_search`
   failures (~5–10 s each). At 200 turns it would grind far longer before dying,
   so 200 raises the *wall-clock wasted on a doomed loop*.
 - **Cost/concurrency.** `subagents.max_concurrent_limit: 4` → four subagents
@@ -263,7 +263,7 @@ The `a7629185` failure was **not** caused by agent-type choice nor by 50 being
 inherently small. It was:
 
 > a **broad multi-bullet brief** handed to one subagent + a **flaky
-> `websearch.search`** (428 `ExceptionGroup` + 30 `BrokenResourceError` + 36
+> `websearch_search`** (428 `ExceptionGroup` + 30 `BrokenResourceError` + 36
 > circuit-breaker trips in the run) → a retry storm that ate ~25 think→act cycles
 > → recursion limit hit → retried at a **lower** budget (30) → failed again.
 

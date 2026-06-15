@@ -470,6 +470,7 @@ export const enUS: Translations = {
       providerOllama: "Ollama",
       providerLmStudio: "LM Studio",
       providerCustom: "Custom",
+      customPreset: "Custom API type",
       displayName: "Display Name",
       displayNamePlaceholder: "e.g. My Local LLM",
       baseUrl: "Base URL",

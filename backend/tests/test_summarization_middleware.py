@@ -394,6 +394,26 @@ def test_default_summary_prompt_owned_by_capyhome_middleware():
     assert mw.summary_prompt == DEFAULT_SUMMARY_PROMPT
 
 
+def test_summary_message_is_named_internal_context():
+    mw = _make_mw()
+
+    messages = mw._build_new_messages("[summary_quality:fallback]\nsummary")
+
+    assert len(messages) == 1
+    assert messages[0].name == "conversation_summary"
+    assert messages[0].content.startswith("Here is a summary of the conversation to date:")
+
+
+def test_fallback_summary_does_not_emit_user_na_for_ai_only_window():
+    mw = _make_mw()
+
+    summary = mw._deterministic_fallback_summary([AIMessage(content="Assistant-only compressed content")])
+
+    assert "- User: N/A" not in summary
+    assert "- User: No user message was compressed; see preserved recent messages." in summary
+    assert "- Assistant: Assistant-only compressed content" in summary
+
+
 def test_force_compaction_compacts_even_when_threshold_not_met():
     mw = _make_mw()
     mw._should_summarize = lambda messages, total_tokens: False  # type: ignore[method-assign]

@@ -239,7 +239,7 @@ grep -rhoE 'Task failed\. Error: [^"]*' $PD/*.txt | sort | uniq -c
 # Common root causes that drive a subagent into a failure loop:
 grep -rhoE 'Recursion limit of [0-9]+ reached' $PD/*.txt | sort | uniq -c   # turn budget exhausted
 grep -rhc 'web_search_circuit_open' $PD/*.txt | awk -F: '$2{s+=$2}END{print s" circuit-open hits"}'
-grep -rhoE 'Tool `websearch\.search` failed[^.]*' $PD/*.txt | sort | uniq -c  # search transport errors
+grep -rhoE 'Tool `websearch_search` failed[^.]*' $PD/*.txt | sort | uniq -c  # search transport errors
 ```
 
 > **Count caveat:** a failed-task tool message persists in the lead's message

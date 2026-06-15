@@ -213,7 +213,7 @@ for _ in $(seq 1 90); do
             curl -fsS \
                 -H "Content-Type: application/json" \
                 -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
-                http://localhost:9000/mcp | grep -q "websearch.search"
+                http://localhost:9000/mcp | grep -Eq 'websearch[_.]search'
             python3 "$CAPY_PATH/scripts/check-websearch-replicas.py" \
                 --url http://localhost:9000/health \
                 --replicas "$REPLICAS" \

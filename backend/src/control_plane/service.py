@@ -2853,18 +2853,10 @@ class ControlPlaneService:
         except Exception:
             return (None, None)
 
-    def _get_local_llm_base_url(self, app_config: Any) -> str | None:
+    def _get_local_llm_base_url(self, _app_config: Any) -> str | None:
         env_base_url = os.getenv("LOCAL_LLM_BASE_URL")
         if env_base_url:
             return env_base_url
-
-        policy = app_config.model_extra.get("local_llm_policy", {})
-        if isinstance(policy, dict):
-            allowed_urls = policy.get("allowed_base_urls", [])
-            if isinstance(allowed_urls, list) and allowed_urls:
-                first = allowed_urls[0]
-                if isinstance(first, str) and first:
-                    return first
         return os.getenv("LLAMA_CPP_BASE_URL", "http://localhost:1234/v1")
 
     def _integration_service_catalog(self) -> list[dict[str, str]]:

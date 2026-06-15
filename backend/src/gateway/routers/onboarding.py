@@ -1,6 +1,7 @@
 import ipaddress
 import json
 import logging
+import re
 import socket
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,18 @@ def _validate_probe_url(url: str) -> str | None:
         if ip.is_link_local and not ip.is_loopback:
             return "Refusing to probe link-local addresses."
     return None
+
+
+def _openai_models_url(base_url: str) -> str:
+    """Build a models URL from an OpenAI-compatible base URL.
+
+    Most providers use /v1, while Gemini's compatibility endpoint uses
+    /v1beta/openai. Treat any versioned API path as already complete.
+    """
+    normalized = base_url.rstrip("/")
+    if re.search(r"/v\d+(?:beta)?(?:/|$)", normalized):
+        return f"{normalized}/models"
+    return f"{normalized}/v1/models"
 
 
 # ─── Request / Response models ───────────────────────────────────────────────
@@ -313,8 +326,7 @@ def _save_extensions_with_user_models(
     description="Send a GET /v1/models request to verify an OpenAI-compatible endpoint and discover available models.",
 )
 async def test_llm_endpoint(request: TestLlmRequest) -> TestLlmResponse:
-    base_url = request.base_url.rstrip("/")
-    models_url = f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
+    models_url = _openai_models_url(request.base_url)
 
     headers = {}
     if request.api_key:
@@ -431,8 +443,8 @@ async def save_embedding_endpoints(request: EmbeddingEndpointsMap) -> EmbeddingE
 )
 async def test_embedding_endpoint(request: TestEmbeddingRequest) -> TestEmbeddingResponse:
     base_url = request.base_url.rstrip("/")
-    base_v1 = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
-    models_url = f"{base_v1}/models"
+    models_url = _openai_models_url(base_url)
+    base_v1 = models_url.removesuffix("/models")
     embeddings_url = f"{base_v1}/embeddings"
 
     headers = {}

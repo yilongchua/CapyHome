@@ -30,7 +30,11 @@ import { useNotification } from "@/core/notification/hooks";
 import { useLocalSettings } from "@/core/settings";
 import type { ForkDraft } from "@/core/threads/fork";
 import { useThreadStream } from "@/core/threads/hooks";
-import { useRejoinRunningRun } from "@/core/threads/use-rejoin-running-run";
+import {
+  markLocalThreadStream,
+  THREAD_RUN_STREAM_MODES,
+  useRejoinRunningRun,
+} from "@/core/threads/use-rejoin-running-run";
 import { textOfMessage } from "@/core/threads/utils";
 import { api } from "@/core/workspace-io/api";
 import { publishWorkspaceRefresh } from "@/core/workspace-refresh";
@@ -160,7 +164,10 @@ function AgentChatPageContent({
   const [thread, sendMessage, , queueControls] = useThreadStream({
     threadId: isNewThread ? undefined : threadId,
     context: { ...settings.context, agent_name: agentName },
-    onStart: () => {
+    onStart: (startedThreadId) => {
+      if (isNewThread) {
+        markLocalThreadStream(startedThreadId);
+      }
       setIsNewThread(false);
       history.replaceState(
         null,
@@ -297,7 +304,9 @@ function AgentChatPageContent({
         return;
       }
       if (typeof result.run_id === "string" && result.run_id) {
-        void thread.joinStream(result.run_id).catch((error) => {
+        void thread.joinStream(result.run_id, undefined, {
+          streamMode: THREAD_RUN_STREAM_MODES,
+        }).catch((error) => {
           console.warn("Failed to join Work Mode run stream directly:", error);
         });
       }

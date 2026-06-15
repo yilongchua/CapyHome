@@ -23,6 +23,7 @@ interface AssistantSubagentGroup extends GenericMessageGroup<"assistant:subagent
 // HumanMessages that middlewares inject as agent-internal context — they must
 // not render as user chat bubbles.
 const SYNTHETIC_HUMAN_MESSAGE_NAMES = new Set([
+  "conversation_summary",
   "planner_handoff",
   "planner_clarification_required",
   "system_reminder",
@@ -39,6 +40,7 @@ const SYNTHETIC_HUMAN_MESSAGE_NAMES = new Set([
 ]);
 
 const LEGACY_SYNTHETIC_HUMAN_PREFIXES = [
+  "here is a summary of the conversation to date:",
   "resolved planning request:\ncreate the plan mode draft from the original request",
   "forced plan draft:\nthe previous planning attempt did not produce a plan",
 ];
