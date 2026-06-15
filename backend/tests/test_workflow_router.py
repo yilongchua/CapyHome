@@ -86,6 +86,38 @@ def test_initialize_imports_csv_to_sqlite(monkeypatch, tmp_path):
     assert claimed[0]["source"]["name"] == "Example A"
 
 
+def test_claim_rows_prefers_current_row_index_over_lower_pending_rows(monkeypatch, tmp_path):
+    thread_id = "thread-1"
+    paths = _patch_paths(monkeypatch, tmp_path)
+    _write_source(paths, thread_id)
+    workflow_router.write_workflow(thread_id, _workflow_payload())
+    initialized = workflow_router.initialize_runtime(thread_id, workflow_router.read_workflow(thread_id))
+    initialized["execution"]["current_row_index"] = 1
+
+    claimed = workflow_router.claim_rows(thread_id, initialized)
+
+    assert [row["row_number"] for row in claimed] == ["2"]
+    with workflow_router._connect(workflow_router.workflow_sqlite_path(thread_id)) as conn:
+        rows = conn.execute("SELECT row_number, status FROM workflow_rows ORDER BY row_index").fetchall()
+    assert rows[0]["row_number"] == "1"
+    assert rows[0]["status"] == "pending"
+    assert rows[1]["row_number"] == "2"
+    assert rows[1]["status"] == "running"
+
+
+def test_claim_rows_wraps_to_lowest_pending_when_cursor_reaches_row_count(monkeypatch, tmp_path):
+    thread_id = "thread-1"
+    paths = _patch_paths(monkeypatch, tmp_path)
+    _write_source(paths, thread_id)
+    workflow_router.write_workflow(thread_id, _workflow_payload())
+    initialized = workflow_router.initialize_runtime(thread_id, workflow_router.read_workflow(thread_id))
+    initialized["execution"]["current_row_index"] = initialized["source"]["row_count"]
+
+    claimed = workflow_router.claim_rows(thread_id, initialized)
+
+    assert [row["row_number"] for row in claimed] == ["1"]
+
+
 def test_normalize_workflow_defaults_child_memory_off(monkeypatch, tmp_path):
     thread_id = "thread-1"
     _patch_paths(monkeypatch, tmp_path)
@@ -376,7 +408,7 @@ def test_recover_workflow_requeues_failed_rows(monkeypatch, tmp_path):
     assert recovered["execution"]["status"] == "ready"
     assert recovered["execution"]["consecutive_failures"] == 0
     assert recovered["execution"]["failure_rows"] == []
-    assert recovered["execution"]["current_row_index"] == 0
+    assert recovered["execution"]["current_row_index"] == 1
 
     with workflow_router._connect(workflow_router.workflow_sqlite_path(thread_id)) as conn:
         row = conn.execute(
@@ -387,6 +419,42 @@ def test_recover_workflow_requeues_failed_rows(monkeypatch, tmp_path):
     assert row["child_thread_id"] is None
     assert row["child_run_id"] is None
     assert row["error"] is None
+
+
+@pytest.mark.anyio
+async def test_child_row_run_create_failure_returns_failed_result(monkeypatch):
+    class _AppConfig:
+        def get_default_run_config(self):
+            return {}
+
+    class _Threads:
+        async def create(self):
+            return {"thread_id": "child-thread"}
+
+        async def get_state(self, _thread_id):
+            raise AssertionError("failed run creation should not read final state")
+
+    class _Runs:
+        async def create(self, *_args, **_kwargs):
+            raise RuntimeError("500 Internal Server Error")
+
+        async def join(self, _thread_id, _run_id):
+            raise AssertionError("failed run creation should not wait for join")
+
+    class _Client:
+        def __init__(self):
+            self.threads = _Threads()
+            self.runs = _Runs()
+
+    client = _Client()
+    active = workflow_router._ActiveWorkflowRun()
+    monkeypatch.setattr(workflow_router, "get_app_config", lambda: _AppConfig())
+    row = {"row_index": 0, "row_number": "1", "source": {"name": "Example A"}}
+
+    result = await workflow_router._execute_child_row(client, "parent-thread", _workflow_payload(), row, active)
+
+    assert result == (0, "failed", None, "child-thread", None, "500 Internal Server Error")
+    assert active.child_runs == {}
 
 
 @pytest.mark.anyio

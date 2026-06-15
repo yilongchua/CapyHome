@@ -114,7 +114,7 @@ class CompileMixin:
             "log_path": str(self.compiled_log_path),
         }
         search_service = UnifiedVaultSearchService(self.vault_root)
-        vector_status = search_service.vector_status()
+        vector_status = search_service.vector_status(build_if_stale=True)
         compile_report["vector_index"] = vector_status
         report_path = self.compile_reports_dir / f"{_utcnow().strftime('%Y%m%dT%H%M%SZ')}-compile.json"
         report_path.write_text(json.dumps(compile_report, indent=2), encoding="utf-8")

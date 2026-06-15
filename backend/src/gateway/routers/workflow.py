@@ -284,16 +284,30 @@ def initialize_runtime(thread_id: str, workflow: dict[str, Any]) -> dict[str, An
     workflow["source"]["row_count"] = len(rows)
     workflow["runtime"]["sqlite"] = WORKFLOW_SQLITE_VIRTUAL_PATH
     workflow["runtime"]["output_csv"] = output_virtual_path_for_source(workflow["source"]["path"])
-    workflow["execution"]["current_row_index"] = _lowest_pending_index(db_path)
+    workflow["execution"]["current_row_index"] = _next_pending_index(db_path, workflow)
     write_workflow(thread_id, workflow)
     return workflow
 
 
-def _lowest_pending_index(db_path: Path) -> int:
+def _next_pending_index(db_path: Path, workflow: dict[str, Any], *, start_index: int | None = None) -> int:
+    row_count = max(0, int(workflow.get("source", {}).get("row_count") or 0))
+    execution = dict(workflow.get("execution") or {})
+    cursor = max(0, int(execution.get("current_row_index") or 0) if start_index is None else int(start_index))
+
     with _connect(db_path) as conn:
         ensure_schema(conn)
-        row = conn.execute("SELECT MIN(row_index) AS idx FROM workflow_rows WHERE status = 'pending'").fetchone()
-        return int(row["idx"]) if row and row["idx"] is not None else 0
+        if cursor < row_count:
+            pending_at_or_after = conn.execute(
+                "SELECT MIN(row_index) AS idx FROM workflow_rows WHERE status = 'pending' AND row_index >= ?",
+                (cursor,),
+            ).fetchone()
+            if pending_at_or_after and pending_at_or_after["idx"] is not None:
+                return int(pending_at_or_after["idx"])
+
+        pending = conn.execute("SELECT MIN(row_index) AS idx FROM workflow_rows WHERE status = 'pending'").fetchone()
+        if pending and pending["idx"] is not None:
+            return int(pending["idx"])
+    return row_count
 
 
 def update_execution_timing(thread_id: str, workflow: dict[str, Any]) -> dict[str, Any]:
@@ -342,6 +356,7 @@ def update_execution_timing(thread_id: str, workflow: dict[str, Any]) -> dict[st
 def claim_rows(thread_id: str, workflow: dict[str, Any]) -> list[dict[str, Any]]:
     db_path = workflow_sqlite_path(thread_id)
     limit = max(1, int(workflow["execution"].get("max_parallel") or 1))
+    start_index = _next_pending_index(db_path, workflow)
     now = _utc_now_iso()
     with _connect(db_path) as conn:
         ensure_schema(conn)
@@ -351,10 +366,11 @@ def claim_rows(thread_id: str, workflow: dict[str, Any]) -> list[dict[str, Any]]
             SELECT row_index, row_number, source_json
             FROM workflow_rows
             WHERE status = 'pending'
+              AND row_index >= ?
             ORDER BY row_index
             LIMIT ?
             """,
-            (limit,),
+            (start_index, limit),
         ).fetchall()
         for row in rows:
             conn.execute(
@@ -464,7 +480,6 @@ def record_row_result(
         )
         row = conn.execute("SELECT row_number FROM workflow_rows WHERE row_index = ?", (row_index,)).fetchone()
         completed = conn.execute("SELECT COUNT(*) FROM workflow_rows WHERE status = 'success'").fetchone()[0]
-        pending = conn.execute("SELECT MIN(row_index) AS idx FROM workflow_rows WHERE status = 'pending'").fetchone()
         conn.commit()
 
     execution = dict(workflow["execution"])
@@ -478,7 +493,8 @@ def record_row_result(
             failure_rows.append(row_number)
         execution["failure_rows"] = failure_rows
     execution["completed_rows"] = int(completed)
-    execution["current_row_index"] = int(pending["idx"]) if pending and pending["idx"] is not None else int(workflow["source"].get("row_count") or completed)
+    workflow["execution"] = execution
+    execution["current_row_index"] = _next_pending_index(db_path, workflow, start_index=row_index + 1)
     consecutive_failures_limit = max(1, int(execution.get("consecutive_failures_limit") or _DEFAULT_CONSECUTIVE_FAILURES_LIMIT))
     if int(execution.get("consecutive_failures") or 0) >= consecutive_failures_limit:
         execution["status"] = "stopped_failed_threshold"
@@ -524,14 +540,9 @@ def recover_workflow(thread_id: str) -> dict[str, Any]:
                 """
             )
             completed = conn.execute("SELECT COUNT(*) FROM workflow_rows WHERE status = 'success'").fetchone()[0]
-            pending = conn.execute("SELECT MIN(row_index) AS idx FROM workflow_rows WHERE status = 'pending'").fetchone()
             conn.commit()
         workflow["execution"]["completed_rows"] = int(completed)
-        workflow["execution"]["current_row_index"] = (
-            int(pending["idx"])
-            if pending and pending["idx"] is not None
-            else int(workflow["source"].get("row_count") or completed)
-        )
+        workflow["execution"]["current_row_index"] = _next_pending_index(db_path, workflow)
 
     workflow["execution"]["consecutive_failures"] = 0
     workflow["execution"]["failure_rows"] = []
@@ -597,62 +608,64 @@ def _build_child_prompt(workflow: dict[str, Any], row: dict[str, Any]) -> str:
 
 
 async def _execute_child_row(client: Any, thread_id: str, workflow: dict[str, Any], row: dict[str, Any], active: _ActiveWorkflowRun) -> tuple[int, str, dict[str, Any] | None, str | None, str | None, str | None]:
-    async with active.lock:
-        if active.stop_requested:
-            return row["row_index"], "cancelled", None, None, None, "stopped"
-    child_thread = await client.threads.create()
-    child_thread_id = str(child_thread["thread_id"])
-    prompt = _build_child_prompt(workflow, row)
-    child_title = f"wf r{row['row_number']}"
-    add_to_memory = _as_bool(workflow["execution"].get("add_to_memory"), default=False)
-    compact_child_runs = _as_bool(workflow["execution"].get("compact_child_runs"), default=True)
-    model_name = resolve_workflow_model_name(workflow["execution"].get("model_display_name"))
-    context = {
-        "thread_id": child_thread_id,
-        "current_mode": "work",
-        "mode": "work",
-        "is_plan_mode": False,
-        "background_followup": False,
-        "plan_behavior": "work_interactive",
-        "subagent_enabled": True,
-        "thinking_enabled": True,
-        "auto_mode": False,
-        "add_to_memory": add_to_memory,
-        "skip_title_generation": compact_child_runs,
-        "workflow_child": True,
-        "workflow_parent_thread_id": thread_id,
-        "workflow_row_number": row["row_number"],
-        "current_turn_text": prompt,
-        "original_user_request": prompt,
-    }
-    metadata = {"trigger": "workflow_row", "parent_thread_id": thread_id, "row_number": row["row_number"]}
-    if model_name:
-        context["model_name"] = model_name
-        metadata["model_display_name"] = workflow["execution"].get("model_display_name")
-        metadata["model_name"] = model_name
-    if compact_child_runs:
-        context["compact_title"] = child_title
-        metadata["title"] = child_title
-    created = await client.runs.create(
-        child_thread_id,
-        _ASSISTANT_ID,
-        input={"messages": [{"type": "human", "content": prompt}]},
-        config=get_app_config().get_default_run_config(),
-        context=context,
-        metadata=metadata,
-    )
-    child_run_id = str(created.get("run_id") if isinstance(created, dict) else created)
-    async with active.lock:
-        should_cancel = active.stop_requested
-        if not should_cancel:
-            active.child_runs[child_thread_id] = child_run_id
-    if should_cancel:
-        try:
-            await client.runs.cancel(child_thread_id, child_run_id, wait=False, action="interrupt")
-        except Exception:
-            pass
-        return row["row_index"], "cancelled", None, child_thread_id, child_run_id, "stopped"
+    child_thread_id: str | None = None
+    child_run_id: str | None = None
     try:
+        async with active.lock:
+            if active.stop_requested:
+                return row["row_index"], "cancelled", None, None, None, "stopped"
+        child_thread = await client.threads.create()
+        child_thread_id = str(child_thread["thread_id"])
+        prompt = _build_child_prompt(workflow, row)
+        child_title = f"wf r{row['row_number']}"
+        add_to_memory = _as_bool(workflow["execution"].get("add_to_memory"), default=False)
+        compact_child_runs = _as_bool(workflow["execution"].get("compact_child_runs"), default=True)
+        model_name = resolve_workflow_model_name(workflow["execution"].get("model_display_name"))
+        context = {
+            "thread_id": child_thread_id,
+            "current_mode": "work",
+            "mode": "work",
+            "is_plan_mode": False,
+            "background_followup": False,
+            "plan_behavior": "work_interactive",
+            "subagent_enabled": True,
+            "thinking_enabled": True,
+            "auto_mode": False,
+            "add_to_memory": add_to_memory,
+            "skip_title_generation": compact_child_runs,
+            "workflow_child": True,
+            "workflow_parent_thread_id": thread_id,
+            "workflow_row_number": row["row_number"],
+            "current_turn_text": prompt,
+            "original_user_request": prompt,
+        }
+        metadata = {"trigger": "workflow_row", "parent_thread_id": thread_id, "row_number": row["row_number"]}
+        if model_name:
+            context["model_name"] = model_name
+            metadata["model_display_name"] = workflow["execution"].get("model_display_name")
+            metadata["model_name"] = model_name
+        if compact_child_runs:
+            context["compact_title"] = child_title
+            metadata["title"] = child_title
+        created = await client.runs.create(
+            child_thread_id,
+            _ASSISTANT_ID,
+            input={"messages": [{"type": "human", "content": prompt}]},
+            config=get_app_config().get_default_run_config(),
+            context=context,
+            metadata=metadata,
+        )
+        child_run_id = str(created.get("run_id") if isinstance(created, dict) else created)
+        async with active.lock:
+            should_cancel = active.stop_requested
+            if not should_cancel:
+                active.child_runs[child_thread_id] = child_run_id
+        if should_cancel:
+            try:
+                await client.runs.cancel(child_thread_id, child_run_id, wait=False, action="interrupt")
+            except Exception:
+                pass
+            return row["row_index"], "cancelled", None, child_thread_id, child_run_id, "stopped"
         await client.runs.join(child_thread_id, child_run_id)
         async with active.lock:
             if active.stop_requested:
@@ -667,8 +680,9 @@ async def _execute_child_row(client: Any, thread_id: str, workflow: dict[str, An
                 return row["row_index"], "cancelled", None, child_thread_id, child_run_id, "stopped"
         return row["row_index"], "failed", None, child_thread_id, child_run_id, str(exc)
     finally:
-        async with active.lock:
-            active.child_runs.pop(child_thread_id, None)
+        if child_thread_id:
+            async with active.lock:
+                active.child_runs.pop(child_thread_id, None)
 
 
 async def _delete_flushed_children(client: Any, thread_id: str, *, limit: int, flush_all: bool) -> None:

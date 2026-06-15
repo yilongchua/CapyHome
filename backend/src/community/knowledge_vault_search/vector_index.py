@@ -514,8 +514,35 @@ class VaultVectorIndex:
                 matrix = np.array(data["embeddings"], dtype=np.float32)
         return matrix
 
-    def status(self) -> dict[str, Any]:
-        payload = self.load()
+    def _empty_status(self, *, reason: str) -> dict[str, Any]:
+        return {
+            "enabled": True,
+            "backend": self.backend,
+            "effective_backend": "",
+            "embedding_model": self.embedding_model,
+            "effective_embedding_model": self._embedder.resolved_model_name() or self.embedding_model,
+            "built_at": None,
+            "chunk_count": 0,
+            "dimensions": self.dimensions,
+            "current": False,
+            "stale": True,
+            "status_reason": reason,
+        }
+
+    def status(self, *, build_if_stale: bool = False) -> dict[str, Any]:
+        if build_if_stale:
+            payload = self.load()
+        elif not self.metadata_path.exists():
+            return self._empty_status(reason="missing_metadata")
+        else:
+            try:
+                payload = json.loads(self.metadata_path.read_text(encoding="utf-8"))
+            except Exception:
+                return self._empty_status(reason="invalid_metadata")
+            if not isinstance(payload, dict):
+                return self._empty_status(reason="invalid_metadata")
+
+        current = self._metadata_is_current(payload)
         return {
             "enabled": True,
             "backend": str(payload.get("backend") or self.backend),
@@ -531,6 +558,9 @@ class VaultVectorIndex:
             "built_at": payload.get("built_at"),
             "chunk_count": int(payload.get("chunk_count") or 0),
             "dimensions": int(payload.get("dimensions") or self.dimensions),
+            "current": current,
+            "stale": not current,
+            "status_reason": "current" if current else "stale_metadata",
         }
 
     def search(self, query: str, *, categories: list[str] | None = None, limit: int = 10) -> list[dict[str, Any]]:

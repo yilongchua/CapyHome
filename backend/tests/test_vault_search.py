@@ -279,6 +279,38 @@ class _FakeEmbedder:
 
 
 class TestVaultVectorIndexInvalidation:
+    def test_status_does_not_rebuild_stale_metadata(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        _write_page(vault, "sources", "langgraph.md", "LangGraph Overview", "LangGraph supports agent workflows.")
+
+        index = VaultVectorIndex(vault)
+        fake = _FakeEmbedder()
+        index._embedder = fake  # noqa: SLF001
+        index.metadata_path.write_text(
+            json.dumps(
+                {
+                    "backend": "openai_compatible",
+                    "effective_backend": "none",
+                    "embedding_model": "",
+                    "effective_embedding_model": "old-chat-model",
+                    "dimensions": 256,
+                    "chunk_chars": index.chunk_chars,
+                    "overlap_chars": index.overlap_chars,
+                    "built_at": "2026-06-05T18:32:42+00:00",
+                    "chunk_count": 0,
+                    "chunks": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        status = index.status()
+
+        assert status["stale"] is True
+        assert status["status_reason"] == "stale_metadata"
+        assert fake.batch_sizes == []
+        assert not index.matrix_path.exists()
+
     def test_stale_zero_chunk_metadata_rebuilds_when_compiled_pages_exist(self, tmp_path):
         vault = _make_vault(tmp_path)
         _write_page(vault, "sources", "langgraph.md", "LangGraph Overview", "LangGraph supports agent workflows.")

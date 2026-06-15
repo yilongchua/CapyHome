@@ -274,10 +274,10 @@ class UnifiedVaultSearchService:
             ],
         }
 
-    def vector_status(self) -> dict[str, Any]:
+    def vector_status(self, *, build_if_stale: bool = False) -> dict[str, Any]:
         if not self._vector_index:
             return {"enabled": False, "chunk_count": 0, "built_at": None}
-        return self._vector_index.status()
+        return self._vector_index.status(build_if_stale=build_if_stale)
 
     def ensure_vector_ready(self) -> dict[str, Any]:
         if not self._vector_index:
