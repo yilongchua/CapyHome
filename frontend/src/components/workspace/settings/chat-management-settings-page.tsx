@@ -15,7 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/core/i18n/hooks";
 import { useDeleteSelectedThreads, useThreads } from "@/core/threads/hooks";
-import { titleOfThread } from "@/core/threads/utils";
+import { pathOfNewThread, titleOfThread } from "@/core/threads/utils";
 import { formatTimeAgo } from "@/core/utils/datetime";
 import { cn } from "@/lib/utils";
 
@@ -128,7 +128,7 @@ export function ChatManagementSettingsPage() {
           });
           setConfirmOpen(false);
           if (deletesCurrentThread && deletedThreadIds.includes(currentThreadId)) {
-            router.push("/workspace/chats/new");
+            router.push(pathOfNewThread());
           }
         },
       },

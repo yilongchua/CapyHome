@@ -1,7 +1,6 @@
 "use client";
 
 import { ArrowUpRightIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -49,6 +48,7 @@ import {
   useRejoinRunningRun,
 } from "@/core/threads/use-rejoin-running-run";
 import { useThreadNotification } from "@/core/threads/use-thread-notification";
+import { pathOfNewThread } from "@/core/threads/utils";
 import { api } from "@/core/workspace-io/api";
 import { useMountedFolder } from "@/core/workspace-io/hooks/use-mounted-folder";
 import { useMountedFolderFiles } from "@/core/workspace-io/hooks/use-mounted-folder-files";
@@ -222,7 +222,6 @@ function ChatPageContent({
   isMock: boolean;
 }) {
   const { t } = useI18n();
-  const router = useRouter();
   const [settings, setSettings] = useLocalSettings();
   const asset = useThemeAssets();
   const selectedModelName =
@@ -236,16 +235,19 @@ function ChatPageContent({
   });
   const { notices: generationNotices, artifactPaths: generationArtifacts } =
     useGenerationCompletions(threadId, { enabled: !isNewThread });
+  const newChatHref = useMemo(() => pathOfNewThread(), []);
   const { data: mountedFolder } = useMountedFolder(threadId, { enabled: !isNewThread });
   const { data: mountedFolderFiles } = useMountedFolderFiles(
     threadId,
     Boolean(mountedFolder) && !isNewThread,
   );
-  const mountedArtifacts = (mountedFolderFiles?.files ?? []).map(
-    (file) => file.virtual_path,
+  const mountedArtifacts = useMemo(
+    () => (mountedFolderFiles?.files ?? []).map((file) => file.virtual_path),
+    [mountedFolderFiles?.files],
   );
-  const combinedArtifacts = Array.from(
-    new Set([...generationArtifacts, ...mountedArtifacts]),
+  const combinedArtifacts = useMemo(
+    () => Array.from(new Set([...generationArtifacts, ...mountedArtifacts])),
+    [generationArtifacts, mountedArtifacts],
   );
 
   const { onFinish } = useThreadNotification();
@@ -331,14 +333,6 @@ function ChatPageContent({
         "",
         `/workspace/chats/${threadId}`,
       );
-      // Synchronize Next's internal route after one browser paint. Without
-      // this, a later New Chat navigation can be treated as a same-route no-op
-      // because usePathname/useParams still point at `/workspace/chats/new`.
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => {
-          router.replace(`/workspace/chats/${threadId}`);
-        });
-      });
     },
     onFinish,
     onPlanCreated: (event) => {
@@ -573,6 +567,7 @@ function ChatPageContent({
           body: JSON.stringify({
             plan_id: effectivePlanCreatedEvent?.plan_id,
             auto_mode: settings.context.auto_mode === true,
+            model_name: settings.context.model_name ?? undefined,
           }),
         });
         if (!response.ok) {
@@ -1145,6 +1140,11 @@ function ChatPageContent({
     onContextTokens(latestPersistedContextTokens.tokenCount);
   }, [latestPersistedContextTokens, onContextTokens]);
 
+  const liveNotices = useMemo(
+    () => [...generationNotices, ...uiNotices],
+    [generationNotices, uiNotices],
+  );
+
   return (
     <ThreadContext.Provider value={{ thread, isMock, forkDraft, setForkDraft }}>
       <ChatBox
@@ -1237,7 +1237,7 @@ function ChatPageContent({
                   className={cn("size-full", !isNewThread && "pt-10", handoffBanner && !isNewThread && "pt-0")}
                   threadId={threadId}
                   thread={thread}
-                  liveNotices={[...generationNotices, ...uiNotices]}
+                  liveNotices={liveNotices}
                   liveThinkingContent={liveThinkingContent}
                   paddingBottom={
                     effectivePlanCreatedEvent && !isNewThread && effectivePlanEventKey !== hiddenPlanEventKey
@@ -1292,7 +1292,7 @@ function ChatPageContent({
                     className={cn("bg-background/5 w-full")}
                     isNewThread={isNewThread}
                     threadId={threadId}
-                    newChatHref="/workspace/chats/new"
+                    newChatHref={newChatHref}
                     autoFocus={isNewThread}
                     status={thread.isLoading || hasPendingToolResults || isExecutingWorkflow ? "streaming" : "ready"}
                     context={settings.context}

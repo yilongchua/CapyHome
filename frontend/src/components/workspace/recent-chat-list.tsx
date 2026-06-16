@@ -39,6 +39,7 @@ import {
   useThreads,
 } from "@/core/threads/hooks";
 import {
+  pathOfNewThread,
   pathOfThreadRecord,
   titleOfThread,
 } from "@/core/threads/utils";
@@ -83,7 +84,7 @@ export function RecentChatList() {
           onSuccess: () => {
             if (threadId === threadIdFromPath) {
               const threadIndex = threads.findIndex((t) => t.thread_id === threadId);
-              let nextThreadPath = "/workspace/chats/new";
+              let nextThreadPath = pathOfNewThread();
               if (threadIndex > -1) {
                 if (threads[threadIndex + 1]) {
                   nextThreadPath = pathOfThreadRecord(threads[threadIndex + 1]!);

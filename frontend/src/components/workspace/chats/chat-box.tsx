@@ -1,5 +1,5 @@
 import { ChevronLeftIcon, ChevronRightIcon, FilesIcon, RefreshCwIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePanelRef } from "react-resizable-panels";
 
 import { ConversationEmptyState } from "@/components/ai-elements/conversation";
@@ -83,6 +83,17 @@ const ChatBox: React.FC<{
   const [activeTab, setActiveTab] = useState<"activity" | "directory">("activity");
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(true);
   const [isDirectoryExplorerCollapsed, setIsDirectoryExplorerCollapsed] = useState(true);
+  const nextDirectoryFiles = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...(thread.values.artifacts ?? []),
+          ...extraDirectoryFiles,
+          ...sandboxOutputFiles,
+        ]),
+      ),
+    [extraDirectoryFiles, sandboxOutputFiles, thread.values.artifacts],
+  );
   const loadArtifacts = useCallback(async () => {
     try {
       const response = await fetch(
@@ -128,9 +139,6 @@ const ChatBox: React.FC<{
       directoryExplorerPanelRef.current?.collapse();
     }
 
-    const nextDirectoryFiles = Array.from(
-      new Set([...(thread.values.artifacts ?? []), ...extraDirectoryFiles, ...sandboxOutputFiles]),
-    );
     if (!sameStringArray(directoryFiles, nextDirectoryFiles)) {
       setDirectoryFiles(nextDirectoryFiles);
     }
@@ -138,11 +146,9 @@ const ChatBox: React.FC<{
     directoryFiles,
     directoryExplorerPanelRef,
     deselect,
-    extraDirectoryFiles,
     panelRef,
-    sandboxOutputFiles,
     setDirectoryFiles,
-    thread.values.artifacts,
+    nextDirectoryFiles,
     threadId,
   ]);
 

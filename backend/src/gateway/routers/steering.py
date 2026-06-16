@@ -75,6 +75,12 @@ class ExecutePlanRequest(BaseModel):
         default=None,
         description="Optional auto-mode preference for the work handoff run.",
     )
+    model_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=256,
+        description="Optional chat-selected model for the work handoff run.",
+    )
 
 
 class ExecutePlanResponse(BaseModel):
@@ -180,6 +186,12 @@ def _requested_model_from_values(values: dict[str, Any]) -> str | None:
     if isinstance(model_name, str) and model_name.strip():
         return model_name.strip()
     return None
+
+
+def _requested_model_for_execute_plan(request: ExecutePlanRequest, values: dict[str, Any]) -> str | None:
+    if isinstance(request.model_name, str) and request.model_name.strip():
+        return request.model_name.strip()
+    return _requested_model_from_values(values)
 
 
 _WORK_MODE_ASSISTANT_ID = "work_agent"
@@ -524,7 +536,7 @@ async def execute_plan(thread_id: str, request: ExecutePlanRequest) -> ExecutePl
             run_id, assistant_id = await _create_work_mode_run(
                 client=client,
                 thread_id=thread_id,
-                requested_model_name=_requested_model_from_values(values),
+                requested_model_name=_requested_model_for_execute_plan(request, values),
                 auto_mode=auto_mode,
                 original_user_request=resolve_original_user_request(values),
             )
@@ -596,7 +608,7 @@ async def execute_plan(thread_id: str, request: ExecutePlanRequest) -> ExecutePl
         run_id, assistant_id = await _create_work_mode_run(
             client=client,
             thread_id=thread_id,
-            requested_model_name=_requested_model_from_values(values),
+            requested_model_name=_requested_model_for_execute_plan(request, values),
             auto_mode=auto_mode,
             original_user_request=resolve_original_user_request(values),
         )

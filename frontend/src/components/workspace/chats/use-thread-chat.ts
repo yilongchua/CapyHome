@@ -8,6 +8,7 @@ import { uuid } from "@/core/utils/uuid";
 export function useThreadChat() {
   const { thread_id: threadIdFromPath } = useParams<{ thread_id: string }>();
   const searchParams = useSearchParams();
+  const newChatKey = searchParams.get("new") ?? "";
 
   // For an existing thread, the path id is authoritative. For "new", we defer
   // returning a thread id until the post-mount effect generates a UUID. The
@@ -26,15 +27,12 @@ export function useThreadChat() {
   useEffect(() => {
     if (threadIdFromPath === "new") {
       setIsNewThread(true);
-      // Use the functional form so a later URL transition from "new" → UUID
-      // (after the first message submit triggers router.replace) is a no-op
-      // rather than a fresh UUID — keeps the chat page from remounting.
-      setThreadId((existing) => existing ?? uuid());
+      setThreadId(uuid());
       return;
     }
     setIsNewThread(false);
     setThreadId(threadIdFromPath);
-  }, [threadIdFromPath]);
+  }, [newChatKey, threadIdFromPath]);
 
   const isMock = searchParams.get("mock") === "true";
   return { threadId, isNewThread, setIsNewThread, isMock };

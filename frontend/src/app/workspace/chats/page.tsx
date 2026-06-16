@@ -16,7 +16,7 @@ import {
 } from "@/components/workspace/workspace-container";
 import { useI18n } from "@/core/i18n/hooks";
 import { useDeleteAllThreads, useDeleteThread, useThreads } from "@/core/threads/hooks";
-import { pathOfThread, titleOfThread } from "@/core/threads/utils";
+import { pathOfNewThread, pathOfThread, titleOfThread } from "@/core/threads/utils";
 import { formatTimeAgo } from "@/core/utils/datetime";
 
 export default function ChatsPage() {
@@ -135,7 +135,7 @@ export default function ChatsPage() {
                 deleteAllMutation.mutate(undefined, {
                   onSuccess: (result) => {
                     if (result.failed_thread_ids.length === 0) {
-                      router.push("/workspace/chats/new");
+                      router.push(pathOfNewThread());
                     }
                   },
                 });

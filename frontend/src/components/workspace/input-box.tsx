@@ -47,7 +47,7 @@ import {
   parseLeadingSlashCommand,
   type SlashCommandName,
 } from "@/core/threads/slash-commands";
-import { pathOfThread, textOfMessage } from "@/core/threads/utils";
+import { pathOfNewThread, pathOfThread, textOfMessage } from "@/core/threads/utils";
 import { sanitizeThreadId } from "@/core/utils/strings";
 import { api } from "@/core/workspace-io/api";
 import { useFolderPicker } from "@/core/workspace-io/hooks/use-folder-picker";
@@ -767,7 +767,7 @@ export function InputBox({
     if (newChatHref) {
       return newChatHref;
     }
-    return "/workspace/chats/new";
+    return pathOfNewThread();
   }, [newChatHref]);
 
   const runCompact = useCallback(async () => {

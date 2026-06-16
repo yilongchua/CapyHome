@@ -286,6 +286,7 @@ function AgentChatPageContent({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           auto_mode: settings.context.auto_mode === true,
+          model_name: settings.context.model_name ?? undefined,
         }),
       });
       if (!response.ok) {

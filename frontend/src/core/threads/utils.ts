@@ -6,6 +6,10 @@ export function pathOfThread(threadId: string) {
   return `/workspace/chats/${threadId}`;
 }
 
+export function pathOfNewThread() {
+  return `/workspace/chats/new?new=${Date.now().toString(36)}`;
+}
+
 export function pathOfThreadRecord(thread: AgentThread) {
   return `/workspace/chats/${thread.thread_id}`;
 }

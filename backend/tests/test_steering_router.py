@@ -241,6 +241,30 @@ def test_execute_plan_accepts_draft_plan(monkeypatch):
     assert runs.create_calls[-1][1]["config"] == {"recursion_limit": 1000}
 
 
+def test_execute_plan_prefers_request_model_over_thread_state(monkeypatch):
+    threads = _ThreadsClient(
+        values={
+            "model_name": "qwen3.6-local",
+            "plan": {"plan_id": "plan-1", "status": "draft", "title": "Plan"},
+            "plan_history": [{"plan_id": "plan-1", "title": "Plan", "status": "draft"}],
+        }
+    )
+    runs = _RunsClient()
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads, runs))
+    monkeypatch.setattr("src.gateway.routers.steering.get_app_config", lambda: _AppConfig())
+
+    response = asyncio.run(
+        execute_plan(
+            "thread-1",
+            ExecutePlanRequest(plan_id="plan-1", model_name="deepseek-v4-flash"),
+        )
+    )
+
+    assert response.status == "accepted"
+    created_context = runs.create_calls[-1][1]["context"]
+    assert created_context["model_name"] == "deepseek-v4-flash"
+
+
 def test_execute_plan_duplicate_for_already_approved(monkeypatch):
     threads = _ThreadsClient(
         values={

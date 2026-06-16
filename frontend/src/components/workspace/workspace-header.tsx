@@ -3,7 +3,7 @@
 import { MessageSquarePlus } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import {
   SidebarMenu,
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useI18n } from "@/core/i18n/hooks";
 import { useLocalSettings } from "@/core/settings";
+import { pathOfNewThread } from "@/core/threads/utils";
 import { env } from "@/env";
 import { useThemeAssets } from "@/hooks/use-theme-assets";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,7 @@ export function WorkspaceHeader({ className }: { className?: string }) {
   const { t } = useI18n();
   const { state } = useSidebar();
   const pathname = usePathname();
+  const router = useRouter();
   const [settings] = useLocalSettings();
   const asset = useThemeAssets();
 
@@ -125,7 +127,14 @@ export function WorkspaceHeader({ className }: { className?: string }) {
             isActive={pathname === "/workspace/chats/new"}
             asChild
           >
-            <Link className="text-muted-foreground" href="/workspace/chats/new">
+            <Link
+              className="text-muted-foreground"
+              href="/workspace/chats/new"
+              onClick={(event) => {
+                event.preventDefault();
+                router.push(pathOfNewThread());
+              }}
+            >
               <MessageSquarePlus size={16} />
               <span>{t.sidebar.newChat}</span>
             </Link>

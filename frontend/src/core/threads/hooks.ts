@@ -1862,6 +1862,9 @@ export function useThreadStream({
   ] as const;
 }
 
+const THREAD_SEARCH_PRIMARY_TIMEOUT_MS = 3_500;
+const THREAD_SEARCH_FALLBACK_TIMEOUT_MS = 3_000;
+
 export function useThreads(
   params?: Parameters<ThreadsClient["search"]>[0],
 ) {
@@ -1886,12 +1889,30 @@ export function useThreads(
       effectiveParams.status ?? null,
     ],
     queryFn: async () => {
+      const createTimeoutAbortReason = (timeoutMs: number) =>
+        typeof DOMException === "function"
+          ? new DOMException(
+              `Thread search timed out after ${timeoutMs}ms`,
+              "TimeoutError",
+            )
+          : new Error(`Thread search timed out after ${timeoutMs}ms`);
+
+      const isAbortLikeError = (error: unknown) => {
+        if (!error || typeof error !== "object") {
+          return false;
+        }
+        const name = "name" in error ? String(error.name) : "";
+        return name === "AbortError" || name === "TimeoutError";
+      };
+
       const searchWithTimeout = async (
         query: Parameters<ThreadsClient["search"]>[0],
         timeoutMs: number,
       ) => {
         const controller = new AbortController();
-        const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+        const timer = window.setTimeout(() => {
+          controller.abort(createTimeoutAbortReason(timeoutMs));
+        }, timeoutMs);
         try {
           return await apiClient.threads.search<AgentThreadState>({
             ...query,
@@ -1906,39 +1927,48 @@ export function useThreads(
       // If this fails (e.g. oversized/invalid state payload in one thread), fall
       // back to a lightweight list so the sidebar still renders past chats.
       try {
-        const response = await searchWithTimeout(effectiveParams, 3_500);
+        const response = await searchWithTimeout(effectiveParams, THREAD_SEARCH_PRIMARY_TIMEOUT_MS);
         if (!Array.isArray(response)) {
           return [];
         }
         return response as AgentThread[];
       } catch (error) {
         console.warn("Primary threads.search failed; falling back to lightweight thread list.", error);
-        const fallbackResponse = await searchWithTimeout({
-          limit: effectiveParams.limit,
-          offset: effectiveParams.offset,
-          sortBy: effectiveParams.sortBy,
-          sortOrder: effectiveParams.sortOrder,
-          metadata: effectiveParams.metadata,
-          status: effectiveParams.status,
-          ids: effectiveParams.ids,
-          // Avoid selecting values in fallback to bypass state serialization issues.
-          select: ["thread_id", "updated_at"],
-        }, 3_000);
-        if (!Array.isArray(fallbackResponse)) {
-          return [];
+        try {
+          const fallbackResponse = await searchWithTimeout({
+            limit: effectiveParams.limit,
+            offset: effectiveParams.offset,
+            sortBy: effectiveParams.sortBy,
+            sortOrder: effectiveParams.sortOrder,
+            metadata: effectiveParams.metadata,
+            status: effectiveParams.status,
+            ids: effectiveParams.ids,
+            // Avoid selecting values in fallback to bypass state serialization issues.
+            select: ["thread_id", "updated_at"],
+          }, THREAD_SEARCH_FALLBACK_TIMEOUT_MS);
+          if (!Array.isArray(fallbackResponse)) {
+            return [];
+          }
+          return fallbackResponse.map((thread) => ({
+            ...thread,
+            values: {
+              title: "Untitled",
+            },
+          })) as AgentThread[];
+        } catch (fallbackError) {
+          if (isAbortLikeError(fallbackError)) {
+            console.warn("Fallback threads.search timed out; rendering an empty thread list.", fallbackError);
+            return [];
+          }
+          throw fallbackError;
         }
-        return fallbackResponse.map((thread) => ({
-          ...thread,
-          values: {
-            title: "Untitled",
-          },
-        })) as AgentThread[];
       }
     },
     refreshDomains: ["threads"],
     invalidateQueryKey: ["threads", "search"],
     invalidateExact: false,
     refetchInterval: false,
+    retry: false,
     staleTime: 60_000,
   });
 }
