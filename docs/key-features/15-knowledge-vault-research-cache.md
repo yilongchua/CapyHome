@@ -5,9 +5,11 @@
 
 ---
 
-Imagine an analyst who throws away every source note after submitting a report.
+You've spent two hours reading whitepapers on battery supply chains. You extracted three key constraints, seven competing manufacturers, and a timeline of industry shifts. You write your report. You move on.
 
-They might still produce good work, but every follow-up begins with the same searches, the same reading, and the same effort to reconstruct context. That is how most AI research products behave by default.
+Three weeks later, a follow-up question arrives: *How does this relate to vertical integration in chip design?* You know you've seen something relevant before. But the context is gone. So you search again. You skim the same three whitepapers. You re-extract the same facts. You move forward two hours poorer.
+
+That loop—searching, reading, extracting, discarding, then repeating—is how most AI research systems operate by default. Each conversation is a clean slate. Each search starts from zero. Knowledge compounds in your brain, not in your tools.
 
 CapyHome's **Knowledge Vault** starts from a different premise: useful research should become infrastructure for future research.
 
@@ -17,76 +19,95 @@ It acts like a cache, but not a conventional browser cache. It does not merely p
 
 ## Why "save every page" is not enough
 
-A folder full of downloaded articles solves disappearance, but not retrieval.
+You download 47 articles into a folder. Problem solved, right? No. Three months later:
 
-Three months later, you may remember the idea but not the title. You may ask about "organizational autonomy" when the article used "decentralized decision-making." You may want everything about a company spread across twenty sources.
+- You remember the insight but not the title. Search through 47 files manually.
+- You ask about "organizational autonomy"—the article calls it "decentralized decision-making." Your keyword search misses it.
+- You want everything about Tesla from three different sources, scattered across folders for "EVs," "supply chains," and "manufacturing."
 
-The vault therefore creates two durable views:
+A pile of documents solves disappearance, not retrieval. **The vault reorganizes for retrieval.**
 
-- **Entity pages** collect knowledge about named things such as companies, products, people, and places.
-- **Concept pages** collect recurring ideas, mechanisms, frameworks, and themes.
+It creates two types of pages that compound across sessions:
 
-Those pages compound across research sessions. A source about an electric-vehicle manufacturer can strengthen both the company page and concept pages for battery supply chains, vertical integration, or manufacturing yield.
+- **Entity pages** collect everything about a named thing—a company, product, person, or place. One vault entry for Tesla includes battery-chain constraints from Article A, margin pressures from Article B, and manufacturing capacity from Article C.
+- **Concept pages** collect recurring themes—battery supply chains, vertical integration, manufacturing yield, pricing power. When you ingest a new article about Ford, both the Ford entity page *and* the battery supply-chain concept page get stronger.
 
-The thought process is simple: organize knowledge around what future questions will refer to, not around the chat that happened to discover it.
+A source about electric vehicles ceases to be "that one article I read." It becomes evidence that strengthens multiple questions you'll ask in the future. The thought process is simple: organize knowledge around what future questions will refer to, not around the chat that happened to discover it.
 
 ## Search once, reuse many times
 
-When WebSearch returns an eligible result with extracted content, CapyHome can queue it for vault ingestion. Duplicate URLs and content hashes are filtered, weak sources can be rejected by a trust threshold, and ingestion creates the compiled pages used by later vault searches.
+When WebSearch finds a relevant article, CapyHome queues it for vault ingestion. Deduplication filters (URL + content hash), trust gates, and weak-source rejection happen automatically. The result: organized, searchable entity and concept pages ready for the next question.
 
-The next time an agent receives a related question, it can search the vault before reaching for the open web.
+Next time a related question arrives, the agent retrieves from the vault before hitting the open web.
 
-That produces several kinds of leverage:
+This creates measurable leverage:
 
-- **Lower latency:** local retrieval is faster than crawling the same page.
-- **Lower model cost:** previous extraction and organization do not need to be repeated.
-- **Greater consistency:** follow-up answers can build on the same evidence base.
-- **Resilience:** useful content remains available if the page changes or disappears.
-- **Cumulative depth:** every serious project improves the starting point of the next one.
+- **Lower latency:** vault retrieval (~50ms) beats web crawl + extraction (~3-5s). A follow-up query runs twice as fast.
+- **Lower cost:** re-extracting the same article costs tokens every time. Vault reuse costs zero additional tokens.
+- **Greater consistency:** five queries spanning three months can now reference the *same* underlying evidence, not five independent interpretations.
+- **Resilience:** if an article moves or disappears, the vault copy remains. No broken references, no lost context.
+- **Cumulative depth:** your first deep-dive on battery supply chains becomes infrastructure for the next project. Each new ingestion strengthens existing entities and concept pages rather than starting from scratch.
 
 ![Why it is a cache for in-depth analysis](./diagrams/06-websearch-markdown-d3.png)
 
 ## A concrete example
 
-Suppose you research whether a software company can maintain growth while improving margins.
+**Day 1—The first question:** "Can Figma sustain 40%+ ARR growth while improving gross margins above 75%?"
 
-The first run gathers earnings reports, executive interviews, pricing pages, analyst commentary, and product documentation. The vault extracts the company as an entity and concepts such as operating leverage, customer concentration, and usage-based pricing.
+You spend ninety minutes gathering five earnings reports, CEO interviews, customer testimonials, pricing pages, and analyst notes. CapyHome extracts:
+- Entity page: **Figma** (market position, unit economics, customer mix)
+- Concept pages: **operating leverage**, **customer concentration**, **freemium-to-paid conversion**, **AI-as-margin-driver**
 
-Two weeks later, you ask:
+The vault now contains structured evidence across twenty ingested sources.
 
-> How does this company's pricing model compare with its closest competitor, and what does that imply for margin expansion?
+**Day 15—A follow-up lands:** "How does Figma's unit economics compare with Canva's? What does that imply for Figma's margin story?"
 
-A stateless agent starts again. CapyHome can retrieve the existing company and pricing pages, identify what is already known, and use live WebSearch only for missing or time-sensitive evidence.
+A stateless system searches again. Same sources. Re-extracts the same facts. Burns tokens on redundant work.
 
-That is the real benefit of caching: not "never search again," but **search selectively because you know what you already have**.
+CapyHome retrieves:
+- The Figma entity page (90% of what you need already compiled)
+- The unit-economics concept page (already structured across sources)
+- Live search only for: *new* public Canva metrics, *new* quarterly results, or *new* analyst reports
+
+The second question takes 15 minutes instead of 90. The reasoning builds on the same evidence base, not five independent interpretations.
+
+**The real leverage isn't "never search again."** It's **search selectively because you already know what you have**.
 
 ## Hybrid retrieval protects both precision and recall
 
-The vault combines keyword matching with semantic retrieval when embeddings are configured.
+The vault uses keyword *and* semantic search in parallel, fused into one result set.
 
-Keyword search is excellent for exact names, product codes, quotations, and financial terms. Semantic search helps when the new question expresses an old idea with different words. Fusing both avoids a common RAG failure: choosing between exactness and meaning when a good research system needs both.
+**Keyword search** excels at exactness: ticker symbols, product names, quotations, financial figures. You search `"iPhone 15 unit sales Q4 2024"` and find the exact sentence.
 
-The index remains local and file-backed. The compiled knowledge remains readable markdown rather than being trapped inside a remote vector database.
+**Semantic search** excels at meaning: you ask about "margin drivers in SaaS" and it retrieves insights about "operating leverage" and "unit economics"—different words, same idea.
+
+Most RAG systems force a choice: be exact or be flexible. The vault does both. Search for the ticker *and* for the concept simultaneously; rank results that match either signal.
+
+The index stays local, file-backed, and readable markdown—not locked inside a remote vector database. You own it. You can inspect it. You can prune it.
 
 ## Why the vault also needs pruning
 
-Compounding only works if the accumulated material remains useful.
+A vault that swallows every article, duplicate, nav fragment, and weak source becomes a *search problem*, not a solution. CapyHome includes trust gates, deduplication, linting, and pruning.
 
-An ingestion system that accepts every thin page, duplicate, navigation fragment, and weak source eventually creates a larger search problem. CapyHome therefore includes trust gates, deduplication, linting, aliasing, and pruning.
+**Deletion is not a bug—it is part of curation.** Human researchers don't weight every search result equally. They ignore shallow pieces, duplicates, and noise. A good vault does the same. A source that says "This adds no durable value" belongs in the trash, not cluttering future searches.
 
-Deletion sounds counterintuitive in a knowledge system, but curation is part of memory. Human researchers do not preserve every search result with equal weight. A useful vault must be able to say, "This adds no durable value."
-
-Dry-run controls make that judgment inspectable before destructive cleanup.
+The system offers dry-run controls: see what would be deleted and *why* before the vault changes. Pruning is explicit, inspectable, reversible until you confirm it.
 
 ## The impact on deep research
 
-The vault changes deep research from a sequence of isolated jobs into a program of work.
+The vault transforms deep research from a series of isolated sprints into a program of accumulated work.
 
-Day one establishes the core entities and concepts. Later questions expose gaps. Autoresearch fills selected gaps. Browser clips add human-curated material. New web searches update time-sensitive claims. The evidence base grows in the shape of your interests.
+**Week 1**: You establish the core entities (companies, products, key people) and concepts (market dynamics, unit economics, regulatory landscape). Vault populated with fifty sources.
 
-Over time, the system spends less effort rediscovering foundations and more effort investigating what is genuinely new.
+**Week 2**: A gap emerges—pricing models across competitors. Auto-research fills it. Twelve new sources ingest into existing concept pages.
 
-That is what "memory that compounds" should mean: not remembering the conversation, but preserving the work.
+**Week 3**: You manually clip three blog posts about regulatory shifts and add them to the vault.
+
+**Week 4**: A live market event changes unit economics. One new web search updates time-sensitive claims. No redundant rediscovery.
+
+The evidence base grows *in the shape of your interests*, not in the shape of search-term randomness. Over time, the system shifts from "What did I know about X?" to "What *new* have I learned about X since last time?"
+
+That is what compounding knowledge means: not remembering the conversation, but *preserving the work*.
 
 ## Video script (40-55 seconds, vertical Short)
 

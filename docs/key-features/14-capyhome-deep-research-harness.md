@@ -48,6 +48,8 @@ The practical difference is that the agent can reason over extracted article con
 
 This gives you web-search capability without paying per query to a commercial search API. "Free" still has real costs - your machine, bandwidth, and electricity - but it removes a metered vendor from the critical path and keeps the stack under your control.
 
+![Tavily and Firecrawl have API costs; the open-source WebSearch repository has zero API cost](./asset/14-capyhome-deep-research-harness-2.png)
+
 ## A useful way to ask for deep research
 
 Weak prompt:
@@ -76,6 +78,8 @@ The lead agent receives focused summaries, reconciles the evidence, and produces
 
 That last part changes the value curve. A normal search assistant is useful per session. A research harness becomes more useful as its workspace accumulates evidence.
 
+> **[Generate: Wide process illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. A lead capybara at a laptop reviews `plan.md` on the left. Three baby capybaras research in parallel across the centre: one searches technical milestones, one studies manufacturing economics, and one checks company announcements against demonstrated output. Their evidence cards flow into one cited report and then into a glowing Knowledge Vault bookshelf on the right. Warm cream background, clear left-to-right flow, minimal readable labels.]**
+
 ## The impact: research becomes an asset
 
 The immediate benefit is speed, especially when a question naturally fans out.
@@ -83,6 +87,8 @@ The immediate benefit is speed, especially when a question naturally fans out.
 The deeper benefit is **continuity**. Sources become files. Questions become plans. useful evidence becomes vault pages. Internal folders can be mounted into the same workspace. A research session leaves behind materials another session can use.
 
 This is closer to how a good analyst works. The final report matters, but so do the source notes, the unresolved questions, the comparison framework, and the ability to explain how the conclusion was reached.
+
+> **[Generate: Before-and-after illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. Left panel labelled "One session": a capybara watches loose search results and chat bubbles fade away. Right panel labelled "Research asset": the same capybara confidently reuses an organised workspace containing source markdown, a plan, evidence cards, and vault pages. Warm cream background, strong visual contrast between temporary output and durable accumulated knowledge.]**
 
 ## What CapyHome does not solve automatically
 

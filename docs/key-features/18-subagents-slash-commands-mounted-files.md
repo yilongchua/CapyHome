@@ -5,120 +5,154 @@
 
 ---
 
-It is easy to make multiple agents produce text in parallel.
+You ask three agents to audit an unfamiliar codebase in parallel.
 
-The harder problem is making that parallelism useful:
+Agent A generates a summary of its own view of `README.md`. Agent B summarizes a different view of the same `README.md`. Agent C writes a third summary. You get three different descriptions of one file, zero division of labor, and a context window full of duplicated effort.
 
-- each worker needs a clear scope;
-- independent work should run concurrently;
-- dependent work must wait;
-- the lead needs concise results rather than every transcript;
-- agents need access to the files the task is actually about;
-- writes need boundaries.
+Parallelism feels fast until it hits reality: **agents can't coordinate without shared context, and they can't inspect shared context without seeing the actual files.**
 
-CapyHome combines **Baby Capy subagents**, **slash commands**, and a mounted sandbox path to solve those coordination problems as one workflow.
+The hard problems are not "agents writing text faster." They are:
+
+- How does each worker get a clear, non-overlapping assignment?
+- How do independent tasks run in parallel, and dependent tasks wait?
+- How does the lead receive a *summary* instead of three transcripts?
+- How do agents access the files they actually need?
+- How are writes bounded—reviewed before they change the real project?
+
+CapyHome solves this with **Baby Capy subagents**, **slash commands**, and a mounted sandbox path.
 
 ## One lead, several focused workers
 
-The lead agent decomposes a task and can launch up to three subagents concurrently. Each worker receives its own context, tools, budget, timeout, and assignment.
+The lead agent decomposes the task and launches up to three subagents in parallel. Each receives a narrow assignment, its own context window, tools, timeout, and budget.
 
 ![Lead delegates, summaries flow back](./diagrams/08-baby-capy-subagents-d1.png)
 
-Context isolation is not merely a scaling trick. It protects reasoning quality.
+**Context isolation is not a scaling trick—it protects reasoning.**
 
-If one giant agent reads every file, every search result, and every intermediate thought, its context becomes an attic. Focused workers can inspect a narrow slice and return a useful summary. The lead preserves enough space to compare and synthesize.
+One giant agent that reads every file, every search result, every failed tool call becomes bloated. Its reasoning dilutes. Focused workers inspect a thin slice *deeply*, return a concise summary. The lead keeps space to compare and judge.
 
-This pattern fits research naturally:
+Real example—auditing an inherited codebase:
 
-- one worker maps architecture;
-- one traces data flow;
-- one audits tests and operational risks;
-- the lead reconciles their findings.
+- **Baby Capy 1** inspects architecture: directory structure, module boundaries, dependency graphs. Returns: architecture summary.
+- **Baby Capy 2** traces data flow: request ingress → response egress, state mutations, IO patterns. Returns: flow diagram and concerns.
+- **Baby Capy 3** audits tests and ops: coverage, failure modes, deployment risk. Returns: risk assessment and gaps.
+- **Lead** reads three summaries (not three transcripts), weighs contradictions, synthesizes the due-diligence report.
+
+Total time: parallel. Total effort: divided. Final artifact: trustworthy because it's assembled from focused investigation, not from one exhausted agent drowning in files.
 
 ## `/mount` connects the sandbox to real work
 
-Type `/mount`, choose a local folder, and CapyHome exposes it inside the agent environment at:
+Type `/mount`, choose a folder from your machine, and CapyHome mounts it inside the agent environment:
 
 ```text
 /mnt/user-data/mounted
 ```
 
-The virtual path gives tools a stable location while the middleware maps access back to the selected host directory.
+Now agents can:
+- Read your actual code, config, tests, docs—not abstractions or summaries
+- Trace real imports and dependencies, see how modules actually connect
+- Inspect naming conventions, commit history, file organization
+- Understand *why* the codebase is structured the way it is
 
-This is a better interaction for large projects than uploading files one by one. Folder structure is evidence. Imports, neighboring documents, configuration, and naming conventions all help an agent understand how the work fits together.
+This beats uploading files one by one. **Folder structure is evidence.** How modules are organized tells you about team structure, architectural assumptions, and code maturity.
 
 > **[Generate: Split-panel illustration using the character from `asset/CapyHome/capybara-logo.webp` as the base. Left panel: a cute cartoon capybara clicks on a native macOS-style folder picker dialog — a folder named "my-project/" is highlighted in blue, with an "Open" button in the bottom-right corner. Right panel: the same capybara's illustrated laptop screen shows a CapyHome sidebar file tree with a pinned node at the top labelled "/mnt/user-data/mounted" with a 📌 pin icon, expanding to show two child folders. Warm cream background, fully illustrated.]**
 
 ## Slash commands make the safety contract memorable
 
-The most useful commands form a staged workflow:
+The workflow unfolds in explicit stages:
 
 ```text
-/mount         Select the local folder
-/analyse       Build markdown mirrors and analysis artifacts
-/publishdocs   Write reviewed documentation back
+/mount         Select the local folder (now visible at /mnt/user-data/mounted)
+/analyse       Build markdown mirrors and analysis artifacts (read-only)
+/publishdocs   Write reviewed documentation back to mounted folder
 /handoff       Package context and continue in a fresh thread
-/compact       Reduce context deterministically
+/compact       Reduce context deterministically (useful for long sessions)
 /new           Start a fresh conversation in the workspace
 ```
 
-`/analyse` is deliberately read-only with respect to the mounted files. It creates staged artifacts such as a repository overview that you can inspect before anything is published back.
+`/analyse` is deliberately read-only. It generates artifacts—repository overviews, architecture diagrams, risk summaries—that you can inspect and revise before anything touches the real files.
 
 ![Stage -> review -> commit](./diagrams/05-slash-commands-mount-analyse-d1.png)
 
-The design goal is not to remove write capability. It is to make the moment of write-back explicit.
+**The goal is not to forbid writes.** It's to make write-back explicit and reversible. You see what will change before it changes. You approve before it lands. The mounted folder is not a black box—it's a staging area under your control.
 
-## An end-to-end example
+## An end-to-end example: Technical due diligence in 90 minutes
 
-Imagine inheriting an unfamiliar repository and needing a technical due-diligence report.
+You inherit a 50K-line codebase. You need a due-diligence report by tomorrow.
 
-1. Run `/mount` and select the repository.
-2. Run `/analyse` to produce a deterministic markdown mirror and architecture overview.
-3. Enter Plan Mode and ask for an assessment of architecture, security boundaries, test coverage, deployment risk, and maintainability.
-4. Approve the todo graph.
-5. Watch independent Baby Capys inspect separate concerns in parallel.
-6. Review the synthesized report and its source references.
-7. Run `/publishdocs` only when the documentation is ready to return to the mounted folder.
+1. Run `/mount` and select the repository root.
+2. Run `/analyse` to generate a markdown mirror of the codebase structure and a repository overview.
+3. Review the overview. It's accurate—agents read the actual code.
+4. Enter Plan Mode. Ask: "Assess architecture, security boundaries, test coverage, deployment risk, and maintainability. Return a due-diligence report with findings and references."
+5. Approve the todo graph: the plan breaks the assessment into parallel work streams.
+6. **Parallel phase** (20 minutes):
+   - Baby Capy 1 audits architecture and security boundaries.
+   - Baby Capy 2 traces data flow and operational risk.
+   - Baby Capy 3 examines test coverage and maintainability.
+7. Lead agent synthesizes three focused summaries into one coherent report, citing file paths and line numbers.
+8. Review the report. If revisions needed, the lead agent can revise specific sections without re-running parallel work.
+9. Run `/publishdocs` to write the report back to a `due-diligence.md` in the mounted folder.
 
-This is where parallel agents stop being theatre. They are operating over a shared project map, with distinct assignments and an explicit publishing boundary.
+This is where parallelism stops being theatre. Three focused workers, operating over one shared codebase, with distinct assignments and an explicit publish boundary you control.
 
 ## Why summaries flow back instead of transcripts
 
-Raw worker transcripts feel transparent, but they are a poor coordination format.
+Transcripts feel transparent. They're also useless.
 
-The lead needs:
+A lead agent drowning in three transcripts (each 5K tokens of thinking, tool calls, false starts, corrections) cannot synthesize. It can barely *read* them within a reasonable budget. Instead, each Baby Capy returns a structured summary:
 
-- what the worker examined;
-- what it concluded;
-- supporting file paths or sources;
-- uncertainty and unresolved questions;
-- the artifact it produced.
+```
+## What I examined
+- src/api/handlers/* (request routing)
+- tests/integration/api_test.py (coverage report)
+- docs/architecture.md (stated design)
 
-A concise result contract reduces token use and makes synthesis more reliable. The activity timeline can still show which worker ran and what tools it used, while the lead receives the information needed for the next decision.
+## What I concluded
+- Strong type safety via Pydantic validates 87% of inputs at boundary
+- Test coverage at 73% with gaps in error-handling paths
+- Three timeout risk points in database query layers
 
-## Why cap parallelism
+## Uncertainty
+- No observed load test results; unclear if concurrency limits will hold under stress
+- Legacy middleware layer (auth.py) lacks recent review
 
-More agents are not automatically faster.
+## Files to review
+- src/api/handlers/users.py:156-184 (connection pooling risk)
+- tests/error_cases_test.py (gaps identified)
+```
 
-Every additional worker increases model load, search concurrency, rate-limit pressure, and the chance of duplicated effort. On a local machine, it also competes with Docker, the browser, and the local model for memory.
+Concise. Actionable. The lead scans three summaries (1K tokens total), spots contradictions, synthesizes a coherent view, and makes decisions. The activity timeline shows which tools each worker used—transparency preserved, usability restored.
 
-A small concurrency limit encourages meaningful decomposition. Three well-scoped workers are often better than ten workers all discovering the same README.
+## Why cap parallelism at three
 
-The todo dependency graph supplies the other half of the answer: parallelize only tasks that are actually ready, then synthesize after their prerequisites complete.
+Ten agents are not automatically faster than three.
 
-## The impact: local files become a collaborative workspace
+Every additional worker:
+- Consumes model quota (tokens, rate limits)
+- Multiplies search concurrency (API throttling risk)
+- Duplicates effort (all reading the same `README.md`)
+- Consumes local memory (Docker, browser, GPU contention)
 
-Mounted folders change the agent from a detached answer generator into a collaborator that can understand the materials already surrounding the task.
+**Three focused workers beat ten diluted ones.** The limit forces meaningful decomposition. You must ask: "What is *truly* independent here?" instead of just parallelizing everything.
 
-Subagents make that understanding faster without forcing one context window to carry everything. Slash commands make the workflow legible. The sandbox and publish step keep the user's control visible.
+The todo dependency graph supplies the rest: run ready tasks in parallel, then synthesize after prerequisites complete. Wait for architecture assessment before evaluating security implications. That's not serial overhead—that's correct work.
 
-Together, these features support a strong division of labor:
+## The impact: from answer generator to collaborative inspector
 
-- the user chooses the folder and defines the goal;
-- the planner defines the work;
-- subagents investigate in parallel;
-- the lead integrates the evidence;
-- the user decides when results become part of the real project.
+Mounting your real files transforms the agent. It stops being a detached text producer and becomes a tool that *understands* the materials already on your desk.
+
+Subagents make that understanding parallel without forcing one context window to carry everything. Slash commands make the workflow legible: mount, analyze, review, publish. The sandbox keeps your control visible.
+
+The result is a clear division of labor:
+
+- **You** choose the folder and state the goal
+- **Planner** decomposes into independent work streams
+- **Baby Capys** investigate in parallel—architecture, data flow, tests, ops—each with a narrow scope
+- **Lead** reads three summaries (not three transcripts), synthesizes findings, produces a report
+- **You** decide when results land in the real folder
+
+You are never a passenger. The agents are never flying blind.
 
 ## Video script (45-60 seconds, vertical Short)
 
