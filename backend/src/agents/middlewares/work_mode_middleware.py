@@ -112,7 +112,7 @@ class WorkModeMiddlewareState(AgentState):
     phase_execution: NotRequired[dict | None]
 
 
-_KNOWN_PLAN_STATUSES = {"draft", "approved", "executing", "completed"}
+_KNOWN_PLAN_STATUSES = {"draft", "approved", "executing", "completed", "stopped"}
 
 
 def _normalize_plan_status(raw: Any) -> str:

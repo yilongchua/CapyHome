@@ -521,6 +521,14 @@ async def execute_plan(thread_id: str, request: ExecutePlanRequest) -> ExecutePl
 
         current_status = str(plan.get("status") or "draft").strip().lower() or "draft"
         auto_mode = resolve_auto_mode(values, request_auto_mode=request.auto_mode)
+        if current_status == "stopped":
+            return ExecutePlanResponse(
+                thread_id=thread_id,
+                acknowledged=False,
+                plan_id=plan_id,
+                plan_status=current_status,
+                status="conflict",
+            )
         if current_status in {"approved", "executing", "completed"}:
             if execute_plan_should_duplicate(plan, values):
                 return ExecutePlanResponse(

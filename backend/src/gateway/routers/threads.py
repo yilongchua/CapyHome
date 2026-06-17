@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import shutil
+from datetime import UTC, datetime
 from time import time
 from uuid import uuid4
 
@@ -245,6 +246,114 @@ def _stopped_work_mode(values: dict) -> dict | None:
     }
 
 
+def _stopped_plan(values: dict, *, stopped_at: str) -> dict | None:
+    plan = values.get("plan")
+    if not isinstance(plan, dict):
+        return None
+    if str(plan.get("status") or "").strip().lower() != "executing":
+        return None
+    return {
+        **plan,
+        "status": "stopped",
+        "awaiting_execution_approval": False,
+        "execution_stopped": True,
+        "execution_stopped_at": stopped_at,
+        "updated_at": stopped_at,
+    }
+
+
+def _stopped_plan_history(values: dict, plan: dict | None, *, stopped_at: str) -> list[dict] | None:
+    history = values.get("plan_history")
+    if not isinstance(history, list) or not plan:
+        return None
+    plan_id = str(plan.get("plan_id") or "").strip()
+    if not plan_id:
+        return None
+
+    changed = False
+    next_history: list[dict] = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("plan_id") or "").strip() == plan_id:
+            next_history.append({**item, "status": "stopped", "stopped_at": stopped_at})
+            changed = True
+        else:
+            next_history.append(item)
+    return next_history if changed else None
+
+
+def _reset_in_progress_todos(values: dict) -> tuple[list[dict] | None, dict | None]:
+    todos = values.get("todos")
+    next_todos: list[dict] | None = None
+    if isinstance(todos, list):
+        changed = False
+        next_items: list[dict] = []
+        for item in todos:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status") or "").strip().lower() == "in_progress":
+                next_items.append({**item, "status": "pending"})
+                changed = True
+            else:
+                next_items.append(item)
+        if changed:
+            next_todos = next_items
+
+    todo_graph = values.get("todo_graph")
+    next_todo_graph: dict | None = None
+    if isinstance(todo_graph, dict):
+        nodes = todo_graph.get("nodes")
+        if isinstance(nodes, list):
+            changed = False
+            next_nodes: list[dict] = []
+            for item in nodes:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("status") or "").strip().lower() == "in_progress":
+                    next_nodes.append({**item, "status": "pending"})
+                    changed = True
+                else:
+                    next_nodes.append(item)
+            if changed:
+                next_todo_graph = {**todo_graph, "nodes": next_nodes}
+
+    return next_todos, next_todo_graph
+
+
+def _stopped_phase_execution(values: dict) -> dict | None:
+    phase_execution = values.get("phase_execution")
+    if not isinstance(phase_execution, dict):
+        return None
+    phase_results = phase_execution.get("phase_results")
+    if not isinstance(phase_results, list):
+        return None
+
+    changed = False
+    next_results: list[dict] = []
+    for item in phase_results:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "").strip().lower() == "in_progress":
+            next_results.append({**item, "status": "pending"})
+            changed = True
+        else:
+            next_results.append(item)
+
+    if not changed:
+        return None
+
+    return {
+        **phase_execution,
+        "phase_results": next_results,
+        "pending_sse_events": [],
+        "in_progress_started_at": {},
+        "ephemeral_instruction_text": None,
+        "ephemeral_instruction_todo_id": None,
+        "stopped": True,
+    }
+
+
 _ACTIVE_RUN_STATUSES = {"running", "pending"}
 
 
@@ -305,6 +414,21 @@ async def hard_stop_thread(thread_id: str) -> HardStopThreadResponse:
         stopped_work_mode = _stopped_work_mode(values)
         if stopped_work_mode is not None:
             update_payload["work_mode"] = stopped_work_mode
+        stopped_at = datetime.now(UTC).isoformat()
+        stopped_plan = _stopped_plan(values, stopped_at=stopped_at)
+        if stopped_plan is not None:
+            update_payload["plan"] = stopped_plan
+        stopped_history = _stopped_plan_history(values, stopped_plan, stopped_at=stopped_at)
+        if stopped_history is not None:
+            update_payload["plan_history"] = stopped_history
+        next_todos, next_todo_graph = _reset_in_progress_todos(values)
+        if next_todos is not None:
+            update_payload["todos"] = next_todos
+        if next_todo_graph is not None:
+            update_payload["todo_graph"] = next_todo_graph
+        stopped_phase_execution = _stopped_phase_execution(values)
+        if stopped_phase_execution is not None:
+            update_payload["phase_execution"] = stopped_phase_execution
 
         if update_payload:
             await client.threads.update_state(thread_id, update_payload)

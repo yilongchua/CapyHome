@@ -57,7 +57,7 @@ class PlanExecutionGateState(AgentState):
 
 def _normalize_plan_status(raw: Any) -> str:
     value = str(raw or "").strip().lower()
-    if value in {"draft", "approved", "executing", "completed"}:
+    if value in {"draft", "approved", "executing", "completed", "stopped"}:
         return value
     if value:
         logger.warning("Unknown plan status %r coerced to 'draft'", value)
@@ -112,8 +112,15 @@ class PlanExecutionGateMiddleware(AgentMiddleware[PlanExecutionGateState]):
         if not isinstance(plan, dict):
             return None
 
-        if _normalize_plan_status(plan.get("status")) != "draft":
+        plan_status = _normalize_plan_status(plan.get("status"))
+        if plan_status not in {"draft", "stopped"}:
             return None
+
+        if plan_status == "stopped":
+            return self._build_block_command(
+                request,
+                "[plan_gate] Plan execution was stopped by the user. Create or approve a new plan before running execution tools again.",
+            )
 
         tool_name = str(request.tool_call.get("name") or "")
 

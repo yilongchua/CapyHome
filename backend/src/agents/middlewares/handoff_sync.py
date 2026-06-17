@@ -251,7 +251,7 @@ def _collect_execution_notes(state: dict[str, Any]) -> list[str]:
 
 def _normalize_plan_status(raw: Any) -> str:
     value = str(raw or "").strip().lower()
-    if value in {"draft", "approved", "executing", "completed"}:
+    if value in {"draft", "approved", "executing", "completed", "stopped"}:
         return value
     return "draft"
 
@@ -278,6 +278,8 @@ def _current_status_line(nodes: list[dict[str, Any]], plan: dict[str, Any], file
         return f"Plan status: `{status}`. In progress: {completed}/{total} todos marked complete."
     if status == "completed" and completed >= total:
         return f"Plan status: `{status}`. Execution complete with {completed}/{total} todos done."
+    if status == "stopped":
+        return f"Plan status: `{status}`. Execution was stopped by the user with {completed}/{total} todos complete."
     if completed >= total:
         return f"Plan status: `{status}`. All {completed}/{total} todos marked complete."
     if completed > 0:

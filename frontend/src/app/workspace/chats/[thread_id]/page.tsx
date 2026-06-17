@@ -345,10 +345,30 @@ function ChatPageContent({
   const { runningRun } = useRejoinRunningRun(isNewThread ? null : threadId, thread, {
     pollBump: runPollBump,
   });
+  const [workModeStopAcknowledged, setWorkModeStopAcknowledged] = useState(false);
   const hasPendingToolResults = useMemo(
     () => hasPendingToolResultsInCurrentTurn(thread.messages),
     [thread.messages],
   );
+  const isWorkModeStopped =
+    workModeStopAcknowledged ||
+    thread.values.work_mode?.stopped === true ||
+    thread.values.plan?.execution_stopped === true;
+  const chatInputStatus =
+    isExecutingWorkflow || (!isWorkModeStopped && (thread.isLoading || hasPendingToolResults))
+      ? "streaming"
+      : "ready";
+
+  useEffect(() => {
+    setWorkModeStopAcknowledged(false);
+  }, [threadId]);
+
+  useEffect(() => {
+    const planStatus = String(thread.values.plan?.status ?? "").toLowerCase();
+    if (thread.values.work_mode?.active === true || planStatus === "executing") {
+      setWorkModeStopAcknowledged(false);
+    }
+  }, [thread.values.plan?.status, thread.values.work_mode?.active]);
 
   const handleStop = useCallback(async () => {
     if (isExecutingWorkflow) {
@@ -362,6 +382,9 @@ function ChatPageContent({
       }
     }
     await queueControls.stop();
+    if (!isExecutingWorkflow) {
+      setWorkModeStopAcknowledged(true);
+    }
   }, [isExecutingWorkflow, queueControls, refreshWorkflowStatus, threadId]);
   const handleContextChange = useCallback(
     (nextContext: Parameters<typeof setSettings>[1]) => {
@@ -1294,7 +1317,7 @@ function ChatPageContent({
                     threadId={threadId}
                     newChatHref={newChatHref}
                     autoFocus={isNewThread}
-                    status={thread.isLoading || hasPendingToolResults || isExecutingWorkflow ? "streaming" : "ready"}
+                    status={chatInputStatus}
                     context={settings.context}
                     extraHeader={
                       isNewThread && (

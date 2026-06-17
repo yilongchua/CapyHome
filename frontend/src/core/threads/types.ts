@@ -26,6 +26,8 @@ export interface WorkModeState {
   current_phase_index?: number;
   total_phases?: number;
   phases_completed?: number;
+  stopped?: boolean;
+  stopped_at?: number;
 }
 
 export interface PhaseExecutionState {
@@ -46,7 +48,7 @@ export interface HandoffMetaState {
 
 export interface PlanState {
   plan_id?: string;
-  status?: "draft" | "approved" | "executing" | "completed" | string;
+  status?: "draft" | "approved" | "executing" | "completed" | "stopped" | string;
   title?: string;
   objective?: string;
   summary?: string;
@@ -88,6 +90,8 @@ export interface PlanState {
   created_at?: string;
   approved_at?: string;
   execution_started_at?: string;
+  execution_stopped?: boolean;
+  execution_stopped_at?: string;
   completed_at?: string;
 }
 

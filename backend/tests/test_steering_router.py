@@ -344,6 +344,20 @@ def test_execute_plan_stale_handoff_flag_without_work_still_accepts(monkeypatch)
     assert len(runs.create_calls) == 1
 
 
+def test_execute_plan_conflicts_for_stopped_plan(monkeypatch):
+    threads = _ThreadsClient(values={"plan": {"plan_id": "plan-1", "status": "stopped"}})
+    runs = _RunsClient()
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads, runs))
+
+    response = asyncio.run(execute_plan("thread-1", ExecutePlanRequest(plan_id="plan-1")))
+
+    assert response.acknowledged is False
+    assert response.status == "conflict"
+    assert response.plan_status == "stopped"
+    assert runs.create_calls == []
+    assert threads.calls == []
+
+
 def test_execute_plan_conflict_when_plan_missing(monkeypatch):
     threads = _ThreadsClient(values={})
     monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(threads))

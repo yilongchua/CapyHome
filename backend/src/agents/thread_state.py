@@ -195,6 +195,45 @@ class QualityGateState(TypedDict, total=False):
     fail_reasons: list[str]
     repair_passes: int
     checked_path: str
+    repair_passes_by_path: dict[str, int]
+
+
+def merge_quality_gate(existing: QualityGateState | None, new: QualityGateState | None) -> QualityGateState | None:
+    """Merge quality-gate updates from parallel artifact writes.
+
+    Work Mode often writes multiple report files in one model step. Each
+    successful write emits a quality_gate update, so this state key needs a
+    reducer just like artifacts/messages do.
+    """
+    if existing is None:
+        return new
+    if new is None:
+        return existing
+
+    merged: QualityGateState = {**existing, **new}
+
+    existing_repair_by_path = existing.get("repair_passes_by_path")
+    new_repair_by_path = new.get("repair_passes_by_path")
+    if isinstance(existing_repair_by_path, dict) or isinstance(new_repair_by_path, dict):
+        merged["repair_passes_by_path"] = {
+            **(existing_repair_by_path if isinstance(existing_repair_by_path, dict) else {}),
+            **(new_repair_by_path if isinstance(new_repair_by_path, dict) else {}),
+        }
+
+    existing_reasons = existing.get("fail_reasons")
+    new_reasons = new.get("fail_reasons")
+    if isinstance(existing_reasons, list) or isinstance(new_reasons, list):
+        reasons: list[str] = []
+        for reason in [
+            *(existing_reasons if isinstance(existing_reasons, list) else []),
+            *(new_reasons if isinstance(new_reasons, list) else []),
+        ]:
+            reason_text = str(reason)
+            if reason_text not in reasons:
+                reasons.append(reason_text)
+        merged["fail_reasons"] = reasons
+
+    return merged
 
 
 class HandoffMetaState(TypedDict, total=False):
@@ -345,7 +384,7 @@ class ThreadState(AgentState):
     # Work Mode execution tracking (set by WorkModeMiddleware)
     work_mode: NotRequired[WorkModeState | None]
     phase_execution: NotRequired[PhaseExecutionState | None]
-    quality_gate: NotRequired[QualityGateState | None]
+    quality_gate: Annotated[QualityGateState | None, merge_quality_gate]
     handoff_meta: NotRequired[HandoffMetaState | None]
     deferred_compaction: NotRequired[bool]
     deferred_compaction_message_count: NotRequired[int | None]
