@@ -8,7 +8,7 @@ from src.agents.middlewares.todo_dag_middleware import (
     collect_clarification_blocked_todo_ids,
     compute_effective_ready_ids,
 )
-from src.agents.thread_state import ThreadState, merge_clarifications, replace_bool
+from src.agents.thread_state import ThreadState, merge_clarifications, merge_quality_gate, replace_bool
 
 # --- helper functions ------------------------------------------------------
 
@@ -109,3 +109,65 @@ def test_clarification_pending_allows_parallel_true_writes():
     result = graph_builder.compile().invoke({})
 
     assert result["clarification_pending"] is True
+
+
+def test_quality_gate_allows_parallel_artifact_writes():
+    def _node_a(_state: ThreadState) -> dict:
+        return {
+            "quality_gate": {
+                "status": "passed",
+                "fail_reasons": [],
+                "checked_path": "/mnt/user-data/workspace/a.md",
+            }
+        }
+
+    def _node_b(_state: ThreadState) -> dict:
+        return {
+            "quality_gate": {
+                "status": "failed",
+                "fail_reasons": ["Missing executive summary"],
+                "repair_passes": 1,
+                "repair_passes_by_path": {"/mnt/user-data/workspace/b.md": 1},
+                "checked_path": "/mnt/user-data/workspace/b.md",
+            }
+        }
+
+    graph_builder = StateGraph(ThreadState)
+    graph_builder.add_node("a", _node_a)
+    graph_builder.add_node("b", _node_b)
+    graph_builder.add_edge(START, "a")
+    graph_builder.add_edge(START, "b")
+    graph_builder.add_edge("a", END)
+    graph_builder.add_edge("b", END)
+
+    result = graph_builder.compile().invoke({})
+
+    assert result["quality_gate"]["fail_reasons"] == ["Missing executive summary"]
+    assert result["quality_gate"]["repair_passes_by_path"] == {"/mnt/user-data/workspace/b.md": 1}
+
+
+def test_merge_quality_gate_dedupes_fail_reasons_and_merges_repair_counts():
+    result = merge_quality_gate(
+        {
+            "status": "failed",
+            "fail_reasons": ["Duplicate table rows"],
+            "repair_passes_by_path": {"/mnt/user-data/workspace/a.md": 1},
+            "checked_path": "/mnt/user-data/workspace/a.md",
+        },
+        {
+            "status": "failed",
+            "fail_reasons": ["Duplicate table rows", "Missing executive summary"],
+            "repair_passes_by_path": {"/mnt/user-data/workspace/b.md": 2},
+            "checked_path": "/mnt/user-data/workspace/b.md",
+        },
+    )
+
+    assert result == {
+        "status": "failed",
+        "fail_reasons": ["Duplicate table rows", "Missing executive summary"],
+        "repair_passes_by_path": {
+            "/mnt/user-data/workspace/a.md": 1,
+            "/mnt/user-data/workspace/b.md": 2,
+        },
+        "checked_path": "/mnt/user-data/workspace/b.md",
+    }

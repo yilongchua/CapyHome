@@ -217,6 +217,47 @@ def test_hard_stop_patches_dangling_tool_calls(monkeypatch: pytest.MonkeyPatch):
     assert "[run_stopped]" in patched_messages[-1]["content"]
 
 
+def test_hard_stop_clears_work_mode_progress_state(monkeypatch: pytest.MonkeyPatch):
+    executor_module = importlib.import_module("src.subagents.executor")
+    client = _ThreadsClient(
+        values={
+            "messages": [],
+            "work_mode": {"active": True, "current_phase_index": 0},
+            "plan": {"plan_id": "plan-1", "status": "executing", "awaiting_execution_approval": False},
+            "plan_history": [{"plan_id": "plan-1", "title": "Plan", "status": "executing"}],
+            "todos": [{"id": "todo-1", "content": "Do work", "status": "in_progress"}],
+            "todo_graph": {"nodes": [{"id": "todo-1", "content": "Do work", "status": "in_progress"}]},
+            "phase_execution": {
+                "current_phase": 0,
+                "phase_results": [{"phase_index": 0, "todo_id": "todo-1", "content": "Do work", "status": "in_progress"}],
+                "pending_sse_events": [{"type": "phase_started"}],
+                "in_progress_started_at": {"todo-1": "2026-06-16T04:25:03Z"},
+                "ephemeral_instruction_text": "Execute todo-1",
+                "ephemeral_instruction_todo_id": "todo-1",
+            },
+        }
+    )
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda url: _Client(client))
+    monkeypatch.setattr(executor_module, "cancel_background_tasks_for_thread", lambda thread_id: 0)
+
+    response = asyncio.run(threads.hard_stop_thread("thread-1"))
+
+    assert response.state_patched is True
+    updated = client.updated[0]
+    assert updated["work_mode"]["active"] is False
+    assert updated["work_mode"]["stopped"] is True
+    assert updated["plan"]["status"] == "stopped"
+    assert updated["plan"]["execution_stopped"] is True
+    assert updated["plan_history"][0]["status"] == "stopped"
+    assert updated["todos"][0]["status"] == "pending"
+    assert updated["todo_graph"]["nodes"][0]["status"] == "pending"
+    assert updated["phase_execution"]["phase_results"][0]["status"] == "pending"
+    assert updated["phase_execution"]["pending_sse_events"] == []
+    assert updated["phase_execution"]["in_progress_started_at"] == {}
+    assert updated["phase_execution"]["ephemeral_instruction_text"] is None
+    assert updated["phase_execution"]["ephemeral_instruction_todo_id"] is None
+
+
 def test_hard_stop_does_not_duplicate_existing_tool_results(monkeypatch: pytest.MonkeyPatch):
     executor_module = importlib.import_module("src.subagents.executor")
     client = _ThreadsClient(

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 def _normalize_plan_status(raw: object) -> str:
     value = str(raw or "").strip().lower()
-    if value in {"draft", "approved", "executing", "completed"}:
+    if value in {"draft", "approved", "executing", "completed", "stopped"}:
         return value
     return "draft"
 
@@ -282,10 +282,11 @@ def task_tool(
     plan_state = runtime.state.get("plan") if runtime and runtime.state else None
     if isinstance(plan_state, dict) and "plan" not in config.modes:
         plan_status = _normalize_plan_status(plan_state.get("status"))
-        if plan_status == "draft":
+        if plan_status in {"draft", "stopped"}:
+            reason = "was stopped by the user" if plan_status == "stopped" else "is still in draft state"
             return (
-                "Task execution is gated because the current plan is still in draft state. "
-                "Use the explicit execute-plan action first, then retry."
+                f"Task execution is gated because the current plan {reason}. "
+                "Create or approve a new plan first, then retry."
             )
 
     skills_section = get_skills_prompt_section()

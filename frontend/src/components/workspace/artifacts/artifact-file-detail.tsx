@@ -128,6 +128,9 @@ export function ArtifactFileDetail({
   const isJsonFile = useMemo(() => {
     return filepath.toLowerCase().endsWith(".json");
   }, [filepath]);
+  const isWorkflowJson = useMemo(() => {
+    return getFileName(filepath).toLowerCase() === "workflow.json";
+  }, [filepath]);
   const isSqliteFile = useMemo(() => {
     const lower = filepath.toLowerCase();
     return lower.endsWith(".sqlite") || lower.endsWith(".sqlite3") || lower.endsWith(".db");
@@ -217,11 +220,12 @@ export function ArtifactFileDetail({
   useEffect(() => {
     if (isEditableJson) {
       setJsonDraft(displayContent);
+      setIsJsonEditing(isWorkflowJson);
     } else {
       setJsonDraft("");
       setIsJsonEditing(false);
     }
-  }, [displayContent, isEditableJson]);
+  }, [displayContent, isEditableJson, isWorkflowJson]);
 
   const handleInstallSkill = useCallback(async () => {
     if (isInstalling) return;
@@ -627,7 +631,7 @@ export function ArtifactFileDetail({
               wrapLines
             />
           )}
-          {!shouldRenderPlan && !isCodeFile && (
+          {!shouldRenderPlan && !isCodeFile && !isSqliteFile && (
             <iframe
               className="size-full"
               src={urlOfArtifact({ filepath, threadId, isMock })}
