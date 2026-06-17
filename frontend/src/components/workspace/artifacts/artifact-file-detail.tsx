@@ -661,6 +661,7 @@ function ArtifactSqlitePreview({
 
   useEffect(() => {
     const controller = new AbortController();
+    let requestSettled = false;
     const run = async () => {
       setIsLoading(true);
       setError(null);
@@ -691,13 +692,18 @@ function ArtifactSqlitePreview({
         setPreview(null);
         setError(err instanceof Error ? err.message : "Failed to preview SQLite database.");
       } finally {
+        requestSettled = true;
         if (!controller.signal.aborted) {
           setIsLoading(false);
         }
       }
     };
     void run();
-    return () => controller.abort();
+    return () => {
+      if (!requestSettled && !controller.signal.aborted) {
+        controller.abort(new DOMException("SQLite preview request cancelled.", "AbortError"));
+      }
+    };
   }, [filepath, selectedTable, threadId]);
 
   if (isLoading && !preview) {
