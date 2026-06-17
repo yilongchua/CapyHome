@@ -435,8 +435,12 @@ def parse_child_result(raw_text: str, workflow: dict[str, Any]) -> tuple[str, di
     if not isinstance(parsed, dict):
         return "failed", None, "result_json_not_object"
 
-    output_schema = workflow["row_task"].get("output_schema")
-    required_fields = list(output_schema.keys()) if isinstance(output_schema, dict) else []
+    output_schema = workflow["row_task"].get("output_schema") or {}
+    if isinstance(output_schema, dict) and "properties" in output_schema:
+        props = output_schema.get("properties") or {}
+        required_fields = list(output_schema.get("required") or props.keys())
+    else:
+        required_fields = list(output_schema.keys()) if isinstance(output_schema, dict) else []
     missing = [field for field in required_fields if field not in parsed]
     if missing:
         return "failed", parsed, f"missing_required_fields: {', '.join(missing)}"
@@ -555,8 +559,11 @@ def export_output_csv(thread_id: str, workflow: dict[str, Any]) -> str:
     db_path = workflow_sqlite_path(thread_id)
     output_path = resolve_thread_virtual_path(thread_id, workflow["runtime"]["output_csv"])
     source_columns = list(workflow["source"].get("columns") or [])
-    output_schema = workflow["row_task"].get("output_schema")
-    output_columns = list(output_schema.keys()) if isinstance(output_schema, dict) else []
+    output_schema = workflow["row_task"].get("output_schema") or {}
+    if isinstance(output_schema, dict) and "properties" in output_schema:
+        output_columns = list((output_schema.get("properties") or {}).keys())
+    else:
+        output_columns = list(output_schema.keys()) if isinstance(output_schema, dict) else []
     columns = [*source_columns, *[col for col in output_columns if col not in source_columns]]
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
