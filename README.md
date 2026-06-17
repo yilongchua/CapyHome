@@ -268,7 +268,7 @@ Bring your own. OpenAI, Anthropic, Google Gemini and DeepSeek work out of the bo
 <details>
 <summary><b>Is my data private?</b></summary>
 
-It can be entirely local. CapyHome is self-hosted under the MIT license and ships a local research stack (SearXNG + Onyx + crawl4ai). Nothing leaves your machine unless you point it at a cloud model or service.
+It can be entirely local. CapyHome is self-hosted under the MIT license and ships a local research stack (SearXNG + crawl4ai). Nothing leaves your machine unless you point it at a cloud model or service.
 </details>
 
 <details>
