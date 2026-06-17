@@ -286,6 +286,8 @@ export function ArtifactFileList({
                   download: true,
                 })}
                 target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
               >
                 <Button variant="ghost" size="icon-sm" title={t.common.download}>
                   <DownloadIcon className="size-3.5" />

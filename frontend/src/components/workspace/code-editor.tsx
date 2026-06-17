@@ -10,6 +10,7 @@ import { languages } from "@codemirror/language-data";
 import { basicLightInit } from "@uiw/codemirror-theme-basic";
 import { monokaiInit } from "@uiw/codemirror-theme-monokai";
 import CodeMirror from "@uiw/react-codemirror";
+import { EditorView } from "codemirror";
 import { useTheme } from "next-themes";
 import { useMemo } from "react";
 
@@ -71,8 +72,9 @@ export function CodeEditor({
         codeLanguages: languages,
       }),
       python(),
+      ...(wrapLines ? [EditorView.lineWrapping] : []),
     ];
-  }, []);
+  }, [wrapLines]);
 
   if (readonly && wrapLines) {
     return (
