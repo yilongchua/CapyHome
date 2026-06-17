@@ -5,96 +5,157 @@
 
 ---
 
-Most AI interfaces offer one interaction pattern: type a request and hope the system chooses the right amount of thinking.
+You ask an AI: "Help me summarize these notes into a comparison table." It starts immediately. Two minutes later, you have it. The cost of being wrong? Nothing. You edit the columns and move on.
 
-That is convenient, but it hides an important decision. The cost of a wrong turn is not constant.
+Next request: "Should we acquire Company X?" You want an analysis of market position, runway, technology moat, team depth, and customer concentration. An AI starts immediately, generates a sprawling search strategy, makes three assumptions about what "acquisition risk" means, runs for ninety minutes, and hands you analysis that might be completely wrong *because it misunderstood the question.*
 
-Drafting five title ideas is cheap to redo. A multi-hour market analysis can waste dozens of searches if the framing is wrong. An overnight research run should not pause at 2:00 a.m. to ask whether it may choose the option it already recommends.
+These are not the same problem. The cost of being wrong is not constant.
+
+- Drafting five title ideas: cheap to redo.
+- A multi-hour market analysis: wastes dozens of searches if the framing is wrong.
+- An overnight research run: should not pause at 2:00 a.m. asking permission to choose what it already recommends.
+
+CapyHome makes that cost visible through three distinct modes.
 
 CapyHome makes that decision visible through **Work Mode**, **Plan Mode**, and the **Auto Mode** modifier.
 
-## Work Mode: when the path is already clear
+## Work Mode: straight execution when the path is already clear
 
-Use Work Mode for direct tasks:
+Use Work Mode when you know what you want and there is no room for misinterpretation:
 
-- summarize this folder;
-- turn these notes into a table;
-- research three named competitors;
-- fix a specific error;
-- produce a report from an agreed outline.
+- Summarize this folder of documentation
+- Turn these notes into a comparison table
+- Research three named competitors and extract pricing models
+- Fix the error at line 156 in this file
+- Generate a report using this outline I'm providing
 
-The agent receives its full toolset and can delegate parallel work immediately. There is little value in generating a planning ceremony when the requested output and path are already concrete.
+The agent receives its full toolset and starts immediately. No planning ceremony, no clarification loop. You get momentum—one intent, execution begins.
 
-The benefit is momentum. The user expresses intent once and watches execution begin.
+**When to use:** You already know the dimensions that matter, the output format is clear, the cost of a wrong assumption is near zero.
 
-## Plan Mode: when framing is the real work
+**What happens:** The agent researches, synthesizes, or edits in parallel subagents, and returns an artifact two minutes later. You revise if needed. Done.
 
-Use Plan Mode when the question is broad, consequential, or underspecified:
+**Real example:** "Compare storage costs across AWS, GCP, and Azure for 100 TB/month transfer." You know the comparison axes. The agent knows where to find current pricing. No ambiguity. Work Mode is right.
+
+## Plan Mode: catch misunderstandings before you waste hours
+
+Use Plan Mode when the question is broad, consequential, or the stakes are high:
 
 - Which market should we enter?
 - Is this technology ready for production?
 - What caused a company's performance to diverge from competitors?
 - How should we redesign this system?
 
-Before execution, CapyHome creates an editable `plan.md` containing the objective, assumptions, constraints, risks, acceptance criteria, and a todo graph.
+Here is the difference: **Work Mode starts researching. Plan Mode starts thinking.**
+
+The system produces an editable `plan.md`:
+
+```
+## Objective
+Assess whether we should acquire Company X
+
+## Key assumptions we're making
+- "Acquire" means full integration, not just IP licensing
+- We care about margins 12+ months post-close, not year-1 revenue
+- Customer concentration risk is as important as tech risk
+
+## Research streams (parallel)
+1. Market position and growth context
+2. Customer concentration and retention
+3. Technology moat evaluation
+4. Integration risk assessment
+
+## Acceptance criteria
+- Evidence for/against each axis
+- 3-5 comparables
+- Risk summary for board discussion
+```
+
+You read it. You spot: "Wait, we don't care about year-1 revenue—we care about customer retention." You edit the plan. Now the research runs with the right framing.
 
 ![The Planner -> Generator -> Evaluator loop](./diagrams/03-plan-and-work-mode-d1.png)
 
-The todo graph matters because research is not a flat checklist. Some questions can run in parallel; others depend on earlier findings. A dependency-aware plan gives the system a way to move quickly without synthesizing before the evidence exists.
+The todo graph matters because research is not a flat checklist. Some questions can run in parallel (market context, tech moat). Others depend on earlier findings (integration risk depends on knowing who the customers are). A dependency-aware plan lets the system move fast without synthesizing prematurely.
 
-Planning also creates a valuable pause: you can catch a misunderstanding while it is still one paragraph in a file instead of after twenty tool calls.
+**The real value of Plan Mode:** catching a misunderstanding when it is one sentence in a file costs nothing. Catching it after 90 minutes of research costs ninety minutes.
 
-## Auto Mode: when the plan is trusted but your attention is scarce
+## Auto Mode: hands-off execution for familiar workflows
 
-Auto Mode is not a third reasoning style. It is a modifier that removes selected waiting points from Plan Mode.
+Auto Mode is not a reasoning style. It is a modifier that removes selected waiting points from Plan Mode.
 
-Normally, the system may wait for plan approval or clarification. With Auto Mode enabled, it can auto-approve the plan and choose a clarification's recommended option. Those decisions remain marked in the transcript.
+**Scenario:** You set up an Autoresearch run about robotics adoption trends at 6:00 p.m. You want the research to run overnight. Plan Mode would pause at 9:00 p.m. asking, "Shall I approve the plan?" and at 2:00 a.m. asking, "Should I choose the recommended search direction?"
+
+Auto Mode removes those human-attendance gates:
+- Auto-approves the plan if it looks reasonable
+- Chooses the system's recommended option when clarification is needed
+- Records every decision in the transcript (fully auditable)
 
 ![Where Auto Mode removes the gates](./diagrams/04-auto-mode-d1.png)
 
-This is a narrower and more useful definition of autonomy than "let the AI do anything." The execution process remains the same. Auto Mode changes who must be present at predictable gates.
+This is not "let the AI do anything." The execution process, error checking, and vault ingestion remain identical. Auto Mode changes who must be *present* at predictable gates, not who controls the boundaries.
 
-The result is a practical trust ladder:
+The practical trust ladder:
 
 | Situation | Choice | Why |
 |---|---|---|
-| Clear and reversible | Work Mode | Start immediately |
-| Ambiguous or high-impact | Plan Mode | Review framing before spending effort |
-| Complex but familiar | Plan + Auto | Keep structure, remove routine waiting |
+| **Clear, reversible** | Work Mode | Start immediately, results in minutes |
+| **Ambiguous, high-stakes** | Plan Mode | Review framing before spending effort |
+| **Complex but trusted** | Plan + Auto | Approve plan once, run overnight unattended |
 
-## A research example in all three modes
+Auto Mode is useful precisely because it *doesn't* pretend to remove your agency. You still approve the plan. The system just doesn't need you staring at the screen while it runs.
 
-Request:
+## The same request, three different executions
 
-> Compare three local LLM serving options for a 64 GB Mac.
+**Request:** "Compare three local LLM serving options for a 64 GB Mac."
 
-In **Work Mode**, the agent can research the named options and produce a comparison directly. This is appropriate if you already know the dimensions that matter.
+### Work Mode (5 minutes, you return a comparison table)
+The agent already knows what matters: speed, ease of setup, model quality. It searches, compiles, returns a table. You tweak the columns. Done. Good when you're familiar with the trade-offs.
 
-In **Plan Mode**, it may first clarify workload, model size, concurrency, Apple Silicon support, and whether ease of use or throughput matters more. You can edit the plan before execution.
+### Plan Mode (20 minutes: 10 to review, 10 to research)
+The system pauses to clarify:
+- Workload: long context chains or quick chat?
+- Concurrency: single user or multi-user?
+- Model size: 7B parameter or 70B?
+- Priority: ease of use or raw throughput?
 
-In **Plan + Auto**, it can produce the same structured plan, accept recommended defaults, execute the independent research in parallel, and leave a complete audit trail for the morning.
+You review the plan, change "priority: throughput" to "priority: ease of use" because you're testing, not production. Now the research focuses on the right axes. Then execution runs in parallel.
 
-No mode is universally superior. The right question is: **where would human attention change the outcome enough to justify waiting?**
+### Plan + Auto (overnight, results when you wake up)
+Same plan as Plan Mode, but:
+- Auto-approves the plan at 6:00 p.m. (you reviewed it before leaving)
+- Accepts recommended defaults for clarifications
+- Runs parallel research through the night
+- Wakes you with a complete audit trail and comparison
 
-## Why explicit modes beat invisible complexity detection
+You never wait for the system. The system respects your planned approval.
 
-An agent can guess whether a task is complex, but complexity is not the only variable.
+---
 
-A short request may carry legal or financial consequences. A long request may be a routine workflow the user has run ten times. The user knows the stakes and desired involvement better than a classifier inferring them from word count.
+**The principle:** The right mode depends on where human attention *actually changes the outcome.* Not on how hard the task *looks*.
 
-Explicit modes make control predictable. The system does not suddenly interrupt a Work Mode task because it decided to "upgrade" the workflow. The user selects the contract.
+## Why explicit modes beat hidden complexity detection
 
-## The wider impact: autonomy becomes adjustable
+An agent can *guess* whether a task is complex. But complexity is not the only thing that matters.
 
-The usual debate frames AI systems as either assistants or autonomous agents.
+"Reformat this CSV into a table" is short but stakes are zero—Work Mode is right. "Should we enter the Asian market?" is also short but stakes are huge—Plan Mode is right.
 
-In practice, useful systems need adjustable autonomy:
+Word count tells you nothing. Only the user knows whether human attention will change the outcome.
 
-- high supervision while discovering a workflow;
-- lighter supervision once the workflow is understood;
-- renewed supervision when the stakes or context change.
+Explicit modes give you predictability. The system does not suddenly "upgrade" a Work Mode task to Plan Mode because it decided the prompt looks complex. You make the choice. You keep control.
 
-Plan, Work, and Auto provide that progression without requiring three different products. You can earn trust task by task.
+## The wider impact: autonomy is not binary
+
+The old debate: assistant or autonomous agent?
+
+The real life: systems that *adjust* autonomy based on context.
+
+**Week 1** (discovering a workflow): Plan Mode. You review framing for every task. You catch misunderstandings early.
+
+**Week 4** (confident in the workflow): Plan + Auto. You approve once. The system runs the familiar workflow unattended.
+
+**New domain arrives**: Back to Plan Mode. Stakes are high, context is fresh.
+
+Three modes in one system. No need to switch products. You earn trust task by task, domain by domain. Autonomy grows when you have evidence it's safe, shrinks when context changes.
 
 ## Video script (45-60 seconds, vertical Short)
 
