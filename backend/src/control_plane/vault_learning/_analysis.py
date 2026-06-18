@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from src.config import get_app_config
-from src.control_plane.vault_learning._prompts import ANALYZE_SOURCE_PROMPT, GENERATE_PAGE_PROMPT
+from src.control_plane.vault_learning._prompts import ANALYZE_SOURCE_PROMPT
 from src.models.factory import create_chat_model
 
 
@@ -96,17 +96,15 @@ class AnalysisMixin:
         entities = list(dict.fromkeys(cleaned_entity_refs + title_tokens[:5]))
         concepts = list(dict.fromkeys(concept_refs + topic_words[:6]))
         synthesis_refs = list(dict.fromkeys(target_synthesis_refs + topic_tags[:3] + ([self._topic_slug(topic)] if topic else [])))
-        open_questions = [f"What evidence is still missing around {topic or title}?", f"Which facts should be re-verified from {url}?"]
-        gap_queries = [f"{topic or title} latest evidence", f"{topic or title} contradictory sources"]
+        evidence_markdown = "\n".join(f"- {item}" for item in self._heuristic_sentences(raw_text, limit=6)) or (raw_text[:1200] if raw_text else title)
         return {
             "summary": summary or title,
             "key_claims": key_claims or [title],
             "entities": entities,
             "concepts": concepts,
             "topic_tags": topic_tags,
-            "open_questions": open_questions,
-            "gap_queries": gap_queries,
             "synthesis_refs": [item for item in synthesis_refs if item],
+            "evidence_markdown": evidence_markdown,
         }
 
     def _call_vault_model_json(self, prompt: str) -> dict[str, Any]:
@@ -164,7 +162,7 @@ class AnalysisMixin:
             **{key: value for key, value in parsed.items() if value not in (None, "", [], {})},
         }
         merged["analysis_mode"] = "model" if parsed else "heuristic"
-        for key in ("key_claims", "entities", "concepts", "topic_tags", "open_questions", "gap_queries", "synthesis_refs"):
+        for key in ("key_claims", "entities", "concepts", "topic_tags", "synthesis_refs"):
             value = merged.get(key)
             if not isinstance(value, list):
                 merged[key] = fallback.get(key, [])
@@ -172,6 +170,7 @@ class AnalysisMixin:
                 merged[key] = [str(item).strip() for item in value if str(item).strip()]
         merged["entities"] = [item for item in merged["entities"] if self._is_quality_entity(item)]
         merged["summary"] = str(merged.get("summary") or fallback["summary"]).strip()
+        merged["evidence_markdown"] = str(merged.get("evidence_markdown") or fallback["evidence_markdown"]).strip()
         return merged
 
     def _generate_source_sections(
@@ -183,35 +182,23 @@ class AnalysisMixin:
         raw_text: str,
         analysis: dict[str, Any],
     ) -> dict[str, Any]:
-        fallback = {
-            "summary_markdown": str(analysis.get("summary") or title).strip(),
-            "claims_markdown": "\n".join(f"- {item}" for item in analysis.get("key_claims", [])[:8]) or f"- {title}",
-            "evidence_markdown": "\n".join(f"- {item}" for item in self._heuristic_sentences(raw_text, limit=6)) or raw_text[:1200],
-            "backlink_lines": [f"[[../syntheses/{item}.md]]" for item in analysis.get("synthesis_refs", [])[:8]],
-            "review_items": [str(item) for item in analysis.get("open_questions", [])[:8]],
+        """Derive the source-page markdown sections from the analysis — no LLM call.
+
+        ``_analyze_source`` is now a single merged call that already produces the
+        structured fields plus ``evidence_markdown`` (the one section carrying new
+        content). The remaining sections are deterministic reformats of analysis
+        fields, so they are built here in code rather than via a second model call.
+        """
+        summary_markdown = str(analysis.get("summary") or title).strip()
+        claims_markdown = "\n".join(f"- {item}" for item in analysis.get("key_claims", [])[:8]) or f"- {title}"
+        evidence_markdown = str(analysis.get("evidence_markdown") or "").strip() or (
+            "\n".join(f"- {item}" for item in self._heuristic_sentences(raw_text, limit=6)) or raw_text[:1200]
+        )
+        backlink_lines = [f"[[../syntheses/{item}.md]]" for item in analysis.get("synthesis_refs", [])[:8]]
+        return {
+            "summary_markdown": summary_markdown,
+            "claims_markdown": claims_markdown,
+            "evidence_markdown": evidence_markdown,
+            "backlink_lines": backlink_lines,
+            "generation_mode": analysis.get("analysis_mode"),
         }
-        if not self.vault_config.cot_ingest_enabled or len(raw_text) < int(self.vault_config.cot_min_chars):
-            return {**fallback, "generation_mode": "heuristic"}
-        try:
-            parsed = self._call_vault_model_json(
-                GENERATE_PAGE_PROMPT.format(
-                    title=title,
-                    url=url,
-                    topic=topic,
-                    analysis_json=json.dumps(analysis, ensure_ascii=False, indent=2),
-                    content=raw_text[: self.max_content_chars],
-                )
-            )
-        except Exception:
-            parsed = {}
-        merged = {
-            **fallback,
-            **{key: value for key, value in parsed.items() if value not in (None, "", [], {})},
-        }
-        merged["generation_mode"] = "model" if parsed else "heuristic"
-        merged["summary_markdown"] = str(merged.get("summary_markdown") or fallback["summary_markdown"]).strip()
-        merged["claims_markdown"] = str(merged.get("claims_markdown") or fallback["claims_markdown"]).strip()
-        merged["evidence_markdown"] = str(merged.get("evidence_markdown") or fallback["evidence_markdown"]).strip()
-        merged["backlink_lines"] = [str(item).strip() for item in merged.get("backlink_lines", []) if str(item).strip()]
-        merged["review_items"] = [str(item).strip() for item in merged.get("review_items", []) if str(item).strip()]
-        return merged

@@ -331,7 +331,29 @@ Bridges external messaging platforms (Slack, Telegram) to the CapyHome agent via
 **Configuration** (`config.yaml` -> `channels`):
 - `langgraph_url` - LangGraph Server URL (default: `http://localhost:2024`)
 - `gateway_url` - Gateway API URL for auxiliary commands (default: `http://localhost:8001`)
-- Per-channel configs: `slack` (bot_token, app_token), `telegram` (bot_token)
+- Per-channel configs: `slack` (bot_token, app_token), `telegram` (bot_token, optional `allowed_users`)
+
+### Notifications System (`src/notifications/`)
+
+Proactive **outbound** notifications that ping the user on an IM channel about server-side events (run completion, approvals), even when no browser is open. This is distinct from the channels system, which only replies to *inbound* messages.
+
+**Key insight**: delivery reuses the channels `MessageBus` — a notification is just an `OutboundMessage` published onto the same bus Telegram/Slack already subscribe to. No new transport code.
+
+**Components**:
+- `service.py` — `NotificationService` singleton. `notify(text, *, scope=None, channel=None, chat_id=None, thread_id=None)` is **synchronous and fire-and-forget**: it schedules the async `bus.publish_outbound(...)` onto the gateway event loop captured at startup (`bind_loop`), so it is safe to call from synchronous control-plane code running in a background thread (mirrors `TelegramChannel`'s `run_coroutine_threadsafe` bridge). Never raises. Returns `True` if scheduled, `False` if skipped (disabled / scope off / no target). `scope_enabled(scope)` gates per-scope kill switches.
+- `targets.py` — `NotificationTargetStore`, a JSON file (`{base_dir}/notifications/targets.json`) mapping `channel_name -> {chat_id, user_id}`. Single primary target per channel (single-user model). Auto-recorded the first time the user messages the bot — `TelegramChannel._record_notification_target()` is called from `_cmd_start` / `_cmd_generic` / `_on_text`.
+
+**Lifecycle**: `start_notification_service()` runs in the gateway lifespan ([app.py](src/gateway/app.py)) **after** `start_channel_service()` (it needs the channel's bus). `get_notification_service()` returns the singleton; `stop_notification_service()` tears it down.
+
+**Triggers** (where notifications fire):
+- **Run completion (Phase 1, built)** — `ControlPlaneService._finalize_run()` calls `_notify_run_finalized()` on every terminal pipeline/scheduled/autoresearch run (`scope="on_scheduled_run"`). Channel-initiated runs (via a `TriggerEvent` with `channel_name`/`chat_id`) route back to their originating chat; everything else uses the primary target. Chat routing is shared via `_notification_chat_for_run()`.
+- **Approvals (Phase 2, built)** — when `start_run`/`create_run` puts a run into `pending_approval` and creates an `ApprovalRequest`, `_notify_approval_pending()` fires (`scope="on_approval"`), routed the same way as run completion. When a pending approval auto-expires, `ApprovalsService._expire_approvals()` collects the cancelled runs and calls `_notify_approval_expired()` (same scope) so the "approval needed" loop is closed. Resolution is still done in the app (no inbound `/approve` command yet).
+- **Web-UI chat completion (Phase 3, planned)** — needs a frontend `onFinish` → gateway endpoint (`scope="on_chat_complete"`), since web-UI runs have no backend completion signal.
+
+**Configuration** (`config.yaml` -> `notifications`):
+- `enabled` - master switch (also requires the target `channel` to be enabled under `channels`)
+- `channel` - default delivery channel (default `telegram`)
+- `on_scheduled_run` / `on_approval` / `on_chat_complete` - per-scope kill switches (default `true` when omitted)
 
 ### Memory System (`src/agents/memory/`)
 

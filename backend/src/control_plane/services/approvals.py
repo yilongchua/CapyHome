@@ -95,6 +95,9 @@ class ApprovalsService:
         deadline = utcnow() - timedelta(minutes=config.auto_expire_minutes)
 
         def expire(snapshot):
+            # Collect runs cancelled by expiry so we can notify after the mutate
+            # commits (notifications must not run inside the store write).
+            expired_runs: list[tuple[PipelineRun, str]] = []
             for approval in snapshot.approvals.values():
                 if approval.status != "pending":
                     continue
@@ -107,5 +110,9 @@ class ApprovalsService:
                         run.status = "cancelled"
                         run.updated_at = utcnow()
                         run.alerts.append("Approval expired before execution.")
+                        expired_runs.append((run, approval.title))
+            return expired_runs
 
-        self._store.mutate(expire)
+        expired_runs = self._store.mutate(expire)
+        for run, title in expired_runs:
+            self._cps._notify_approval_expired(run, title)

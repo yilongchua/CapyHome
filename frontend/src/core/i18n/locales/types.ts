@@ -276,8 +276,7 @@ export interface Translations {
       memory: string;
       knowledgeVault: string;
       chats: string;
-      pipelineCleanup: string;
-      autoresearchCleanup: string;
+      cleanUp: string;
       tools: string;
       notification: string;
       llm: string;

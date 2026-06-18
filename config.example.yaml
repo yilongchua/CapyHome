@@ -111,6 +111,8 @@ channels:
   telegram:
     enabled: false
     bot_token: $TELEGRAM_BOT_TOKEN
+    # Lock the bot to specific Telegram user IDs (recommended). Empty = allow anyone who finds the bot.
+    # allowed_users: [123456789]
 
   session:
     assistant_id: work_agent
@@ -121,6 +123,17 @@ channels:
       subagent_enabled: true
       max_concurrent_subagents: 3
       is_plan_mode: false
+
+# Proactive outbound notifications — pings the user on an IM channel about
+# server-side events (run completion, approvals). Reuses the channels MessageBus
+# above, so the target `channel` must also be enabled under `channels`. The
+# destination chat is auto-recorded the first time the user messages the bot.
+notifications:
+  enabled: false
+  channel: telegram
+  on_scheduled_run: true   # scheduled / autoresearch / pipeline run completion
+  on_approval: true        # a pipeline step needs human approval
+  on_chat_complete: false  # web-UI chat finished (requires frontend wiring; Phase 3)
 
 # -----------------------------------------------------------------------------
 # Agent Behavior (Middleware) — hooks, planning, evaluation, safety guards

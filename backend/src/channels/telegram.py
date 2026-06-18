@@ -218,10 +218,22 @@ class TelegramChannel(Channel):
             return True
         return user_id in self._allowed_users
 
+    def _record_notification_target(self, chat_id: str, user_id: str) -> None:
+        """Remember this chat as the destination for proactive notifications."""
+        try:
+            from src.notifications import get_notification_service
+
+            service = get_notification_service()
+            if service is not None:
+                service.record_target("telegram", chat_id, user_id=user_id)
+        except Exception:
+            logger.debug("[Telegram] could not record notification target", exc_info=True)
+
     async def _cmd_start(self, update, context) -> None:
         """Handle /start command."""
         if not self._check_user(update.effective_user.id):
             return
+        self._record_notification_target(str(update.effective_chat.id), str(update.effective_user.id))
         await update.message.reply_text("Welcome to CapyHome! Send me a message to start a conversation.\nType /help for available commands.")
 
     async def _cmd_generic(self, update, context) -> None:
@@ -233,6 +245,7 @@ class TelegramChannel(Channel):
         chat_id = str(update.effective_chat.id)
         user_id = str(update.effective_user.id)
         msg_id = str(update.message.message_id)
+        self._record_notification_target(chat_id, user_id)
 
         inbound = self._make_inbound(
             chat_id=chat_id,
@@ -258,6 +271,7 @@ class TelegramChannel(Channel):
         chat_id = str(update.effective_chat.id)
         user_id = str(update.effective_user.id)
         msg_id = str(update.message.message_id)
+        self._record_notification_target(chat_id, user_id)
 
         # topic_id: if the user is replying to a bot message, look up
         # the original topic_id stored for that reply chain.  Otherwise

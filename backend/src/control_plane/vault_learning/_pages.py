@@ -62,14 +62,12 @@ class PagesMixin:
         source_title: str,
         topic_tags: list[str],
         extra_frontmatter: dict[str, Any] | None = None,
-        open_questions: list[str] | None = None,
     ) -> None:
         frontmatter: dict[str, Any]
-        body: str
         if path.exists():
-            frontmatter, body = _parse_frontmatter(path.read_text(encoding="utf-8"))
+            frontmatter, _ = _parse_frontmatter(path.read_text(encoding="utf-8"))
         else:
-            frontmatter, body = {}, ""
+            frontmatter = {}
         source_refs = {str(item) for item in frontmatter.get("source_refs", []) if str(item).strip()}
         source_refs.add(source_id)
         frontmatter.update(
@@ -81,26 +79,41 @@ class PagesMixin:
                 "freshness_window_days": int(frontmatter.get("freshness_window_days") or 30),
                 "source_refs": sorted(source_refs),
                 "topic_tags": sorted(set(topic_tags) | set(frontmatter.get("topic_tags", []))),
-                "open_questions": open_questions or frontmatter.get("open_questions", []),
             }
         )
         if extra_frontmatter:
             frontmatter.update(extra_frontmatter)
 
+        # Build Overview from source summaries stored in the manifest. This turns
+        # entity/concept pages from boilerplate stubs into scannable overviews, and
+        # makes the search index snippet actually informative.
+        manifest_sources = (getattr(self, "_manifest", None) or {}).get("sources") or {}
+        summary_lines: list[str] = []
+        for ref in frontmatter["source_refs"]:
+            record = manifest_sources.get(ref, {}) or {}
+            stitle = str(record.get("title") or ref)
+            smry = str(record.get("summary") or "").strip()
+            if smry:
+                summary_lines.append(f"- **{stitle}**: {smry[:200]}")
+        overview = (
+            "## Overview\n\n" + "\n".join(summary_lines)
+            if summary_lines
+            else f"## Overview\n\nMaintained {kind} page derived from ingested sources."
+        )
         sections = [
+            overview,
             "## Evidence\n\n" + "\n".join(f"- Supports source `{ref}`" for ref in frontmatter["source_refs"]),
         ]
-        if body.strip():
-            sections.insert(0, body.strip())
-        else:
-            sections.insert(0, f"## Overview\n\nMaintained {kind} page derived from ingested sources.")
         self._write_page(path=path, frontmatter=frontmatter, title=title, sections=sections)
+        # Index text built from aggregated summaries so search snippets are
+        # informative rather than the boilerplate Overview fallback.
+        index_text_parts = [title] + [line.lstrip("- ") for line in summary_lines]
         self._index_document(
             doc_id=path.stem,
             kind=kind,
             title=title,
             path=path,
-            text=f"{title}\n\n{sections[0]}\n\n{source_title}",
+            text="\n".join(index_text_parts),
             tags=frontmatter.get("topic_tags", []),
         )
 
@@ -122,9 +135,6 @@ class PagesMixin:
 
         for synthesis_ref in synthesis_refs:
             path = self._compiled_synthesis_path(_slugify(synthesis_ref))
-            open_questions = []
-            if not path.exists():
-                open_questions = [f"What new evidence is still missing for {synthesis_ref}?"]
             self._update_reference_page(
                 path=path,
                 title=synthesis_ref.replace("-", " ").title(),
@@ -136,7 +146,6 @@ class PagesMixin:
                     "concept_refs": concept_refs,
                     "entity_refs": entity_refs,
                 },
-                open_questions=open_questions,
             )
             frontmatter, body = _parse_frontmatter(path.read_text(encoding="utf-8"))
             if "## Latest Supporting Evidence" not in body:
