@@ -50,17 +50,28 @@ class ChannelService:
         self._running = False
 
     @classmethod
-    def from_app_config(cls) -> ChannelService:
-        """Create a ChannelService from the application config."""
+    def _resolve_channels_config(cls) -> dict[str, Any]:
+        """Read config.yaml channels and merge UI overrides from extensions_config.json."""
+        from src.channels.config_store import merged_channels_config
         from src.config.app_config import get_app_config
 
         config = get_app_config()
-        channels_config = {}
         # extra fields are allowed by AppConfig (extra="allow")
-        extra = config.model_extra or {}
-        if "channels" in extra:
-            channels_config = extra["channels"]
-        return cls(channels_config=channels_config)
+        base = (config.model_extra or {}).get("channels") or {}
+        return merged_channels_config(base)
+
+    @classmethod
+    def from_app_config(cls) -> ChannelService:
+        """Create a ChannelService from the application config (+ UI overrides)."""
+        return cls(channels_config=cls._resolve_channels_config())
+
+    def reload_config(self) -> None:
+        """Re-read the merged channel config so a subsequent (re)start sees UI edits."""
+        merged = type(self)._resolve_channels_config()
+        # Drop the non-channel infra keys the constructor consumes; keep per-channel blocks.
+        for infra_key in ("langgraph_url", "gateway_url", "session"):
+            merged.pop(infra_key, None)
+        self._config = merged
 
     async def start(self) -> None:
         """Start the manager and all enabled channels."""
@@ -97,6 +108,9 @@ class ChannelService:
 
     async def restart_channel(self, name: str) -> bool:
         """Restart a specific channel. Returns True if successful."""
+        # Pick up any config changes saved via the API (e.g. a new bot token).
+        self.reload_config()
+
         if name in self._channels:
             try:
                 await self._channels[name].stop()

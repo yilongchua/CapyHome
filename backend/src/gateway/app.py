@@ -25,6 +25,7 @@ from src.gateway.routers import (
     mcp,
     memory,
     models,
+    notifications,
     onboarding,
     pipelines,
     runs,
@@ -32,6 +33,7 @@ from src.gateway.routers import (
     skills,
     steering,
     suggestions,
+    system,
     threads,
     triggers,
     uploads,
@@ -387,6 +389,9 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
     # Channels API is mounted at /api/channels
     app.include_router(channels.router)
 
+    # Notifications API is mounted at /api/notifications
+    app.include_router(notifications.router)
+
     # Control-plane APIs
     app.include_router(triggers.router)
     app.include_router(pipelines.router)
@@ -399,6 +404,7 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
     app.include_router(handoff.router)
     app.include_router(runs.router)
     app.include_router(steering.router)
+    app.include_router(system.router)
     app.include_router(clarifications.router)
     app.include_router(threads.router)
     app.include_router(vault.router)

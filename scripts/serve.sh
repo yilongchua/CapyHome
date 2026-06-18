@@ -101,7 +101,14 @@ else
     LANGGRAPH_EXTRA_FLAGS="--no-reload"
     GATEWAY_EXTRA_FLAGS=""
 fi
-LANGGRAPH_WORKERS="${LANGGRAPH_WORKERS:-3}"
+# Load user-persisted overrides from .env (e.g. LANGGRAPH_WORKERS set via settings panel)
+if [ -f "$REPO_ROOT/.env" ]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$REPO_ROOT/.env"
+  set +a
+fi
+LANGGRAPH_WORKERS="${LANGGRAPH_WORKERS:-5}"
 
 echo "Starting LangGraph server with ${LANGGRAPH_WORKERS} worker job(s)..."
 # BG_JOB_ISOLATED_LOOPS=true gives each run its own event loop so a slow LLM

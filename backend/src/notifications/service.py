@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from concurrent.futures import Future
 from typing import Any
 
 from src.channels.message_bus import MessageBus, OutboundMessage
@@ -112,8 +113,19 @@ class NotificationService:
         coro = self._bus.publish_outbound(msg)
         loop = self._loop
         if loop is not None and loop.is_running():
-            # Safe from any thread, including the loop's own thread.
-            asyncio.run_coroutine_threadsafe(coro, loop)
+            # Safe from any thread, including the loop's own thread. The returned
+            # Future is otherwise dropped, so attach a callback that surfaces any
+            # exception raised while publishing (delivery is fire-and-forget, but
+            # a silent failure should at least be logged).
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+
+            def _log_dispatch_result(fut: Future) -> None:
+                try:
+                    fut.result()
+                except Exception:
+                    logger.exception("[Notifications] dispatch failed for channel=%s", msg.channel_name)
+
+            future.add_done_callback(_log_dispatch_result)
             return True
         # No bound running loop (e.g. embedded/test context): best-effort.
         try:

@@ -974,7 +974,11 @@ class ControlPlaneService:
             text = f"⏳ Approval needed: {approval.title}"
             if approval.description:
                 text += f"\n\n{approval.description}"
-            text += "\n\nApprove or reject it in the CapyHome app."
+            text += (
+                f"\n\nApprove in the app, or reply:\n"
+                f"/approve {approval.id}\n"
+                f"/reject {approval.id} <reason>"
+            )
 
             chat_id = self._notification_chat_for_run(run, service.default_channel)
             service.notify(text, scope="on_approval", chat_id=chat_id)

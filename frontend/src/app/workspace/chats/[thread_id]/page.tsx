@@ -250,7 +250,7 @@ function ChatPageContent({
     [generationArtifacts, mountedArtifacts],
   );
 
-  const { onFinish } = useThreadNotification();
+  const { onFinish } = useThreadNotification(isNewThread ? undefined : threadId);
 
   const [planCreatedEvent, setPlanCreatedEvent] = useState<PlanCreatedEvent | null>(null);
   const [adaptationEvent, setAdaptationEvent] = useState<PlanAdaptedEvent | null>(null);

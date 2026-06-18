@@ -4,6 +4,7 @@ import {
   BellIcon,
   InfoIcon,
   BrainIcon,
+  GaugeIcon,
   PaletteIcon,
   Trash2Icon,
   WrenchIcon,
@@ -15,6 +16,7 @@ import {
   LibraryIcon,
   SettingsIcon,
   MessageSquareIcon,
+  SendIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -29,6 +31,7 @@ import { AboutSettingsPage } from "@/components/workspace/settings/about-setting
 import { AppearanceSettingsPage } from "@/components/workspace/settings/appearance-settings-page";
 import { BrowserExtensionSettingsPage } from "@/components/workspace/settings/browser-extension-settings-page";
 import { BrowserSettingsPage } from "@/components/workspace/settings/browser-settings-page";
+import { ChannelsSettingsPage } from "@/components/workspace/settings/channels-settings-page";
 import { ChatManagementSettingsPage } from "@/components/workspace/settings/chat-management-settings-page";
 import { CleanUpSettingsPage } from "@/components/workspace/settings/cleanup-settings-page";
 import { EmbeddingSettingsPage } from "@/components/workspace/settings/embedding-settings-page";
@@ -37,6 +40,7 @@ import { KnowledgeVaultSettingsPage } from "@/components/workspace/settings/know
 import { LlmSettingsPage } from "@/components/workspace/settings/llm-settings-page";
 import { MemorySettingsPage } from "@/components/workspace/settings/memory-settings-page";
 import { NotificationSettingsPage } from "@/components/workspace/settings/notification-settings-page";
+import { PerformanceSettingsPage } from "@/components/workspace/settings/performance-settings-page";
 import { SetupSettingsPage } from "@/components/workspace/settings/setup-settings-page";
 import { ToolSettingsPage } from "@/components/workspace/settings/tool-settings-page";
 import { useI18n } from "@/core/i18n/hooks";
@@ -56,6 +60,8 @@ type SettingsSection =
   | "embedding"
   | "browser"
   | "browserExtension"
+  | "channels"
+  | "performance"
   | "about";
 
 type SettingsDialogProps = React.ComponentProps<typeof Dialog> & {
@@ -131,6 +137,16 @@ export function SettingsDialog(props: SettingsDialogProps) {
         label: t.settings.sections.browserExtension,
         icon: PuzzleIcon,
       },
+      {
+        id: "channels",
+        label: t.settings.sections.channels,
+        icon: SendIcon,
+      },
+      {
+        id: "performance",
+        label: t.settings.sections.performance,
+        icon: GaugeIcon,
+      },
       { id: "about", label: t.settings.sections.about, icon: InfoIcon },
     ],
     [
@@ -147,6 +163,8 @@ export function SettingsDialog(props: SettingsDialogProps) {
       t.settings.sections.embedding,
       t.settings.sections.browser,
       t.settings.sections.browserExtension,
+      t.settings.sections.channels,
+      t.settings.sections.performance,
       t.settings.sections.about,
     ],
   );
@@ -209,6 +227,8 @@ export function SettingsDialog(props: SettingsDialogProps) {
               {activeSection === "browserExtension" && (
                 <BrowserExtensionSettingsPage />
               )}
+              {activeSection === "channels" && <ChannelsSettingsPage />}
+              {activeSection === "performance" && <PerformanceSettingsPage />}
               {activeSection === "about" && <AboutSettingsPage />}
             </div>
           </ScrollArea>

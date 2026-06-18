@@ -342,7 +342,30 @@ export const enUS: Translations = {
       browser: "Browser Tool",
       browserExtension: "Browser Extension",
       comfyui: "ComfyUI",
+      channels: "Channels",
+      performance: "Performance",
       about: "About",
+    },
+
+    performance: {
+      workerSlotsTitle: "Agent Worker Slots",
+      workerSlotsDescription:
+        "Number of concurrent agent runs the LangGraph server handles. Each active chat and each workflow parallel row occupies one slot.",
+      save: "Save",
+      saving: "Saving…",
+      saveError: "Failed to save. Check that the gateway is running.",
+      restartRequired:
+        "Restart the LangGraph server to apply this change: make stop && make dev",
+      rangeHint: (min: number, max: number) => `Allowed range: ${min}–${max}`,
+      restartSectionTitle: "Restart Services",
+      restartSectionDescription:
+        "Restart all services from the settings panel. Use Dev for hot-reloading development mode, or Prod for optimized production mode.",
+      restartDev: "Restart Dev",
+      restartStart: "Restart Prod",
+      restarting: "Restarting…",
+      restartError: "Failed to send restart command. Check that the gateway is running.",
+      restartingBanner:
+        "Services are restarting. They will be back in ~15 seconds — then refresh the page.",
     },
 
     memory: {
