@@ -40,6 +40,10 @@ And it isn't a coding-only tool. People use CapyHome to build slide decks, model
 
 ## 🐹 See It in Action
 
+<video src="./docs/key-features/asset/CapyHome%20Vid%201.mov" controls width="720">
+  Your browser does not support the video tag.
+</video>
+
 Tell CapyHome what you want in plain words. Here's what that looks like:
 
 > 📈 **"Forecast the 2026 agent trends for me."**
@@ -268,7 +272,7 @@ Bring your own. OpenAI, Anthropic, Google Gemini and DeepSeek work out of the bo
 <details>
 <summary><b>Is my data private?</b></summary>
 
-It can be entirely local. CapyHome is self-hosted under the MIT license and ships a local research stack (SearXNG + Onyx + crawl4ai). Nothing leaves your machine unless you point it at a cloud model or service.
+It can be entirely local. CapyHome is self-hosted under the MIT license and ships a local research stack (SearXNG + crawl4ai). Nothing leaves your machine unless you point it at a cloud model or service.
 </details>
 
 <details>
