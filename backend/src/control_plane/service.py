@@ -2201,6 +2201,7 @@ class ControlPlaneService:
 
                 report = manager.reprocess_existing_sources(
                     only_missing=not force_reanalyze,
+                    max_workers=worker_count,
                     progress_callback=_progress,
                 )
 

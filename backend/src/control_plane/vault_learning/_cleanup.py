@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -270,12 +271,15 @@ class CleanupMixin:
         self,
         *,
         only_missing: bool = True,
+        max_workers: int = 1,
         progress_callback: Any | None = None,
     ) -> dict[str, Any]:
         """Re-run analysis on already-ingested sources to backfill entities/concepts.
 
         - When ``only_missing`` is True, skip sources whose manifest entry already
           lists at least one entity_ref or concept_ref.
+        - ``max_workers`` parallelizes raw-file reads and analysis calls only.
+          Manifest/page writes remain serialized in the caller thread.
         - ``progress_callback(index, total, source_id, title, status, error)`` is
           invoked after each source so callers can surface progress to users.
         """
@@ -298,34 +302,25 @@ class CleanupMixin:
         skipped_no_raw = 0
         failed = 0
         errors: list[dict[str, Any]] = []
+        worker_count = max(1, min(3, int(max_workers or 1)))
+        batch_size = worker_count * 10
 
         if progress_callback is not None:
             progress_callback(0, total, "", "", "started", None)
 
-        for source_id, record in items:
-            processed += 1
+        def _analyze_item(source_id: str, record: dict[str, Any]) -> dict[str, Any]:
             title = str(record.get("title") or record.get("url") or source_id)
             raw_path_str = str(record.get("raw_path") or "").strip()
             if not raw_path_str:
-                skipped_no_raw += 1
-                if progress_callback is not None:
-                    progress_callback(processed, total, source_id, title, "skipped_no_raw", None)
-                continue
+                return {"source_id": source_id, "record": record, "title": title, "status": "skipped_no_raw"}
             raw_path = Path(raw_path_str)
             try:
                 raw_text = raw_path.read_text(encoding="utf-8") if raw_path.exists() else ""
             except Exception as exc:
-                failed += 1
-                errors.append({"source_id": source_id, "reason": f"read_error:{exc}"})
-                if progress_callback is not None:
-                    progress_callback(processed, total, source_id, title, "failed", str(exc))
-                continue
+                return {"source_id": source_id, "record": record, "title": title, "status": "failed", "error": f"read_error:{exc}"}
 
             if not raw_text.strip():
-                skipped_no_raw += 1
-                if progress_callback is not None:
-                    progress_callback(processed, total, source_id, title, "skipped_no_raw", None)
-                continue
+                return {"source_id": source_id, "record": record, "title": title, "status": "skipped_no_raw"}
 
             raw_text = raw_text[: self.max_content_chars]
             topic_tags = [str(item).strip() for item in record.get("topic_tags", []) if str(item).strip()]
@@ -342,19 +337,47 @@ class CleanupMixin:
                     target_synthesis_refs=[],
                 )
             except Exception as exc:
-                failed += 1
-                errors.append({"source_id": source_id, "reason": f"analysis_error:{exc}"})
-                if progress_callback is not None:
-                    progress_callback(processed, total, source_id, title, "failed", str(exc))
-                continue
+                return {"source_id": source_id, "record": record, "title": title, "status": "failed", "error": f"analysis_error:{exc}"}
 
+            return {
+                "source_id": source_id,
+                "record": record,
+                "title": title,
+                "status": "analyzed",
+                "topic_tags": topic_tags,
+                "analysis": analysis,
+            }
+
+        def _commit_result(result: dict[str, Any]) -> None:
+            nonlocal failed, processed, skipped_no_raw, updated
+            processed += 1
+            source_id = str(result.get("source_id") or "")
+            title = str(result.get("title") or source_id)
+            status = str(result.get("status") or "")
+            error = result.get("error")
+
+            if status == "skipped_no_raw":
+                skipped_no_raw += 1
+                if progress_callback is not None:
+                    progress_callback(processed, total, source_id, title, "skipped_no_raw", None)
+                return
+            if status == "failed":
+                failed += 1
+                errors.append({"source_id": source_id, "reason": str(error or "unknown_error")})
+                if progress_callback is not None:
+                    progress_callback(processed, total, source_id, title, "failed", str(error or "unknown_error"))
+                return
+
+            record = result["record"]
+            topic_tags = result["topic_tags"]
+            analysis = result["analysis"]
             entity_refs = [str(item).strip() for item in analysis.get("entities", []) if str(item).strip()]
             concept_refs = [str(item).strip() for item in analysis.get("concepts", []) if str(item).strip()]
 
             if not entity_refs and not concept_refs:
                 if progress_callback is not None:
                     progress_callback(processed, total, source_id, title, "no_refs", None)
-                continue
+                return
 
             for entity_ref in entity_refs:
                 self._update_reference_page(
@@ -386,6 +409,26 @@ class CleanupMixin:
 
             if progress_callback is not None:
                 progress_callback(processed, total, source_id, title, "updated", None)
+
+        if worker_count == 1:
+            for source_id, record in items:
+                _commit_result(_analyze_item(source_id, record))
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                for batch_start in range(0, len(items), batch_size):
+                    batch = items[batch_start:batch_start + batch_size]
+                    futures = [executor.submit(_analyze_item, source_id, record) for source_id, record in batch]
+                    for future in as_completed(futures):
+                        try:
+                            result = future.result()
+                        except Exception as exc:
+                            processed += 1
+                            failed += 1
+                            errors.append({"source_id": "", "reason": f"worker_error:{exc}"})
+                            if progress_callback is not None:
+                                progress_callback(processed, total, "", "", "failed", str(exc))
+                            continue
+                        _commit_result(result)
 
         self._manifest["last_run_summary"] = {
             "step": "reprocess",
