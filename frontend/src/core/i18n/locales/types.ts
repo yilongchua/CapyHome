@@ -276,8 +276,7 @@ export interface Translations {
       memory: string;
       knowledgeVault: string;
       chats: string;
-      pipelineCleanup: string;
-      autoresearchCleanup: string;
+      cleanUp: string;
       tools: string;
       notification: string;
       llm: string;
@@ -285,7 +284,26 @@ export interface Translations {
       browser: string;
       browserExtension: string;
       comfyui: string;
+      channels: string;
+      performance: string;
       about: string;
+    };
+
+    performance: {
+      workerSlotsTitle: string;
+      workerSlotsDescription: string;
+      save: string;
+      saving: string;
+      saveError: string;
+      restartRequired: string;
+      rangeHint: (min: number, max: number) => string;
+      restartSectionTitle: string;
+      restartSectionDescription: string;
+      restartDev: string;
+      restartStart: string;
+      restarting: string;
+      restartError: string;
+      restartingBanner: string;
     };
 
     memory: {

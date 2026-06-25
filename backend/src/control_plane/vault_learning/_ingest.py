@@ -14,9 +14,6 @@ from src.control_plane.vault_text_utils import (
     extract_title as _extract_title,
 )
 from src.control_plane.vault_text_utils import (
-    slugify as _slugify,
-)
-from src.control_plane.vault_text_utils import (
     strip_html as _strip_html,
 )
 from src.control_plane.vault_text_utils import (
@@ -153,7 +150,7 @@ class IngestMixin:
                 "concept_refs": concept_refs,
                 "entity_refs": entity_refs,
                 "analysis": {},
-                "generated_page": {"generation_mode": None, "review_items": []},
+                "generated_page": {"generation_mode": None},
             }
             raw_metadata_path.write_text(json.dumps(raw_metadata, indent=2), encoding="utf-8")
             return PrefetchedIngest(
@@ -220,7 +217,6 @@ class IngestMixin:
             "analysis": analysis,
             "generated_page": {
                 "generation_mode": generated_page.get("generation_mode"),
-                "review_items": generated_page.get("review_items", []),
             },
         }
         raw_metadata_path.write_text(json.dumps(raw_metadata, indent=2), encoding="utf-8")
@@ -383,7 +379,6 @@ class IngestMixin:
                 "analysis": analysis,
                 "generated_page": {
                     "generation_mode": generated_page.get("generation_mode"),
-                    "review_items": generated_page.get("review_items", []),
                 },
             }
             raw_metadata_path.write_text(json.dumps(raw_metadata, indent=2), encoding="utf-8")
@@ -473,8 +468,6 @@ class IngestMixin:
             "last_reviewed_at": _utcnow_iso(),
             "analysis_mode": analysis.get("analysis_mode"),
             "generation_mode": generated_page.get("generation_mode"),
-            "open_questions": analysis.get("open_questions", []),
-            "gap_queries": analysis.get("gap_queries", []),
         }
         sections = [
             "## Summary\n\n" + str(generated_page.get("summary_markdown") or raw_text[:1200]).strip(),
@@ -482,8 +475,6 @@ class IngestMixin:
             "## Evidence\n\n" + str(generated_page.get("evidence_markdown") or "").strip(),
             "## Backlinks\n\n"
             + "\n".join([f"- {line}" for line in generated_page.get("backlink_lines", [])] or [f"- [[../syntheses/{ref}.md]]" for ref in synthesis_refs] or ["- None"]),
-            "## Review Items\n\n" + "\n".join(f"- {item}" for item in (generated_page.get("review_items", [])[:10] or analysis.get("open_questions", [])[:10] or ["None"])),
-            "## Gap Queries\n\n" + "\n".join(f"- {item}" for item in (analysis.get("gap_queries", [])[:10] or ["None"])),
         ]
         self._write_page(path=compiled_source_path, frontmatter=source_frontmatter, title=title, sections=sections)
 
@@ -512,6 +503,7 @@ class IngestMixin:
                 "source_tool": str((queue_entry or {}).get("source_tool") or source),
                 "analysis_mode": analysis.get("analysis_mode"),
                 "generation_mode": generated_page.get("generation_mode"),
+                "summary": str(analysis.get("summary") or "").strip(),
             }
         )
         self._manifest["sources"][source_id] = source_record
@@ -550,17 +542,6 @@ class IngestMixin:
             ),
             tags=topic_tags,
         )
-        for question in analysis.get("open_questions", [])[:10]:
-            question_text = str(question).strip()
-            if not question_text:
-                continue
-            task_name = f"{_utcnow().strftime('%Y%m%dT%H%M%SZ')}-{_slugify(question_text)[:48] or 'review'}-vault-review.md"
-            task_path = self.task_review_dir / task_name
-            if not task_path.exists():
-                task_path.write_text(
-                    f"# Vault Review Item\n\n- Source: `{title}`\n- URL: {url}\n- Review: {question_text}\n",
-                    encoding="utf-8",
-                )
         return {
             "status": "ingested",
             "source_id": source_id,

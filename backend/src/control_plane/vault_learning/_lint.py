@@ -733,7 +733,6 @@ class LintMixin:
         orphan_pages: list[str] = []
         missing_backlinks: list[str] = []
         contradictions: list[str] = []
-        open_questions: list[str] = []
 
         now = _utcnow()
         for path in sorted(self.compiled_syntheses_dir.glob("*.md")):
@@ -751,12 +750,10 @@ class LintMixin:
                 stale_syntheses.append(path.name)
             if not frontmatter.get("source_refs"):
                 orphan_pages.append(path.name)
-            if not frontmatter.get("open_questions"):
+            if not frontmatter.get("concept_refs") and not frontmatter.get("entity_refs"):
                 missing_backlinks.append(path.name)
             if "contradiction" in body.lower():
                 contradictions.append(path.name)
-            for question in frontmatter.get("open_questions", []):
-                open_questions.append(f"{path.name}: {question}")
 
         for directory in (self.compiled_concepts_dir, self.compiled_entities_dir):
             for path in sorted(directory.glob("*.md")):
@@ -772,23 +769,21 @@ class LintMixin:
             "orphan_pages_count": len(orphan_pages),
             "missing_backlinks_count": len(missing_backlinks),
             "contradictions_count": len(contradictions),
-            "open_questions_count": len(open_questions),
             "expired_queries_count": expired_queries["expired_count"],
             "purged_rejected_count": purged_rejected_count,
             "stale_syntheses": stale_syntheses,
             "orphan_pages": orphan_pages,
             "missing_backlinks": missing_backlinks,
             "contradictions": contradictions,
-            "open_questions": open_questions,
             "queue_backlog_count": len([item for item in self._load_queue() if str(item.get("status") or "") == "queued"]),
         }
         report_path = self.lint_reports_dir / f"{_utcnow().strftime('%Y%m%dT%H%M%SZ')}-lint.json"
         report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-        if report["open_questions_count"] or report["stale_syntheses_count"] or report["orphan_pages_count"]:
+        if report["stale_syntheses_count"] or report["orphan_pages_count"]:
             task_path = self.task_review_dir / f"{_utcnow().strftime('%Y%m%dT%H%M%SZ')}-vault-lint.md"
             task_path.write_text(
                 "# Vault Lint Review\n\n"
-                + "\n".join(f"- {item}" for item in open_questions[:20] or stale_syntheses[:20] or orphan_pages[:20]),
+                + "\n".join(f"- {item}" for item in stale_syntheses[:20] or orphan_pages[:20]),
                 encoding="utf-8",
             )
         self._manifest["last_lint_at"] = _utcnow_iso()
@@ -799,7 +794,6 @@ class LintMixin:
     def _collect_lint_snapshot(self, *, freshness_window_days: int = 30) -> dict[str, Any]:
         stale_syntheses = 0
         contradictions = 0
-        open_questions = 0
         now = _utcnow()
         for path in sorted(self.compiled_syntheses_dir.glob("*.md")):
             if path.name == "index.md":
@@ -816,12 +810,9 @@ class LintMixin:
                 stale_syntheses += 1
             if "contradiction" in body.lower():
                 contradictions += 1
-            if isinstance(frontmatter.get("open_questions"), list):
-                open_questions += len(frontmatter.get("open_questions", []))
         queue_backlog = len([item for item in self._load_queue() if str(item.get("status") or "") == "queued"])
         return {
             "stale_syntheses_count": stale_syntheses,
             "contradictions_count": contradictions,
-            "open_questions_count": open_questions,
             "queue_backlog_count": queue_backlog,
         }

@@ -746,6 +746,8 @@ class ControlPlaneService:
                 trigger.updated_at = utcnow()
 
         self._store.mutate(mutate)
+        if approval is not None:
+            self._notify_approval_pending(run, approval)
         return self.get_run(run.id)
 
     def list_runs(
@@ -910,7 +912,100 @@ class ControlPlaneService:
             self._autoresearch_orchestrator.update_after_run(run=finalized)
         except Exception:
             logger.exception("Failed to update autoresearch objective after run finalization: %s", finalized.id)
+        self._notify_run_finalized(finalized)
         return finalized
+
+    def _notification_chat_for_run(self, run: PipelineRun, default_channel: str) -> str | None:
+        """Resolve the originating chat for a channel-initiated run.
+
+        Returns the trigger's chat_id when the run came from a trigger on the
+        same channel we notify through; otherwise None (caller falls back to the
+        primary notification target).
+        """
+        if not run.trigger_event_id:
+            return None
+        trigger = self._store.read().triggers.get(run.trigger_event_id)
+        if trigger and trigger.channel_name == default_channel and trigger.chat_id:
+            return trigger.chat_id
+        return None
+
+    def _notify_run_finalized(self, run: PipelineRun) -> None:
+        """Send a proactive notification when a pipeline/scheduled run reaches a terminal state.
+
+        Best-effort: never raises, so a notification failure cannot affect run
+        finalization. Channel-initiated runs are routed back to their originating
+        chat; everything else falls back to the primary notification target.
+        """
+        try:
+            from src.notifications import get_notification_service
+
+            service = get_notification_service()
+            if service is None or not service.scope_enabled("on_scheduled_run"):
+                return
+
+            label = run.template_name or "Pipeline run"
+            if run.status == "completed":
+                text = f"✅ {label} completed."
+                if run.summary:
+                    text += f"\n\n{run.summary}"
+            else:
+                text = f"⚠️ {label} {run.status}."
+                if run.alerts:
+                    text += f"\n\n{run.alerts[-1]}"
+
+            chat_id = self._notification_chat_for_run(run, service.default_channel)
+            service.notify(text, scope="on_scheduled_run", chat_id=chat_id)
+        except Exception:
+            logger.exception("Failed to send run-finalization notification: %s", getattr(run, "id", "?"))
+
+    def _notify_approval_pending(self, run: PipelineRun, approval: ApprovalRequest) -> None:
+        """Send a proactive notification when a run is waiting on human approval.
+
+        Best-effort: never raises, so a notification failure cannot affect run
+        creation. Routes back to the originating chat when available.
+        """
+        try:
+            from src.notifications import get_notification_service
+
+            service = get_notification_service()
+            if service is None or not service.scope_enabled("on_approval"):
+                return
+
+            text = f"⏳ Approval needed: {approval.title}"
+            if approval.description:
+                text += f"\n\n{approval.description}"
+            text += (
+                f"\n\nApprove in the app, or reply:\n"
+                f"/approve {approval.id}\n"
+                f"/reject {approval.id} <reason>"
+            )
+
+            chat_id = self._notification_chat_for_run(run, service.default_channel)
+            service.notify(text, scope="on_approval", chat_id=chat_id)
+        except Exception:
+            logger.exception("Failed to send approval-pending notification: %s", getattr(approval, "id", "?"))
+
+    def _notify_approval_expired(self, run: PipelineRun, title: str) -> None:
+        """Send a proactive notification when a pending approval auto-expires.
+
+        Closes the loop opened by ``_notify_approval_pending`` — the user was
+        asked to act, never did, and the window has now closed. Best-effort.
+        """
+        try:
+            from src.notifications import get_notification_service
+
+            service = get_notification_service()
+            if service is None or not service.scope_enabled("on_approval"):
+                return
+
+            text = (
+                f"⌛ Approval expired: {title}\n\n"
+                "The pending run was cancelled because it wasn't approved in time."
+            )
+            chat_id = self._notification_chat_for_run(run, service.default_channel)
+            service.notify(text, scope="on_approval", chat_id=chat_id)
+        except Exception:
+            logger.exception("Failed to send approval-expired notification: %s", getattr(run, "id", "?"))
 
     def start_run_in_background(self, run_id: str) -> PipelineRun:
         """Kick ``start_run`` onto a daemon thread and return the queued run.

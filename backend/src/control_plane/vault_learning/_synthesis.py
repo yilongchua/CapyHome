@@ -36,11 +36,6 @@ class SynthesisMixin:
             gaps.append(f"{len(stale)} stale synthesis pages require review.")
             next_actions.append("Refresh stale synthesis pages with current evidence.")
 
-        open_questions = lint.get("open_questions", [])
-        if isinstance(open_questions, list) and open_questions:
-            gaps.append(f"{len(open_questions)} open questions remain unresolved.")
-            next_actions.append("Address top-priority open questions in synthesis pages.")
-
         lint_contradictions = lint.get("contradictions", [])
         if isinstance(lint_contradictions, list):
             contradictions.extend(str(item) for item in lint_contradictions[:20])
@@ -60,7 +55,6 @@ class SynthesisMixin:
             "next_actions": next_actions,
             "lint_snapshot": {
                 "stale_syntheses_count": lint.get("stale_syntheses_count", 0),
-                "open_questions_count": lint.get("open_questions_count", 0),
                 "contradictions_count": lint.get("contradictions_count", 0),
                 "queue_backlog_count": lint.get("queue_backlog_count", 0),
             },
@@ -95,20 +89,19 @@ class SynthesisMixin:
         lint = self._collect_lint_snapshot()
         stale = int(lint.get("stale_syntheses_count") or 0)
         contradictions = int(lint.get("contradictions_count") or 0)
-        open_questions = int(lint.get("open_questions_count") or 0)
 
         breadth = min(1.0, sources_total / 40.0)
         synthesis_depth = min(1.0, syntheses_total / 20.0)
         freshness = max(0.0, 1.0 - (stale / max(1, syntheses_total or 1)))
         contradiction_resolution = max(0.0, 1.0 - (contradictions / max(1, syntheses_total or 1)))
-        question_closure = max(0.0, 1.0 - (open_questions / max(1, syntheses_total or 1)))
 
+        # open-question closure was removed as a signal; its 0.15 weight is
+        # redistributed across the remaining four so the score still sums to 1.0.
         weighted = (
-            0.25 * breadth
-            + 0.25 * synthesis_depth
+            0.3 * breadth
+            + 0.3 * synthesis_depth
             + 0.2 * freshness
-            + 0.15 * contradiction_resolution
-            + 0.15 * question_closure
+            + 0.2 * contradiction_resolution
         )
         percent = round(max(0.0, min(100.0, weighted * 100.0)), 2)
         return {
@@ -119,7 +112,6 @@ class SynthesisMixin:
                 "synthesis_depth": round(synthesis_depth * 100.0, 2),
                 "freshness": round(freshness * 100.0, 2),
                 "contradiction_resolution": round(contradiction_resolution * 100.0, 2),
-                "open_question_closure": round(question_closure * 100.0, 2),
             },
             "last_updated_at": _utcnow_iso(),
         }
@@ -134,8 +126,6 @@ class SynthesisMixin:
         blockers: list[str] = []
         if int(lint.get("contradictions_count") or 0) > 0:
             blockers.append("unresolved_contradictions")
-        if int(lint.get("open_questions_count") or 0) > 0:
-            blockers.append("open_questions")
         if int(lint.get("stale_syntheses_count") or 0) > 0:
             blockers.append("stale_syntheses")
         score = float(progress.get("percent") or 0.0)
@@ -166,7 +156,6 @@ class SynthesisMixin:
             ],
             "recommended_actions": [
                 "Prioritize contradiction resolution." if "unresolved_contradictions" in blockers else "",
-                "Resolve high-priority open questions." if "open_questions" in blockers else "",
                 "Refresh stale syntheses." if "stale_syntheses" in blockers else "",
                 "Continue periodic monitoring." if not blockers else "",
             ],

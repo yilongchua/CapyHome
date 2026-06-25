@@ -56,7 +56,14 @@ trap cleanup_on_failure INT TERM
 
 mkdir -p logs
 
-LANGGRAPH_WORKERS="${LANGGRAPH_WORKERS:-3}"
+# Load user-persisted overrides from .env (e.g. LANGGRAPH_WORKERS set via settings panel)
+if [ -f "$REPO_ROOT/.env" ]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$REPO_ROOT/.env"
+  set +a
+fi
+LANGGRAPH_WORKERS="${LANGGRAPH_WORKERS:-5}"
 
 echo "Starting LangGraph server with ${LANGGRAPH_WORKERS} worker job(s)..."
 nohup sh -c 'cd backend && BG_JOB_ISOLATED_LOOPS=true NO_COLOR=1 uv run langgraph dev --no-browser --allow-blocking --no-reload --n-jobs-per-worker "$1" > ../logs/langgraph.log 2>&1' _ "$LANGGRAPH_WORKERS" &

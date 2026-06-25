@@ -325,13 +325,40 @@ Bridges external messaging platforms (Slack, Telegram) to the CapyHome agent via
 1. External platform -> Channel impl -> `MessageBus.publish_inbound()`
 2. `ChannelManager._dispatch_loop()` consumes from queue
 3. For chat: look up/create thread on LangGraph Server -> `runs.wait()` -> extract response -> publish outbound
-4. For commands (`/new`, `/status`, `/models`, `/memory`, `/help`): handle locally or query Gateway API
+4. For commands (`/new`, `/status`, `/models`, `/memory`, `/approvals`, `/approve <id>`, `/reject <id> <reason>`, `/help`): handle locally or query Gateway API. `/approvals` lists pending approval ids; `/approve` / `/reject` call `get_control_plane_service().resolve_approval(...)` directly (in-process) so the user can resolve approvals from their phone.
 5. Outbound -> channel callbacks -> platform reply
 
 **Configuration** (`config.yaml` -> `channels`):
 - `langgraph_url` - LangGraph Server URL (default: `http://localhost:2024`)
 - `gateway_url` - Gateway API URL for auxiliary commands (default: `http://localhost:8001`)
-- Per-channel configs: `slack` (bot_token, app_token), `telegram` (bot_token)
+- Per-channel configs: `slack` (bot_token, app_token), `telegram` (bot_token, optional `allowed_users`)
+
+**UI-editable overrides** (`config_store.py`): so users can enter a Telegram bot token from the Settings → Channels tab without editing files, an override block is persisted under the `channels` key of `extensions_config.json` (the same writable-via-API store as MCP servers / user LLM endpoints). `merged_channels_config(base)` deep-merges this override **over** the `config.yaml` block per channel, so a UI-entered `bot_token`/`enabled`/`allowed_users` wins over the env-var reference. `ChannelService._resolve_channels_config()` does the merge at startup; `reload_config()` re-reads it and is called at the start of `restart_channel()` so a saved token applies on restart without a full gateway bounce. The gateway exposes `GET /api/channels/config` and `PUT /api/channels/config` ([routers/channels.py](src/gateway/routers/channels.py)); the PUT writes the override and immediately restarts the telegram channel. Only the override block is returned by GET — a token supplied via `$TELEGRAM_BOT_TOKEN` in config.yaml is never surfaced through the API.
+
+### Notifications System (`src/notifications/`)
+
+Proactive **outbound** notifications that ping the user on an IM channel about server-side events (run completion, approvals), even when no browser is open. This is distinct from the channels system, which only replies to *inbound* messages.
+
+**Key insight**: delivery reuses the channels `MessageBus` — a notification is just an `OutboundMessage` published onto the same bus Telegram/Slack already subscribe to. No new transport code.
+
+**Components**:
+- `service.py` — `NotificationService` singleton. `notify(text, *, scope=None, channel=None, chat_id=None, thread_id=None)` is **synchronous and fire-and-forget**: it schedules the async `bus.publish_outbound(...)` onto the gateway event loop captured at startup (`bind_loop`), so it is safe to call from synchronous control-plane code running in a background thread (mirrors `TelegramChannel`'s `run_coroutine_threadsafe` bridge). Never raises. Returns `True` if scheduled, `False` if skipped (disabled / scope off / no target). `scope_enabled(scope)` gates per-scope kill switches.
+- `targets.py` — `NotificationTargetStore`, a JSON file (`{base_dir}/notifications/targets.json`) mapping `channel_name -> {chat_id, user_id}`. Single primary target per channel (single-user model). Auto-recorded the first time the user messages the bot — `TelegramChannel._record_notification_target()` is called from `_cmd_start` / `_cmd_generic` / `_on_text`.
+
+**Lifecycle**: `start_notification_service()` runs in the gateway lifespan ([app.py](src/gateway/app.py)) **after** `start_channel_service()` (it needs the channel's bus). `get_notification_service()` returns the singleton; `stop_notification_service()` tears it down.
+
+**Triggers** (where notifications fire):
+- **Run completion (Phase 1, built)** — `ControlPlaneService._finalize_run()` calls `_notify_run_finalized()` on every terminal pipeline/scheduled/autoresearch run (`scope="on_scheduled_run"`). Channel-initiated runs (via a `TriggerEvent` with `channel_name`/`chat_id`) route back to their originating chat; everything else uses the primary target. Chat routing is shared via `_notification_chat_for_run()`.
+- **Approvals (Phase 2, built)** — when `start_run`/`create_run` puts a run into `pending_approval` and creates an `ApprovalRequest`, `_notify_approval_pending()` fires (`scope="on_approval"`), routed the same way as run completion; the message includes the approval id and `/approve <id>` / `/reject <id> <reason>` instructions. When a pending approval auto-expires, `ApprovalsService._expire_approvals()` collects the cancelled runs and calls `_notify_approval_expired()` (same scope) so the "approval needed" loop is closed. Approvals can be resolved from the app **or** by replying with the inbound `/approve` / `/reject` commands (see IM Channels).
+- **Web-UI chat completion (Phase 3, built)** — the frontend `useThreadNotification` `onFinish` posts to `POST /api/notifications/thread-complete` (only when the tab is hidden/unfocused — same gate as the browser notification). The endpoint fires `scope="on_chat_complete"` (default **off** in config). Routed to the primary target (web-UI threads have no originating chat).
+
+**Delivery is fire-and-forget but observable**: `_dispatch` attaches a `Future.add_done_callback` that logs any exception raised while publishing, so a failed send is no longer silently swallowed (notify() still returns True meaning "scheduled", not "delivered").
+- **Web-UI chat completion (Phase 3, planned)** — needs a frontend `onFinish` → gateway endpoint (`scope="on_chat_complete"`), since web-UI runs have no backend completion signal.
+
+**Configuration** (`config.yaml` -> `notifications`):
+- `enabled` - master switch (also requires the target `channel` to be enabled under `channels`)
+- `channel` - default delivery channel (default `telegram`)
+- `on_scheduled_run` / `on_approval` / `on_chat_complete` - per-scope kill switches (default `true` when omitted)
 
 ### Memory System (`src/agents/memory/`)
 

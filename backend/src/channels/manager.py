@@ -475,8 +475,23 @@ class ChannelManager:
             reply = await self._fetch_gateway("/api/models", "models")
         elif command == "memory":
             reply = await self._fetch_gateway("/api/memory", "memory")
+        elif command in ("approvals", "pending"):
+            reply = self._list_pending_approvals()
+        elif command in ("approve", "reject"):
+            arg = parts[1].strip() if len(parts) > 1 else ""
+            reply = self._resolve_approval_command(approve=(command == "approve"), arg=arg)
         elif command == "help":
-            reply = "Available commands:\n/new — Start a new conversation\n/status — Show current thread info\n/models — List available models\n/memory — Show memory status\n/help — Show this help"
+            reply = (
+                "Available commands:\n"
+                "/new — Start a new conversation\n"
+                "/status — Show current thread info\n"
+                "/models — List available models\n"
+                "/memory — Show memory status\n"
+                "/approvals — List pending approvals\n"
+                "/approve <id> — Approve a pending run\n"
+                "/reject <id> [reason] — Reject a pending run\n"
+                "/help — Show this help"
+            )
         else:
             reply = f"Unknown command: /{command}. Type /help for available commands."
 
@@ -488,6 +503,56 @@ class ChannelManager:
             thread_ts=msg.thread_ts,
         )
         await self.bus.publish_outbound(outbound)
+
+    def _list_pending_approvals(self) -> str:
+        """List pending approval requests so the user can copy an id to act on."""
+        try:
+            from src.control_plane.service import get_control_plane_service
+
+            approvals = [a for a in get_control_plane_service().list_approvals() if a.status == "pending"]
+        except Exception:
+            logger.exception("Failed to list approvals for channel command")
+            return "Could not load approvals."
+
+        if not approvals:
+            return "No pending approvals."
+
+        lines = ["Pending approvals:"]
+        for a in approvals[:10]:
+            lines.append(f"• {a.title}\n  id: {a.id}\n  /approve {a.id}  |  /reject {a.id} <reason>")
+        return "\n".join(lines)
+
+    def _resolve_approval_command(self, *, approve: bool, arg: str) -> str:
+        """Approve or reject a pending run from an IM command.
+
+        ``arg`` is ``"<approval_id> [optional reason]"``. The reason (used as the
+        rejection note) is everything after the id.
+        """
+        if not arg:
+            verb = "approve" if approve else "reject"
+            return f"Usage: /{verb} <approval_id>{'' if approve else ' <reason>'}\nSend /approvals to list pending ids."
+
+        approval_id, _, note = arg.partition(" ")
+        approval_id = approval_id.strip()
+        note = note.strip() or None
+
+        try:
+            from src.control_plane.service import get_control_plane_service
+
+            run = get_control_plane_service().resolve_approval(
+                approval_id,
+                approve=approve,
+                note=note,
+            )
+        except ValueError as exc:
+            return str(exc)
+        except Exception:
+            logger.exception("Failed to resolve approval %s from channel command", approval_id)
+            return "Failed to resolve the approval. Check the id and try again."
+
+        if approve:
+            return f"✅ Approved. Run {run.id} is now {run.status}."
+        return f"🚫 Rejected. Run {run.id} is now {run.status}."
 
     async def _fetch_gateway(self, path: str, kind: str) -> str:
         """Fetch data from the Gateway API for command responses."""

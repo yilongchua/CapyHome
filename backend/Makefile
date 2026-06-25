@@ -1,4 +1,4 @@
-LANGGRAPH_WORKERS ?= 3
+LANGGRAPH_WORKERS ?= 5
 
 install:
 	uv sync

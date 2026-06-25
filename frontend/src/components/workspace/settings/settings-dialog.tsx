@@ -4,9 +4,9 @@ import {
   BellIcon,
   InfoIcon,
   BrainIcon,
+  GaugeIcon,
   PaletteIcon,
-  ClockIcon,
-  FlaskConicalIcon,
+  Trash2Icon,
   WrenchIcon,
   BotIcon,
   GlobeIcon,
@@ -16,6 +16,7 @@ import {
   LibraryIcon,
   SettingsIcon,
   MessageSquareIcon,
+  SendIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -28,17 +29,18 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AboutSettingsPage } from "@/components/workspace/settings/about-settings-page";
 import { AppearanceSettingsPage } from "@/components/workspace/settings/appearance-settings-page";
-import { AutoresearchCleanupSettingsPage } from "@/components/workspace/settings/autoresearch-cleanup-settings-page";
 import { BrowserExtensionSettingsPage } from "@/components/workspace/settings/browser-extension-settings-page";
 import { BrowserSettingsPage } from "@/components/workspace/settings/browser-settings-page";
+import { ChannelsSettingsPage } from "@/components/workspace/settings/channels-settings-page";
 import { ChatManagementSettingsPage } from "@/components/workspace/settings/chat-management-settings-page";
+import { CleanUpSettingsPage } from "@/components/workspace/settings/cleanup-settings-page";
 import { EmbeddingSettingsPage } from "@/components/workspace/settings/embedding-settings-page";
 import { GeneralSettingsPage } from "@/components/workspace/settings/general-settings-page";
 import { KnowledgeVaultSettingsPage } from "@/components/workspace/settings/knowledge-vault-settings-page";
 import { LlmSettingsPage } from "@/components/workspace/settings/llm-settings-page";
 import { MemorySettingsPage } from "@/components/workspace/settings/memory-settings-page";
 import { NotificationSettingsPage } from "@/components/workspace/settings/notification-settings-page";
-import { PipelineCleanupSettingsPage } from "@/components/workspace/settings/pipeline-cleanup-settings-page";
+import { PerformanceSettingsPage } from "@/components/workspace/settings/performance-settings-page";
 import { SetupSettingsPage } from "@/components/workspace/settings/setup-settings-page";
 import { ToolSettingsPage } from "@/components/workspace/settings/tool-settings-page";
 import { useI18n } from "@/core/i18n/hooks";
@@ -50,15 +52,16 @@ type SettingsSection =
   | "appearance"
   | "memory"
   | "knowledgeVault"
+  | "cleanUp"
   | "chats"
-  | "pipelineCleanup"
-  | "autoresearchCleanup"
   | "tools"
   | "notification"
   | "llm"
   | "embedding"
   | "browser"
   | "browserExtension"
+  | "channels"
+  | "performance"
   | "about";
 
 type SettingsDialogProps = React.ComponentProps<typeof Dialog> & {
@@ -112,19 +115,14 @@ export function SettingsDialog(props: SettingsDialogProps) {
         icon: LibraryIcon,
       },
       {
+        id: "cleanUp",
+        label: t.settings.sections.cleanUp,
+        icon: Trash2Icon,
+      },
+      {
         id: "chats",
         label: t.settings.sections.chats,
         icon: MessageSquareIcon,
-      },
-      {
-        id: "pipelineCleanup",
-        label: t.settings.sections.pipelineCleanup,
-        icon: ClockIcon,
-      },
-      {
-        id: "autoresearchCleanup",
-        label: t.settings.sections.autoresearchCleanup,
-        icon: FlaskConicalIcon,
       },
       { id: "tools", label: t.settings.sections.tools, icon: WrenchIcon },
       { id: "llm", label: t.settings.sections.llm, icon: BotIcon },
@@ -139,6 +137,16 @@ export function SettingsDialog(props: SettingsDialogProps) {
         label: t.settings.sections.browserExtension,
         icon: PuzzleIcon,
       },
+      {
+        id: "channels",
+        label: t.settings.sections.channels,
+        icon: SendIcon,
+      },
+      {
+        id: "performance",
+        label: t.settings.sections.performance,
+        icon: GaugeIcon,
+      },
       { id: "about", label: t.settings.sections.about, icon: InfoIcon },
     ],
     [
@@ -147,15 +155,16 @@ export function SettingsDialog(props: SettingsDialogProps) {
       t.settings.sections.appearance,
       t.settings.sections.memory,
       t.settings.sections.knowledgeVault,
+      t.settings.sections.cleanUp,
       t.settings.sections.chats,
-      t.settings.sections.pipelineCleanup,
-      t.settings.sections.autoresearchCleanup,
       t.settings.sections.tools,
       t.settings.sections.notification,
       t.settings.sections.llm,
       t.settings.sections.embedding,
       t.settings.sections.browser,
       t.settings.sections.browserExtension,
+      t.settings.sections.channels,
+      t.settings.sections.performance,
       t.settings.sections.about,
     ],
   );
@@ -208,9 +217,8 @@ export function SettingsDialog(props: SettingsDialogProps) {
               {activeSection === "appearance" && <AppearanceSettingsPage />}
               {activeSection === "memory" && <MemorySettingsPage />}
               {activeSection === "knowledgeVault" && <KnowledgeVaultSettingsPage />}
+              {activeSection === "cleanUp" && <CleanUpSettingsPage />}
               {activeSection === "chats" && <ChatManagementSettingsPage />}
-              {activeSection === "pipelineCleanup" && <PipelineCleanupSettingsPage />}
-              {activeSection === "autoresearchCleanup" && <AutoresearchCleanupSettingsPage />}
               {activeSection === "tools" && <ToolSettingsPage />}
               {activeSection === "notification" && <NotificationSettingsPage />}
               {activeSection === "llm" && <LlmSettingsPage />}
@@ -219,6 +227,8 @@ export function SettingsDialog(props: SettingsDialogProps) {
               {activeSection === "browserExtension" && (
                 <BrowserExtensionSettingsPage />
               )}
+              {activeSection === "channels" && <ChannelsSettingsPage />}
+              {activeSection === "performance" && <PerformanceSettingsPage />}
               {activeSection === "about" && <AboutSettingsPage />}
             </div>
           </ScrollArea>

@@ -25,6 +25,7 @@ from src.gateway.routers import (
     mcp,
     memory,
     models,
+    notifications,
     onboarding,
     pipelines,
     runs,
@@ -32,6 +33,7 @@ from src.gateway.routers import (
     skills,
     steering,
     suggestions,
+    system,
     threads,
     triggers,
     uploads,
@@ -103,6 +105,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.exception("No IM channels configured or channel service failed to start")
         _mark_component_status(app, "channels", status="failed", error=str(exc))
 
+    # Start proactive notification service (depends on the channel MessageBus)
+    try:
+        from src.notifications import start_notification_service
+
+        notification_service = start_notification_service()
+        logger.info("Notification service started (enabled=%s)", notification_service.enabled)
+        _mark_component_status(app, "notifications", status="running")
+    except Exception as exc:
+        logger.exception("Notification service failed to start")
+        _mark_component_status(app, "notifications", status="failed", error=str(exc))
+
     # Start control-plane scheduler if enabled
     try:
         from src.control_plane.scheduler import start_control_plane_scheduler
@@ -142,6 +155,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.exception("Failed to stop channel service")
         _mark_component_status(app, "channels", status="failed", error=str(exc))
+
+    # Stop notification service on shutdown
+    try:
+        from src.notifications import stop_notification_service
+
+        stop_notification_service()
+        _mark_component_status(app, "notifications", status="stopped")
+    except Exception as exc:
+        logger.exception("Failed to stop notification service")
+        _mark_component_status(app, "notifications", status="failed", error=str(exc))
 
     # Stop control-plane scheduler on shutdown
     try:
@@ -366,6 +389,9 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
     # Channels API is mounted at /api/channels
     app.include_router(channels.router)
 
+    # Notifications API is mounted at /api/notifications
+    app.include_router(notifications.router)
+
     # Control-plane APIs
     app.include_router(triggers.router)
     app.include_router(pipelines.router)
@@ -378,6 +404,7 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
     app.include_router(handoff.router)
     app.include_router(runs.router)
     app.include_router(steering.router)
+    app.include_router(system.router)
     app.include_router(clarifications.router)
     app.include_router(threads.router)
     app.include_router(vault.router)
