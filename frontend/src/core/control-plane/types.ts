@@ -454,16 +454,30 @@ export interface VaultEntityBrowserItem {
   concepts: VaultEntityConceptItem[];
 }
 
+export interface VaultConceptBrowserItem {
+  slug: string;
+  label: string;
+  degree: number;
+  sources: VaultEntitySourceItem[];
+  entities: VaultEntityConceptItem[];
+}
+
 export interface VaultEntityBrowserResponse {
   generated_at: string;
   counts: {
     total_entities?: number;
+    total_concepts?: number;
     dismissed?: number;
+    dismissed_concepts?: number;
     critical_max_degree?: number;
   } & Record<string, unknown>;
   top: VaultEntityBrowserItem[];
   critical_gaps: VaultEntityBrowserItem[];
   less_covered: VaultEntityBrowserItem[];
+  focused?: VaultEntityBrowserItem | null;
+  concept_top: VaultConceptBrowserItem[];
+  concept_critical_gaps: VaultConceptBrowserItem[];
+  concept_less_covered: VaultConceptBrowserItem[];
 }
 
 export interface VaultEntityDismissalItem {

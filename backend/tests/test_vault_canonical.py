@@ -226,3 +226,48 @@ def test_lint_canonical_aliases_runs_against_manifest(tmp_path: Path) -> None:
     slugs_after = {entry["slug"] for entry in browser["top"]}
     assert "jp-morgan" not in slugs_after or "j-p-morgan" not in slugs_after
     assert browser["counts"]["canonical_merges"] >= 1
+
+
+def test_entity_browser_can_return_focused_entity_outside_visible_buckets(tmp_path: Path) -> None:
+    vault = VaultLearningManager(vault_root=tmp_path)
+    vault._manifest["sources"] = {
+        "src-1": {"title": "Apple 1", "entity_refs": ["Apple"], "concept_refs": []},
+        "src-2": {"title": "Apple 2", "entity_refs": ["Apple"], "concept_refs": []},
+        "src-3": {"title": "Apple 3", "entity_refs": ["Apple"], "concept_refs": []},
+        "src-4": {"title": "Nvidia profile", "entity_refs": ["Nvidia"], "concept_refs": []},
+    }
+
+    browser = vault.get_entity_browser(top_n=1, bottom_n=0, critical_max_degree=0, focus_slug="nvidia")
+
+    assert [entry["slug"] for entry in browser["top"]] == ["apple"]
+    assert browser["critical_gaps"] == []
+    assert browser["less_covered"] == []
+    assert browser["focused"]["slug"] == "nvidia"
+    assert browser["focused"]["label"] == "Nvidia"
+
+
+def test_concept_dismissal_removes_and_restores_from_browser(tmp_path: Path) -> None:
+    vault = VaultLearningManager(vault_root=tmp_path)
+    vault._manifest["sources"] = {
+        "src-1": {
+            "title": "GPU acceleration",
+            "entity_refs": ["Nvidia"],
+            "concept_refs": ["GPU acceleration", "CUDA"],
+        }
+    }
+
+    before = vault.get_entity_browser(top_n=5, bottom_n=5)
+    assert {entry["slug"] for entry in before["concept_top"]} >= {"gpu-acceleration", "cuda"}
+
+    result = vault.dismiss_concept(slug="gpu-acceleration", reason="duplicate", alias_for="CUDA")
+    assert result["alias_for"] == "cuda"
+    assert result["affected_sources"] == ["src-1"]
+    assert vault._manifest["sources"]["src-1"]["concept_refs"] == ["cuda", "CUDA"]
+
+    after = vault.get_entity_browser(top_n=5, bottom_n=5)
+    assert "gpu-acceleration" not in {entry["slug"] for entry in after["concept_top"]}
+    assert vault.list_concept_dismissals()[0]["slug"] == "gpu-acceleration"
+
+    restored = vault.restore_concept_dismissal(slug="gpu-acceleration")
+    assert restored == {"slug": "gpu-acceleration", "restored": True}
+    assert vault.list_concept_dismissals() == []

@@ -235,6 +235,7 @@ class _VaultLearningBase:
             "sufficiency_state": data.get("sufficiency_state", {}),
             "memory_stats": data.get("memory_stats", {}),
             "entity_dismissals": data.get("entity_dismissals", {}),
+            "concept_dismissals": data.get("concept_dismissals", {}),
             "schema_migrated_from": version,
         }
         manifest = VaultManifest.model_validate(payload).model_dump(mode="python")

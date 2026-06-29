@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDownIcon, ChevronRightIcon, Loader2Icon, SearchIcon, TrashIcon, UndoIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -17,10 +17,14 @@ import { Input } from "@/components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  useDismissVaultConcept,
   useDismissVaultEntity,
+  useRestoreVaultConceptDismissal,
   useRestoreVaultEntityDismissal,
+  useStartVaultConceptAutoresearch,
   useStartVaultEntityAutoresearch,
   useVaultEntityBrowser,
+  useVaultConceptDismissals,
   useVaultEntityDismissals,
 } from "@/core/control-plane";
 import type {
@@ -30,10 +34,46 @@ import type {
 } from "@/core/control-plane";
 
 const DEFAULT_GOAL_TEMPLATE = "Expand vault coverage of {entity} with diverse, high-quality sources.";
+const SEARCH_RESULT_PAGE_SIZE = 10;
 
 // Critical gaps can run into the thousands; render in pages so the DOM (and the
 // initial paint) stays cheap. A "Show more" button reveals the next page.
 const CRITICAL_PAGE_SIZE = 100;
+
+export type VaultBrowserTab = "entities" | "concepts";
+
+export type VaultBrowserSearchResult = {
+  kind: VaultBrowserTab;
+  slug: string;
+  label: string;
+  path?: string | null;
+  snippet?: string | null;
+  searchedAt: number;
+};
+
+type ConceptBrowserItem = {
+  slug: string;
+  label: string;
+  degree: number;
+  sources: VaultEntitySourceItem[];
+  entities: Array<{ slug: string; label: string }>;
+  result?: VaultBrowserSearchResult;
+};
+
+type BrowserDismissTarget = {
+  kind: VaultBrowserTab;
+  slug: string;
+  label: string;
+  reason: string;
+  aliasFor: string;
+};
+
+type BrowserResearchTarget = {
+  kind: VaultBrowserTab;
+  slug: string;
+  label: string;
+  goal: string;
+};
 
 function HubAndSpoke({ entity }: { entity: VaultEntityBrowserItem }) {
   const width = 576;
@@ -175,39 +215,65 @@ function EntityListRow({
 }
 
 export function VaultEntityBrowser({
+  activeTab = "entities",
+  focusEntitySlug,
+  focusConceptSlug,
   onSourceOpen,
+  onActiveTabChange,
+  onFocusEntity,
+  onFocusConcept,
+  recentSearchResults = [],
 }: {
+  activeTab?: VaultBrowserTab;
+  focusEntitySlug?: string | null;
+  focusConceptSlug?: string | null;
   onSourceOpen?: (sourcePathOrId: string) => void;
+  onActiveTabChange?: (tab: VaultBrowserTab) => void;
+  onFocusEntity?: (slug: string | null) => void;
+  onFocusConcept?: (slug: string | null) => void;
+  recentSearchResults?: VaultBrowserSearchResult[];
 }) {
   // The entity-browser payload is large, so poll on a slow cadence (3× slower than
   // the old 20s default) — enough to surface background writes while the tab is open
   // without the previous churn; the hook also refreshes on "vault" events + tab focus.
-  const { entityBrowser, isLoading } = useVaultEntityBrowser({ top: 15, bottom: 10, criticalMaxDegree: 2, refetchInterval: 60_000 });
+  const { entityBrowser, isLoading } = useVaultEntityBrowser({
+    top: 15,
+    bottom: 10,
+    criticalMaxDegree: 2,
+    focusSlug: focusEntitySlug,
+    refetchInterval: 60_000,
+  });
   const { dismissals } = useVaultEntityDismissals();
+  const { dismissals: conceptDismissals } = useVaultConceptDismissals();
   const dismissMutation = useDismissVaultEntity();
+  const dismissConceptMutation = useDismissVaultConcept();
   const restoreMutation = useRestoreVaultEntityDismissal();
+  const restoreConceptMutation = useRestoreVaultConceptDismissal();
   const autoresearchMutation = useStartVaultEntityAutoresearch();
+  const conceptAutoresearchMutation = useStartVaultConceptAutoresearch();
 
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [selectedConceptSlug, setSelectedConceptSlug] = useState<string | null>(null);
   const [criticalCollapsed, setCriticalCollapsed] = useState(false);
   const [dismissedCollapsed, setDismissedCollapsed] = useState(true);
   const [criticalVisible, setCriticalVisible] = useState(CRITICAL_PAGE_SIZE);
 
-  const [dismissDialog, setDismissDialog] = useState<{
-    entity: VaultEntityBrowserItem;
-    reason: string;
-    aliasFor: string;
-  } | null>(null);
-  const [researchDialog, setResearchDialog] = useState<{
-    entity: VaultEntityBrowserItem;
-    goal: string;
-  } | null>(null);
+  const [dismissDialog, setDismissDialog] = useState<BrowserDismissTarget | null>(null);
+  const [researchDialog, setResearchDialog] = useState<BrowserResearchTarget | null>(null);
+
+  useEffect(() => {
+    if (focusEntitySlug) setSelectedSlug(focusEntitySlug);
+  }, [focusEntitySlug]);
+
+  useEffect(() => {
+    if (focusConceptSlug) setSelectedConceptSlug(focusConceptSlug);
+  }, [focusConceptSlug]);
 
   const allEntities = useMemo(() => {
     if (!entityBrowser) return [];
     const seen = new Set<string>();
     const combined: VaultEntityBrowserItem[] = [];
-    for (const list of [entityBrowser.top, entityBrowser.critical_gaps]) {
+    for (const list of [entityBrowser.focused ? [entityBrowser.focused] : [], entityBrowser.top, entityBrowser.critical_gaps, entityBrowser.less_covered]) {
       for (const entry of list) {
         if (!seen.has(entry.slug)) {
           seen.add(entry.slug);
@@ -225,6 +291,19 @@ export function VaultEntityBrowser({
         .sort((a, b) => a.label.localeCompare(b.label)),
     [allEntities],
   );
+  const conceptAliasCandidates = useMemo(() => {
+    const seen = new Map<string, { slug: string; label: string }>();
+    for (const list of [
+      entityBrowser?.concept_top ?? [],
+      entityBrowser?.concept_critical_gaps ?? [],
+      entityBrowser?.concept_less_covered ?? [],
+    ]) {
+      for (const entry of list) {
+        seen.set(entry.slug, { slug: entry.slug, label: entry.label });
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [entityBrowser?.concept_critical_gaps, entityBrowser?.concept_less_covered, entityBrowser?.concept_top]);
 
   const selectedEntity = useMemo(() => {
     if (!selectedSlug) return null;
@@ -233,32 +312,83 @@ export function VaultEntityBrowser({
 
   const fallbackEntity = entityBrowser?.top[0] ?? entityBrowser?.critical_gaps[0] ?? null;
   const displayEntity = selectedEntity ?? fallbackEntity;
+  const entitySearchResults = recentSearchResults
+    .filter((item) => item.kind === "entities")
+    .slice(0, SEARCH_RESULT_PAGE_SIZE);
+  const conceptSearchResults = recentSearchResults
+    .filter((item) => item.kind === "concepts")
+    .slice(0, SEARCH_RESULT_PAGE_SIZE);
+
+  const conceptItems = useMemo<ConceptBrowserItem[]>(() => {
+    const bySlug = new Map<string, ConceptBrowserItem>();
+    for (const list of [
+      entityBrowser?.concept_top ?? [],
+      entityBrowser?.concept_critical_gaps ?? [],
+      entityBrowser?.concept_less_covered ?? [],
+    ]) {
+      for (const concept of list) {
+        bySlug.set(concept.slug, {
+          slug: concept.slug,
+          label: concept.label,
+          degree: concept.degree,
+          sources: concept.sources,
+          entities: concept.entities,
+        });
+      }
+    }
+    for (const result of conceptSearchResults) {
+      const entry = bySlug.get(result.slug) ?? {
+        slug: result.slug,
+        label: result.label,
+        degree: 0,
+        sources: [],
+        entities: [],
+      };
+      entry.result = result;
+      entry.label = result.label || entry.label;
+      bySlug.set(result.slug, entry);
+    }
+    return [...bySlug.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [conceptSearchResults, entityBrowser?.concept_critical_gaps, entityBrowser?.concept_less_covered, entityBrowser?.concept_top]);
+
+  const selectedConcept = useMemo(() => {
+    if (!selectedConceptSlug) return null;
+    return conceptItems.find((entry) => entry.slug === selectedConceptSlug) ?? null;
+  }, [conceptItems, selectedConceptSlug]);
+
+  const displayConcept = selectedConcept ?? conceptItems[0] ?? null;
 
   const criticalGaps = entityBrowser?.critical_gaps ?? [];
   const visibleCriticalGaps = criticalGaps.slice(0, criticalVisible);
   const criticalRemaining = criticalGaps.length - visibleCriticalGaps.length;
+  const conceptCriticalGaps = entityBrowser?.concept_critical_gaps ?? [];
+  const visibleConceptCriticalGaps = conceptCriticalGaps.slice(0, criticalVisible);
+  const conceptCriticalRemaining = conceptCriticalGaps.length - visibleConceptCriticalGaps.length;
 
-  const handleResearch = (entity: VaultEntityBrowserItem) => {
+  const handleResearch = (target: { kind: VaultBrowserTab; slug: string; label: string }) => {
     setResearchDialog({
-      entity,
-      goal: DEFAULT_GOAL_TEMPLATE.replace("{entity}", entity.label),
+      kind: target.kind,
+      slug: target.slug,
+      label: target.label,
+      goal: DEFAULT_GOAL_TEMPLATE.replace("{entity}", target.label),
     });
   };
 
   const submitResearch = () => {
     if (!researchDialog) return;
-    const { entity, goal } = researchDialog;
-    autoresearchMutation.mutate(
+    const { kind, slug, label, goal } = researchDialog;
+    const mutation = kind === "entities" ? autoresearchMutation : conceptAutoresearchMutation;
+    mutation.mutate(
       {
-        slug: entity.slug,
-        request: { label: entity.label, endpoint_goal: goal },
+        slug,
+        request: { label, endpoint_goal: goal },
       },
       {
         onSuccess: (data) => {
           toast.success(
             data.objective_id
-              ? `Autoresearch queued for "${entity.label}".`
-              : `Autoresearch started for "${entity.label}".`,
+              ? `Autoresearch queued for "${label}".`
+              : `Autoresearch started for "${label}".`,
           );
           setResearchDialog(null);
         },
@@ -269,10 +399,11 @@ export function VaultEntityBrowser({
 
   const submitDismiss = () => {
     if (!dismissDialog) return;
-    const { entity, reason, aliasFor } = dismissDialog;
-    dismissMutation.mutate(
+    const { kind, slug, label, reason, aliasFor } = dismissDialog;
+    const mutation = kind === "entities" ? dismissMutation : dismissConceptMutation;
+    mutation.mutate(
       {
-        slug: entity.slug,
+        slug,
         request: {
           reason: reason.trim() || undefined,
           alias_for: aliasFor.trim() || null,
@@ -282,10 +413,11 @@ export function VaultEntityBrowser({
         onSuccess: () => {
           toast.success(
             aliasFor.trim()
-              ? `"${entity.label}" merged into ${aliasFor.trim()}.`
-              : `"${entity.label}" dismissed.`,
+              ? `"${label}" merged into ${aliasFor.trim()}.`
+              : `"${label}" dismissed.`,
           );
-          if (selectedSlug === entity.slug) setSelectedSlug(null);
+          if (kind === "entities" && selectedSlug === slug) setSelectedSlug(null);
+          if (kind === "concepts" && selectedConceptSlug === slug) setSelectedConceptSlug(null);
           setDismissDialog(null);
         },
         onError: (error) => toast.error(error.message),
@@ -296,9 +428,44 @@ export function VaultEntityBrowser({
   const counts = entityBrowser?.counts ?? {};
   const criticalMaxDegree = Number(counts.critical_max_degree ?? 2);
 
+  const selectEntity = (slug: string | null) => {
+    setSelectedSlug(slug);
+    onFocusEntity?.(slug);
+    onActiveTabChange?.("entities");
+  };
+
+  const selectConcept = (slug: string | null) => {
+    setSelectedConceptSlug(slug);
+    onFocusConcept?.(slug);
+    onActiveTabChange?.("concepts");
+  };
+
   return (
-    <div className="flex min-h-0 flex-1 gap-3 text-xs">
-      <div className="flex w-72 min-w-0 shrink-0 flex-col gap-3 overflow-y-auto rounded border p-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 text-xs">
+      <div className="flex shrink-0 items-center justify-between gap-2">
+        <div className="inline-flex rounded-md border bg-background p-0.5">
+          <Button
+            size="sm"
+            variant={activeTab === "entities" ? "default" : "ghost"}
+            className="h-7"
+            onClick={() => onActiveTabChange?.("entities")}
+          >
+            Entities
+          </Button>
+          <Button
+            size="sm"
+            variant={activeTab === "concepts" ? "default" : "ghost"}
+            className="h-7"
+            onClick={() => onActiveTabChange?.("concepts")}
+          >
+            Concepts
+          </Button>
+        </div>
+      </div>
+
+      {activeTab === "entities" ? (
+        <div className="flex min-h-0 flex-1 gap-3">
+          <div className="flex w-72 min-w-0 shrink-0 flex-col gap-3 overflow-y-auto rounded border p-2">
         <div className="text-muted-foreground">
           {isLoading ? (
             <span className="flex items-center gap-1">
@@ -310,6 +477,34 @@ export function VaultEntityBrowser({
             </span>
           )}
         </div>
+
+        {/* Search results */}
+        <section>
+          <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Search Results
+          </h3>
+          <div className="space-y-0.5">
+            {entitySearchResults.length === 0 ? (
+              <p className="px-2 py-1 text-muted-foreground">No recent entity searches.</p>
+            ) : (
+              entitySearchResults.map((entry) => (
+                <EntityListRow
+                  key={`search-${entry.slug}`}
+                  entity={{
+                    slug: entry.slug,
+                    label: entry.label,
+                    degree: 0,
+                    sources: [],
+                    concepts: [],
+                  }}
+                  selected={selectedSlug === entry.slug}
+                  onClick={() => selectEntity(entry.slug)}
+                  showActions={false}
+                />
+              ))
+            )}
+          </div>
+        </section>
 
         {/* Most connected */}
         <section>
@@ -325,7 +520,7 @@ export function VaultEntityBrowser({
                   key={`top-${entry.slug}`}
                   entity={entry}
                   selected={selectedSlug === entry.slug}
-                  onClick={() => setSelectedSlug(entry.slug)}
+                  onClick={() => selectEntity(entry.slug)}
                   showActions={false}
                 />
               ))
@@ -363,10 +558,18 @@ export function VaultEntityBrowser({
                       key={`crit-${entry.slug}`}
                       entity={entry}
                       selected={selectedSlug === entry.slug}
-                      onClick={() => setSelectedSlug(entry.slug)}
+                      onClick={() => selectEntity(entry.slug)}
                       showActions
-                      onResearch={() => handleResearch(entry)}
-                      onDismiss={() => setDismissDialog({ entity: entry, reason: "", aliasFor: "" })}
+                      onResearch={() => handleResearch({ kind: "entities", slug: entry.slug, label: entry.label })}
+                      onDismiss={() =>
+                        setDismissDialog({
+                          kind: "entities",
+                          slug: entry.slug,
+                          label: entry.label,
+                          reason: "",
+                          aliasFor: "",
+                        })
+                      }
                     />
                   ))}
                   {criticalRemaining > 0 ? (
@@ -448,14 +651,24 @@ export function VaultEntityBrowser({
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <Button size="sm" variant="outline" onClick={() => handleResearch(displayEntity)}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleResearch({ kind: "entities", slug: displayEntity.slug, label: displayEntity.label })}
+                >
                   <SearchIcon className="mr-1 size-3.5" /> Research deeper
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() =>
-                    setDismissDialog({ entity: displayEntity, reason: "", aliasFor: "" })
+                    setDismissDialog({
+                      kind: "entities",
+                      slug: displayEntity.slug,
+                      label: displayEntity.label,
+                      reason: "",
+                      aliasFor: "",
+                    })
                   }
                 >
                   <TrashIcon className="mr-1 size-3.5" /> Dismiss / merge
@@ -514,6 +727,288 @@ export function VaultEntityBrowser({
           </p>
         )}
       </div>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 gap-3">
+          <div className="flex w-72 min-w-0 shrink-0 flex-col gap-3 overflow-y-auto rounded border p-2">
+            <div className="text-muted-foreground">
+              {isLoading ? (
+                <span className="flex items-center gap-1">
+                  <Loader2Icon className="size-3.5 animate-spin" /> Loading concepts...
+                </span>
+              ) : (
+                <span>
+                  {Number(counts.total_concepts ?? 0)} concepts · {Number(counts.dismissed_concepts ?? 0)} dismissed
+                </span>
+              )}
+            </div>
+
+            <section>
+              <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Search Results
+              </h3>
+              <div className="space-y-0.5">
+                {conceptSearchResults.length === 0 ? (
+                  <p className="px-2 py-1 text-muted-foreground">No recent concept searches.</p>
+                ) : (
+                  conceptSearchResults.map((entry) => {
+                    const concept = conceptItems.find((item) => item.slug === entry.slug);
+                    return (
+                      <button
+                        key={`concept-search-${entry.slug}`}
+                        type="button"
+                        onClick={() => selectConcept(entry.slug)}
+                        className={`flex w-full min-w-0 items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted ${
+                          selectedConceptSlug === entry.slug ? "bg-muted font-medium" : ""
+                        }`}
+                      >
+                        <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded bg-muted-foreground/15 px-1 text-[10px] tabular-nums">
+                          {concept?.degree ?? 0}
+                        </span>
+                        <span className="truncate" title={entry.label}>
+                          {entry.label}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+
+            <section>
+              <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Most connected
+              </h3>
+              <div className="space-y-0.5">
+                {(entityBrowser?.concept_top ?? []).length === 0 ? (
+                  <p className="px-2 py-1 text-muted-foreground">No concepts yet.</p>
+                ) : (
+                  entityBrowser?.concept_top.map((entry) => (
+                    <button
+                      key={`concept-top-${entry.slug}`}
+                      type="button"
+                      onClick={() => selectConcept(entry.slug)}
+                      className={`flex w-full min-w-0 items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted ${
+                        displayConcept?.slug === entry.slug ? "bg-muted font-medium" : ""
+                      }`}
+                    >
+                      <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded bg-muted-foreground/15 px-1 text-[10px] tabular-nums">
+                        {entry.entities.length}
+                      </span>
+                      <span className="truncate" title={entry.label}>
+                        {entry.label}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section>
+              <button
+                type="button"
+                onClick={() => setCriticalCollapsed((value) => !value)}
+                className="mb-1 flex w-full items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                {criticalCollapsed ? (
+                  <ChevronRightIcon className="size-3" />
+                ) : (
+                  <ChevronDownIcon className="size-3" />
+                )}
+                <span>
+                  Critical gaps (degree ≤ {criticalMaxDegree}) ·{" "}
+                  {conceptCriticalGaps.length}
+                </span>
+              </button>
+              {!criticalCollapsed ? (
+                <div className="space-y-0.5">
+                  {conceptCriticalGaps.length === 0 ? (
+                    <p className="px-2 py-1 text-muted-foreground">
+                      All concepts have ≥ {criticalMaxDegree + 1} sources — coverage looks solid.
+                    </p>
+                  ) : (
+                    <>
+                      {visibleConceptCriticalGaps.map((entry) => (
+                        <div
+                          key={`concept-crit-${entry.slug}`}
+                          className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted ${
+                            displayConcept?.slug === entry.slug ? "bg-muted font-medium" : ""
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => selectConcept(entry.slug)}
+                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                          >
+                            <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded bg-muted-foreground/15 px-1 text-[10px] tabular-nums">
+                              {entry.degree}
+                            </span>
+                            <span className="truncate" title={entry.label}>
+                              {entry.label}
+                            </span>
+                          </button>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              className="rounded p-1 hover:bg-background"
+                              title="Research deeper (autoresearch)"
+                              aria-label="Research deeper"
+                              onClick={() => handleResearch({ kind: "concepts", slug: entry.slug, label: entry.label })}
+                            >
+                              <SearchIcon className="size-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded p-1 hover:bg-background"
+                              title="Not a concept / merge"
+                              aria-label="Dismiss or merge"
+                              onClick={() =>
+                                setDismissDialog({
+                                  kind: "concepts",
+                                  slug: entry.slug,
+                                  label: entry.label,
+                                  reason: "",
+                                  aliasFor: "",
+                                })
+                              }
+                            >
+                              <TrashIcon className="size-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {conceptCriticalRemaining > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setCriticalVisible((value) => value + CRITICAL_PAGE_SIZE)}
+                          className="mt-1 w-full rounded border border-dashed px-2 py-1 text-[11px] text-muted-foreground hover:bg-background"
+                        >
+                          Show {Math.min(CRITICAL_PAGE_SIZE, conceptCriticalRemaining)} more ({conceptCriticalRemaining} remaining)
+                        </button>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </section>
+
+            <section>
+              <button
+                type="button"
+                onClick={() => setDismissedCollapsed((value) => !value)}
+                className="mb-1 flex w-full items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                {dismissedCollapsed ? (
+                  <ChevronRightIcon className="size-3" />
+                ) : (
+                  <ChevronDownIcon className="size-3" />
+                )}
+                <span>Dismissed · {conceptDismissals.length}</span>
+              </button>
+              {!dismissedCollapsed ? (
+                <div className="space-y-0.5">
+                  {conceptDismissals.length === 0 ? (
+                    <p className="px-2 py-1 text-muted-foreground">No dismissed concepts.</p>
+                  ) : (
+                    conceptDismissals.map((item) => (
+                      <div
+                        key={`concept-dismissed-${item.slug}`}
+                        className="flex items-center gap-2 rounded px-2 py-1 text-muted-foreground"
+                      >
+                        <span className="min-w-0 flex-1 truncate" title={item.reason || item.label}>
+                          {item.label}
+                          {item.alias_for ? ` → ${item.alias_for}` : ""}
+                        </span>
+                        <button
+                          type="button"
+                          className="rounded p-1 hover:bg-background"
+                          title="Restore"
+                          aria-label="Restore dismissal"
+                          onClick={() =>
+                            restoreConceptMutation.mutate(item.slug, {
+                              onSuccess: () => toast.success(`Restored "${item.label}".`),
+                              onError: (error) => toast.error(error.message),
+                            })
+                          }
+                        >
+                          <UndoIcon className="size-3.5" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </section>
+          </div>
+
+          <div className="flex min-h-0 flex-1 flex-col rounded border p-3">
+            {displayConcept ? (
+              <>
+                <div className="mb-2 flex shrink-0 flex-wrap items-baseline justify-between gap-2">
+                  <div>
+                    <h2 className="text-sm font-semibold">{displayConcept.label}</h2>
+                    <p className="text-muted-foreground">
+                      {displayConcept.degree} source{displayConcept.degree === 1 ? "" : "s"} ·{" "}
+                      {displayConcept.entities.length} connected entit
+                      {displayConcept.entities.length === 1 ? "y" : "ies"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleResearch({ kind: "concepts", slug: displayConcept.slug, label: displayConcept.label })}
+                    >
+                      <SearchIcon className="mr-1 size-3.5" /> Research deeper
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setDismissDialog({
+                          kind: "concepts",
+                          slug: displayConcept.slug,
+                          label: displayConcept.label,
+                          reason: "",
+                          aliasFor: "",
+                        })
+                      }
+                    >
+                      <TrashIcon className="mr-1 size-3.5" /> Dismiss / merge
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid min-h-0 flex-1 gap-2 md:grid-cols-2">
+                  <ListSection
+                    title="Sources"
+                    items={displayConcept.sources.map((source: VaultEntitySourceItem) => ({
+                      key: source.source_id,
+                      primary: source.title || source.source_id,
+                      secondary: source.url,
+                      onClick: onSourceOpen ? () => onSourceOpen(source.source_id) : undefined,
+                    }))}
+                  />
+                  <ListSection
+                    title="Connected entities"
+                    items={displayConcept.entities.map((entity) => ({
+                      key: entity.slug,
+                      primary: entity.label,
+                      secondary: entity.slug,
+                      onClick: () => {
+                        selectEntity(entity.slug);
+                      },
+                    }))}
+                  />
+                </div>
+              </>
+            ) : (
+              <p className="text-muted-foreground">
+                {isLoading ? "Loading concepts..." : "No concepts yet. Run ingest to populate the vault."}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Research dialog */}
       <Dialog
@@ -522,10 +1017,11 @@ export function VaultEntityBrowser({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Research deeper: {researchDialog?.entity.label}</DialogTitle>
+            <DialogTitle>Research deeper: {researchDialog?.label}</DialogTitle>
             <DialogDescription>
               Edit the research goal and queue an autoresearch run. The placeholder is a starting
-              point — make it specific to what you want to learn about this entity.
+              point — make it specific to what you want to learn about this{" "}
+              {researchDialog?.kind === "concepts" ? "concept" : "entity"}.
             </DialogDescription>
           </DialogHeader>
           <Textarea
@@ -541,8 +1037,17 @@ export function VaultEntityBrowser({
             <Button variant="outline" onClick={() => setResearchDialog(null)}>
               Cancel
             </Button>
-            <Button onClick={submitResearch} disabled={autoresearchMutation.isPending}>
-              {autoresearchMutation.isPending ? (
+            <Button
+              onClick={submitResearch}
+              disabled={
+                researchDialog?.kind === "concepts"
+                  ? conceptAutoresearchMutation.isPending
+                  : autoresearchMutation.isPending
+              }
+            >
+              {(researchDialog?.kind === "concepts"
+                ? conceptAutoresearchMutation.isPending
+                : autoresearchMutation.isPending) ? (
                 <Loader2Icon className="mr-1 size-4 animate-spin" />
               ) : null}
               Queue autoresearch
@@ -558,10 +1063,11 @@ export function VaultEntityBrowser({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Dismiss or merge: {dismissDialog?.entity.label}</DialogTitle>
+            <DialogTitle>Dismiss or merge: {dismissDialog?.label}</DialogTitle>
             <DialogDescription>
-              Dismiss to mark as not-an-entity (e.g. extraction noise), or merge into another
-              entity by selecting an alias. Affected source records will be rewritten.
+              Dismiss to mark as extraction noise, or merge into another{" "}
+              {dismissDialog?.kind === "concepts" ? "concept" : "entity"} by selecting an alias.
+              Affected source records will be rewritten.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -574,7 +1080,11 @@ export function VaultEntityBrowser({
                     current ? { ...current, reason: event.target.value } : current,
                   )
                 }
-                placeholder="e.g. tokenizer noise, duplicate of Apple Inc"
+                placeholder={
+                  dismissDialog?.kind === "concepts"
+                    ? "e.g. tokenizer noise, duplicate concept"
+                    : "e.g. tokenizer noise, duplicate of Apple Inc"
+                }
               />
             </label>
             <label className="block text-xs">
@@ -586,11 +1096,24 @@ export function VaultEntityBrowser({
                     current ? { ...current, aliasFor: event.target.value } : current,
                   )
                 }
-                placeholder="Type an entity label or slug"
-                list="vault-entity-alias-candidates"
+                placeholder={`Type a ${dismissDialog?.kind === "concepts" ? "concept" : "entity"} label or slug`}
+                list={
+                  dismissDialog?.kind === "concepts"
+                    ? "vault-concept-alias-candidates"
+                    : "vault-entity-alias-candidates"
+                }
               />
               <datalist id="vault-entity-alias-candidates">
                 {aliasCandidates.map((candidate) => (
+                  <option
+                    key={candidate.slug}
+                    value={candidate.slug}
+                    label={candidate.label}
+                  />
+                ))}
+              </datalist>
+              <datalist id="vault-concept-alias-candidates">
+                {conceptAliasCandidates.map((candidate) => (
                   <option
                     key={candidate.slug}
                     value={candidate.slug}
@@ -607,8 +1130,17 @@ export function VaultEntityBrowser({
             <Button variant="outline" onClick={() => setDismissDialog(null)}>
               Cancel
             </Button>
-            <Button onClick={submitDismiss} disabled={dismissMutation.isPending}>
-              {dismissMutation.isPending ? (
+            <Button
+              onClick={submitDismiss}
+              disabled={
+                dismissDialog?.kind === "concepts"
+                  ? dismissConceptMutation.isPending
+                  : dismissMutation.isPending
+              }
+            >
+              {(dismissDialog?.kind === "concepts"
+                ? dismissConceptMutation.isPending
+                : dismissMutation.isPending) ? (
                 <Loader2Icon className="mr-1 size-4 animate-spin" />
               ) : null}
               {dismissDialog?.aliasFor.trim() ? "Merge" : "Dismiss"}

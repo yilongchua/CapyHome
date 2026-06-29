@@ -111,6 +111,13 @@ class UnifiedVaultSearchService:
             return updated_at
         return datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat()
 
+    def _relative_vault_path(self, path: Path | str) -> str:
+        resolved = Path(path)
+        try:
+            return str(resolved.resolve().relative_to(self.vault_root))
+        except Exception:
+            return str(path)
+
     def _load_pages(self, categories: list[str]) -> list[CompiledVaultPage]:
         pages: list[CompiledVaultPage] = []
         for category in categories:
@@ -133,7 +140,7 @@ class UnifiedVaultSearchService:
                         title=title,
                         category=category,
                         kind=category,
-                        path=str(path),
+                        path=self._relative_vault_path(path),
                         tags=tags if isinstance(tags, list) else [],
                         source_url=str(frontmatter.get("source_url") or frontmatter.get("url") or ""),
                         body=body,
@@ -194,8 +201,14 @@ class UnifiedVaultSearchService:
             vector_hits = self._vector_index.search(query, categories=cats, limit=max(20, len(results) or 10))
         except Exception:
             return results
-        vector_rank_by_path = {str(item.get("path") or ""): rank for rank, item in enumerate(vector_hits, start=1)}
-        vector_by_path = {str(item.get("path") or ""): item for item in vector_hits}
+        vector_rank_by_path = {
+            self._relative_vault_path(str(item.get("path") or "")): rank
+            for rank, item in enumerate(vector_hits, start=1)
+        }
+        vector_by_path = {
+            self._relative_vault_path(str(item.get("path") or "")): item
+            for item in vector_hits
+        }
 
         merged: dict[str, dict[str, Any]] = {str(item["path"]): dict(item) for item in results}
         for path, vector_item in vector_by_path.items():
@@ -210,7 +223,7 @@ class UnifiedVaultSearchService:
                 "kind": vector_item.get("category"),
                 "category": vector_item.get("category"),
                 "title": vector_item.get("title"),
-                "path": vector_item.get("path"),
+                "path": path,
                 "snippet": _excerpt(str(vector_item.get("text") or ""), query_tokens),
                 "excerpt": _excerpt(str(vector_item.get("text") or ""), query_tokens),
                 "tags": [],

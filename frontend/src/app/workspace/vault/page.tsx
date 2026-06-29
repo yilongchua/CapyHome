@@ -15,6 +15,7 @@ import {
   PlayIcon,
   RefreshCwIcon,
   SaveIcon,
+  SearchIcon,
   SparklesIcon,
   SquareIcon,
   Trash2Icon,
@@ -23,9 +24,8 @@ import { useEffect, useMemo, useState } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,10 +34,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownContent } from "@/components/workspace/messages/markdown-content";
-import { VaultEntityBrowser } from "@/components/workspace/vault/vault-entity-browser";
+import {
+  VaultEntityBrowser,
+  type VaultBrowserSearchResult,
+  type VaultBrowserTab,
+} from "@/components/workspace/vault/vault-entity-browser";
 import {
   WorkspaceBody,
   WorkspaceContainer,
@@ -56,9 +61,10 @@ import {
   useVaultFile,
   useVaultIngestStatus,
   useVaultLintStatus,
+  useVaultSearch,
   useVaultStatus,
 } from "@/core/control-plane";
-import type { VaultExplorerFileNode, VaultExplorerResponse } from "@/core/control-plane";
+import type { VaultExplorerFileNode, VaultExplorerResponse, VaultSearchItem } from "@/core/control-plane";
 import { useI18n } from "@/core/i18n/hooks";
 import { useModels } from "@/core/models/hooks";
 import { streamdownPlugins } from "@/core/streamdown";
@@ -73,6 +79,19 @@ type TreeNode = {
   hasChildren?: boolean;
   childCount?: number;
 };
+
+type VaultSearchSection = {
+  key: "entities" | "concepts" | "sources";
+  title: string;
+  description: string;
+  results: VaultSearchItem[];
+  total: number;
+  isLoading: boolean;
+  error: unknown;
+};
+
+const VAULT_BROWSER_RECENT_SEARCHES_KEY = "vault-browser-recent-search-results";
+const VAULT_BROWSER_RECENT_SEARCH_LIMIT = 10;
 
 const TREE_CHILDREN_PAGE_SIZE = 150;
 
@@ -215,6 +234,37 @@ function formatEtaLabel(seconds: number): string {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}min${minutes === 1 ? "" : "s"}`;
+}
+
+function vaultMatchLabel(item: VaultSearchItem): string {
+  if (item.rank === 1) return "Closest";
+  if (item.score >= 0.02 || item.rank <= 3) return "Strong";
+  if (item.score >= 0.012 || item.rank <= 10) return "Good";
+  return "Related";
+}
+
+function slugFromVaultSearchItem(item: VaultSearchItem): string | null {
+  if (item.id?.trim()) return item.id.trim();
+  const path = item.path?.trim();
+  if (!path) return null;
+  const filename = path.split("/").pop() ?? "";
+  return filename.replace(/\.md$/i, "") || null;
+}
+
+function searchResultFromVaultItem(
+  kind: VaultBrowserTab,
+  item: VaultSearchItem,
+): VaultBrowserSearchResult | null {
+  const slug = slugFromVaultSearchItem(item);
+  if (!slug) return null;
+  return {
+    kind,
+    slug,
+    label: item.title ?? item.id ?? slug,
+    path: item.path ?? null,
+    snippet: item.snippet ?? null,
+    searchedAt: Date.now(),
+  };
 }
 
 // Dead: the backend returns every level already sorted (directories first, then
@@ -403,11 +453,80 @@ export default function VaultPage() {
   })();
   const [rootCollapsed, setRootCollapsed] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [previewTab, setPreviewTab] = useState<"preview" | "entities">("entities");
+  const [previewTab, setPreviewTab] = useState<"preview" | "entities" | "search">("entities");
+  const [vaultSearchQuery, setVaultSearchQuery] = useState("");
+  const [debouncedVaultSearchQuery, setDebouncedVaultSearchQuery] = useState("");
+  const [focusedEntitySlug, setFocusedEntitySlug] = useState<string | null>(null);
+  const [focusedConceptSlug, setFocusedConceptSlug] = useState<string | null>(null);
+  const [browserTab, setBrowserTab] = useState<VaultBrowserTab>("entities");
+  const [recentBrowserSearchResults, setRecentBrowserSearchResults] = useState<VaultBrowserSearchResult[]>([]);
   const [editorCollapsed, setEditorCollapsed] = useState(false);
   const editorPanelRef = usePanelRef();
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({});
   const { vaultFile, isLoading: vaultFileLoading, error: vaultFileError } = useVaultFile(selectedPath);
+  const activeVaultSearchQuery = debouncedVaultSearchQuery.trim();
+  const vaultSearchEnabled = previewTab === "search" && Boolean(activeVaultSearchQuery);
+  const entityVaultSearch = useVaultSearch(activeVaultSearchQuery, {
+    enabled: vaultSearchEnabled,
+    limit: 8,
+    categories: ["entities"],
+  });
+  const conceptVaultSearch = useVaultSearch(activeVaultSearchQuery, {
+    enabled: vaultSearchEnabled,
+    limit: 8,
+    categories: ["concepts"],
+  });
+  const sourceVaultSearch = useVaultSearch(activeVaultSearchQuery, {
+    enabled: vaultSearchEnabled,
+    limit: 8,
+    categories: ["sources"],
+  });
+  const vaultSearchLoading =
+    entityVaultSearch.isLoading || conceptVaultSearch.isLoading || sourceVaultSearch.isLoading;
+  const vaultSearchSections = useMemo<VaultSearchSection[]>(() => [
+    {
+      key: "entities",
+      title: "Entities",
+      description: "People, organizations, products, places, and named things.",
+      results: entityVaultSearch.results?.items ?? [],
+      total: entityVaultSearch.results?.total ?? 0,
+      isLoading: entityVaultSearch.isLoading,
+      error: entityVaultSearch.error,
+    },
+    {
+      key: "concepts",
+      title: "Concepts",
+      description: "Ideas, themes, abstractions, and recurring topics.",
+      results: conceptVaultSearch.results?.items ?? [],
+      total: conceptVaultSearch.results?.total ?? 0,
+      isLoading: conceptVaultSearch.isLoading,
+      error: conceptVaultSearch.error,
+    },
+    {
+      key: "sources",
+      title: "Sources",
+      description: "Compiled notes and saved source documents.",
+      results: sourceVaultSearch.results?.items ?? [],
+      total: sourceVaultSearch.results?.total ?? 0,
+      isLoading: sourceVaultSearch.isLoading,
+      error: sourceVaultSearch.error,
+    },
+  ], [
+    conceptVaultSearch.error,
+    conceptVaultSearch.isLoading,
+    conceptVaultSearch.results?.items,
+    conceptVaultSearch.results?.total,
+    entityVaultSearch.error,
+    entityVaultSearch.isLoading,
+    entityVaultSearch.results?.items,
+    entityVaultSearch.results?.total,
+    sourceVaultSearch.error,
+    sourceVaultSearch.isLoading,
+    sourceVaultSearch.results?.items,
+    sourceVaultSearch.results?.total,
+  ]);
+  const vaultSearchHasResults = vaultSearchSections.some((section) => section.results.length > 0);
+  const vaultSearchHasError = vaultSearchSections.some((section) => section.error);
   const [editableContent, setEditableContent] = useState("");
   const effectiveExplorer: VaultExplorerResponse | null = explorer;
 
@@ -425,6 +544,34 @@ export default function VaultPage() {
     setPreviewTab("preview");
   };
 
+  const handleVaultSearchResultOpen = (section: VaultSearchSection, item: VaultSearchItem) => {
+    if (section.key === "sources") {
+      if (item.path) handleSelectFile(item.path);
+      return;
+    }
+    const searchResult = searchResultFromVaultItem(section.key, item);
+    if (searchResult) {
+      setRecentBrowserSearchResults((current) => {
+        const deduped = current.filter(
+          (entry) => !(entry.kind === searchResult.kind && entry.slug === searchResult.slug),
+        );
+        return [searchResult, ...deduped].slice(0, VAULT_BROWSER_RECENT_SEARCH_LIMIT);
+      });
+    }
+    if (section.key === "entities") {
+      setBrowserTab("entities");
+      setFocusedEntitySlug(searchResult?.slug ?? slugFromVaultSearchItem(item));
+    } else {
+      setBrowserTab("concepts");
+      setFocusedConceptSlug(searchResult?.slug ?? slugFromVaultSearchItem(item));
+    }
+    setPreviewTab("entities");
+  };
+
+  const handleVaultSearch = () => {
+    setDebouncedVaultSearchQuery(vaultSearchQuery.trim());
+  };
+
   useEffect(() => {
     document.title = `${t.pages.vault} - ${t.pages.appName}`;
   }, [t.pages.appName, t.pages.vault]);
@@ -432,6 +579,44 @@ export default function VaultPage() {
   useEffect(() => {
     setEditableContent(vaultFile?.content ?? "");
   }, [vaultFile?.content, vaultFile?.path]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedVaultSearchQuery(vaultSearchQuery);
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [vaultSearchQuery]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(VAULT_BROWSER_RECENT_SEARCHES_KEY);
+      const parsed = raw ? (JSON.parse(raw) as VaultBrowserSearchResult[]) : [];
+      if (Array.isArray(parsed)) {
+        setRecentBrowserSearchResults(
+          parsed
+            .filter((item) =>
+              (item.kind === "entities" || item.kind === "concepts") &&
+              typeof item.slug === "string" &&
+              typeof item.label === "string",
+            )
+            .slice(0, VAULT_BROWSER_RECENT_SEARCH_LIMIT),
+        );
+      }
+    } catch {
+      /* ignore unavailable or malformed storage */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        VAULT_BROWSER_RECENT_SEARCHES_KEY,
+        JSON.stringify(recentBrowserSearchResults.slice(0, VAULT_BROWSER_RECENT_SEARCH_LIMIT)),
+      );
+    } catch {
+      /* ignore unavailable storage */
+    }
+  }, [recentBrowserSearchResults]);
 
   return (
     <WorkspaceContainer>
@@ -819,10 +1004,21 @@ export default function VaultPage() {
                   >
                     <div className="flex gap-2">
                       <Button size="sm" variant={previewTab === "preview" ? "default" : "outline"} onClick={() => setPreviewTab("preview")}>Preview</Button>
-                      <Button size="sm" variant={previewTab === "entities" ? "default" : "outline"} onClick={() => setPreviewTab("entities")}>Entity Browser</Button>
+                      <Button size="sm" variant={previewTab === "entities" ? "default" : "outline"} onClick={() => setPreviewTab("entities")}>Browser</Button>
+                      <Button size="sm" variant={previewTab === "search" ? "default" : "outline"} onClick={() => setPreviewTab("search")}>
+                        <SearchIcon className="mr-1 size-3.5" />
+                        Search
+                      </Button>
                     </div>
                     {previewTab === "entities" ? (
                       <VaultEntityBrowser
+                        focusEntitySlug={focusedEntitySlug}
+                        focusConceptSlug={focusedConceptSlug}
+                        activeTab={browserTab}
+                        recentSearchResults={recentBrowserSearchResults}
+                        onActiveTabChange={setBrowserTab}
+                        onFocusEntity={setFocusedEntitySlug}
+                        onFocusConcept={setFocusedConceptSlug}
                         onSourceOpen={(sourceId) => {
                           // The explorer tree is loaded lazily, so resolve the compiled
                           // source by its deterministic path (02_compiled/sources/{id}.md)
@@ -830,6 +1026,120 @@ export default function VaultPage() {
                           handleSelectFile(`02_compiled/sources/${sourceId}.md`);
                         }}
                       />
+                    ) : previewTab === "search" ? (
+                      <div className="flex min-h-0 flex-1 flex-col space-y-3">
+                        <form
+                          className="flex shrink-0 items-center gap-2"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            handleVaultSearch();
+                          }}
+                        >
+                          <div className="relative min-w-0 flex-1">
+                            <SearchIcon className="text-muted-foreground pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" />
+                            <Input
+                              value={vaultSearchQuery}
+                              onChange={(event) => setVaultSearchQuery(event.target.value)}
+                              className="pl-9"
+                              placeholder="Search entities and concepts"
+                              aria-label="Search entities and concepts in Knowledge Vault"
+                            />
+                          </div>
+                          <Button type="submit" size="sm" disabled={!vaultSearchQuery.trim() || vaultSearchLoading}>
+                            {vaultSearchLoading ? (
+                              <Loader2Icon className="mr-2 size-4 animate-spin" />
+                            ) : (
+                              <SearchIcon className="mr-2 size-4" />
+                            )}
+                            Search
+                          </Button>
+                        </form>
+                        <div className="min-h-0 flex-1 overflow-y-auto rounded border">
+                          {!activeVaultSearchQuery ? (
+                            <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
+                              Search for a specific entity, concept, source, or note in the knowledge vault.
+                            </div>
+                          ) : vaultSearchLoading && !vaultSearchHasResults ? (
+                            <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+                              <Loader2Icon className="size-4 animate-spin" />
+                              Searching vault...
+                            </div>
+                          ) : !vaultSearchHasResults && vaultSearchHasError ? (
+                            <div className="p-4 text-sm text-destructive">Vault search failed.</div>
+                          ) : !vaultSearchHasResults ? (
+                            <div className="p-4 text-sm text-muted-foreground">
+                              No vault results for &quot;{activeVaultSearchQuery}&quot;.
+                            </div>
+                          ) : (
+                            <div className="space-y-4 p-3">
+                              {vaultSearchSections.map((section) => (
+                                <section key={section.key} className="space-y-2">
+                                  <div className="flex min-w-0 items-center gap-2">
+                                    <div className="min-w-0">
+                                      <h3 className="text-sm font-medium">{section.title}</h3>
+                                      <p className="truncate text-xs text-muted-foreground">{section.description}</p>
+                                    </div>
+                                    {section.isLoading ? (
+                                      <Loader2Icon className="ml-auto size-4 shrink-0 animate-spin text-muted-foreground" />
+                                    ) : (
+                                      <Badge variant="outline" className="ml-auto rounded text-[10px]">
+                                        {section.total}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  {section.error ? (
+                                    <p className="rounded border border-destructive/30 p-3 text-xs text-destructive">
+                                      {section.error instanceof Error ? section.error.message : "Search failed."}
+                                    </p>
+                                  ) : section.results.length === 0 ? (
+                                    <p className="rounded border border-dashed p-3 text-xs text-muted-foreground">
+                                      No {section.title.toLowerCase()} found.
+                                    </p>
+                                  ) : (
+                                    <div className="overflow-hidden rounded border">
+                                      {section.results.map((item) => (
+                                        <button
+                                          key={`${section.key}-${item.rank}-${item.id ?? item.path ?? item.title ?? "result"}`}
+                                          type="button"
+                                          className="block w-full border-b p-3 text-left last:border-b-0 hover:bg-muted/70 disabled:cursor-default disabled:hover:bg-transparent"
+                                          onClick={() => {
+                                            handleVaultSearchResultOpen(section, item);
+                                          }}
+                                          disabled={section.key === "sources" && !item.path}
+                                          title={
+                                            section.key === "sources" && item.path
+                                              ? `Open ${item.path}`
+                                              : "Open Entity Browser"
+                                          }
+                                        >
+                                          <div className="flex min-w-0 items-center gap-2">
+                                            <span className="truncate text-sm font-medium">
+                                              {item.title ?? item.id ?? item.path ?? "Untitled vault item"}
+                                            </span>
+                                            <Badge variant="secondary" className="rounded text-[10px]">
+                                              {vaultMatchLabel(item)}
+                                            </Badge>
+                                          </div>
+                                          {item.path ? (
+                                            <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                                              {item.path}
+                                            </p>
+                                          ) : null}
+                                          {item.snippet ? (
+                                            <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
+                                              {item.snippet}
+                                            </p>
+                                          ) : null}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </section>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     ) : previewTab === "preview" ? (
                       <div className="flex min-h-0 flex-1 flex-col space-y-2">
                         <div className="flex items-center justify-between gap-2">

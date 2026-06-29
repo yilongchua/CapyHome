@@ -279,12 +279,24 @@ class VaultEntityBrowserItem(BaseModel):
     concepts: list[VaultEntityConceptItem] = Field(default_factory=list)
 
 
+class VaultConceptBrowserItem(BaseModel):
+    slug: str
+    label: str
+    degree: int = 0
+    sources: list[VaultEntitySourceItem] = Field(default_factory=list)
+    entities: list[VaultEntityConceptItem] = Field(default_factory=list)
+
+
 class VaultEntityBrowserResponse(BaseModel):
     generated_at: str
     counts: dict[str, Any] = Field(default_factory=dict)
     top: list[VaultEntityBrowserItem] = Field(default_factory=list)
     critical_gaps: list[VaultEntityBrowserItem] = Field(default_factory=list)
     less_covered: list[VaultEntityBrowserItem] = Field(default_factory=list)
+    focused: VaultEntityBrowserItem | None = None
+    concept_top: list[VaultConceptBrowserItem] = Field(default_factory=list)
+    concept_critical_gaps: list[VaultConceptBrowserItem] = Field(default_factory=list)
+    concept_less_covered: list[VaultConceptBrowserItem] = Field(default_factory=list)
 
 
 class VaultEntityDismissalItem(BaseModel):
@@ -339,9 +351,10 @@ def get_vault_status() -> VaultStatusResponse:
 def search_vault(
     q: str = Query("", description="Search query"),
     limit: int = Query(10, ge=1, le=100),
+    categories: list[str] | None = Query(default=None, alias="category"),
 ) -> VaultSearchResponse:
     service = get_control_plane_service()
-    payload = service.search_vault(query=q, limit=limit)
+    payload = service.search_vault(query=q, limit=limit, categories=categories)
     return VaultSearchResponse.model_validate(payload)
 
 
@@ -576,12 +589,14 @@ def get_vault_entity_browser(
     top: int = Query(15, ge=1, le=100),
     bottom: int = Query(10, ge=0, le=50),
     critical_max_degree: int = Query(2, ge=0, le=20),
+    focus_slug: str | None = Query(None),
 ) -> VaultEntityBrowserResponse:
     service = get_control_plane_service()
     payload = service.get_vault_entity_browser(
         top_n=top,
         bottom_n=bottom,
         critical_max_degree=critical_max_degree,
+        focus_slug=focus_slug,
     )
     return VaultEntityBrowserResponse.model_validate(payload)
 
@@ -590,6 +605,13 @@ def get_vault_entity_browser(
 def list_vault_entity_dismissals() -> VaultEntityDismissalsResponse:
     service = get_control_plane_service()
     items = service.list_vault_entity_dismissals()
+    return VaultEntityDismissalsResponse.model_validate({"items": items})
+
+
+@router.get("/concept-dismissals", response_model=VaultEntityDismissalsResponse)
+def list_vault_concept_dismissals() -> VaultEntityDismissalsResponse:
+    service = get_control_plane_service()
+    items = service.list_vault_concept_dismissals()
     return VaultEntityDismissalsResponse.model_validate({"items": items})
 
 
@@ -611,11 +633,39 @@ def dismiss_vault_entity(
     return VaultEntityDismissResponse.model_validate(payload)
 
 
+@router.post("/concepts/{slug}/dismiss", response_model=VaultEntityDismissResponse)
+def dismiss_vault_concept(
+    slug: str,
+    request: VaultEntityDismissRequest | None = None,
+) -> VaultEntityDismissResponse:
+    service = get_control_plane_service()
+    body = request or VaultEntityDismissRequest()
+    try:
+        payload = service.dismiss_vault_concept(
+            slug=slug,
+            reason=body.reason,
+            alias_for=body.alias_for,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return VaultEntityDismissResponse.model_validate(payload)
+
+
 @router.post("/entity-dismissals/{slug}/restore", response_model=VaultEntityRestoreResponse)
 def restore_vault_entity_dismissal(slug: str) -> VaultEntityRestoreResponse:
     service = get_control_plane_service()
     try:
         payload = service.restore_vault_entity_dismissal(slug=slug)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return VaultEntityRestoreResponse.model_validate(payload)
+
+
+@router.post("/concept-dismissals/{slug}/restore", response_model=VaultEntityRestoreResponse)
+def restore_vault_concept_dismissal(slug: str) -> VaultEntityRestoreResponse:
+    service = get_control_plane_service()
+    try:
+        payload = service.restore_vault_concept_dismissal(slug=slug)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return VaultEntityRestoreResponse.model_validate(payload)
@@ -630,6 +680,35 @@ def start_vault_entity_autoresearch(
     body = request or VaultEntityAutoresearchRequest()
     try:
         payload = service.start_vault_entity_autoresearch(
+            slug=slug,
+            label=body.label,
+            endpoint_goal=body.endpoint_goal,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    objective = payload.get("objective")
+    bootstrap_run = payload.get("bootstrap_run")
+    objective_id = getattr(objective, "objective_id", None) or getattr(objective, "id", None)
+    run_id = getattr(bootstrap_run, "id", None) if bootstrap_run is not None else None
+    return VaultEntityAutoresearchResponse.model_validate(
+        {
+            "objective_id": objective_id,
+            "run_id": run_id,
+            "accepted": True,
+            "message": None,
+        }
+    )
+
+
+@router.post("/concepts/{slug}/autoresearch", response_model=VaultEntityAutoresearchResponse)
+def start_vault_concept_autoresearch(
+    slug: str,
+    request: VaultEntityAutoresearchRequest | None = None,
+) -> VaultEntityAutoresearchResponse:
+    service = get_control_plane_service()
+    body = request or VaultEntityAutoresearchRequest()
+    try:
+        payload = service.start_vault_concept_autoresearch(
             slug=slug,
             label=body.label,
             endpoint_goal=body.endpoint_goal,

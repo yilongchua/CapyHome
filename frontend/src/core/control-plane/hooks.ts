@@ -26,9 +26,13 @@ import {
   getVaultFile,
   getVaultEntityBrowser,
   listVaultEntityDismissals,
+  listVaultConceptDismissals,
   dismissVaultEntity,
+  dismissVaultConcept,
   restoreVaultEntityDismissal,
+  restoreVaultConceptDismissal,
   startVaultEntityAutoresearch,
+  startVaultConceptAutoresearch,
   getIntegrationStatus,
   getVaultStatus,
   listApprovals,
@@ -182,10 +186,14 @@ export function useVaultStatus(options?: { refetchInterval?: number }) {
   return { vaultStatus: data ?? null, isLoading, error };
 }
 
-export function useVaultSearch(query: string, options?: { enabled?: boolean; limit?: number }) {
+export function useVaultSearch(
+  query: string,
+  options?: { enabled?: boolean; limit?: number; categories?: string[] },
+) {
+  const categories = options?.categories ?? [];
   const { data, isLoading, error } = useWorkspaceRefreshQuery<VaultSearchResponse>({
-    queryKey: ["control-plane", "vault-search", query, options?.limit ?? 10],
-    queryFn: () => searchVault(query, options?.limit ?? 10),
+    queryKey: ["control-plane", "vault-search", query, options?.limit ?? 10, categories.join(",")],
+    queryFn: () => searchVault(query, options?.limit ?? 10, categories),
     enabled: Boolean(options?.enabled && query.trim()),
     refreshDomains: ["vault"],
   });
@@ -258,16 +266,18 @@ export function useVaultEntityBrowser(options?: {
   top?: number;
   bottom?: number;
   criticalMaxDegree?: number;
+  focusSlug?: string | null;
   refetchInterval?: number | false;
 }) {
   const isVisible = useDocumentVisible();
   const top = options?.top ?? 15;
   const bottom = options?.bottom ?? 10;
   const criticalMaxDegree = options?.criticalMaxDegree ?? 2;
+  const focusSlug = options?.focusSlug ?? "";
   const { data, isLoading, error } = useWorkspaceRefreshQuery<VaultEntityBrowserResponse>({
-    queryKey: ["control-plane", "vault-entity-browser", top, bottom, criticalMaxDegree],
+    queryKey: ["control-plane", "vault-entity-browser", top, bottom, criticalMaxDegree, focusSlug],
     queryFn: () =>
-      getVaultEntityBrowser({ top, bottom, criticalMaxDegree }),
+      getVaultEntityBrowser({ top, bottom, criticalMaxDegree, focusSlug }),
     refetchInterval: isVisible ? (options?.refetchInterval ?? 20_000) : false,
     refreshDomains: ["vault"],
   });
@@ -278,6 +288,16 @@ export function useVaultEntityDismissals(options?: { enabled?: boolean }) {
   const { data, isLoading, error } = useWorkspaceRefreshQuery<VaultEntityDismissalsResponse>({
     queryKey: ["control-plane", "vault-entity-dismissals"],
     queryFn: () => listVaultEntityDismissals(),
+    enabled: options?.enabled ?? true,
+    refreshDomains: ["vault"],
+  });
+  return { dismissals: data?.items ?? [], isLoading, error };
+}
+
+export function useVaultConceptDismissals(options?: { enabled?: boolean }) {
+  const { data, isLoading, error } = useWorkspaceRefreshQuery<VaultEntityDismissalsResponse>({
+    queryKey: ["control-plane", "vault-concept-dismissals"],
+    queryFn: () => listVaultConceptDismissals(),
     enabled: options?.enabled ?? true,
     refreshDomains: ["vault"],
   });
@@ -298,6 +318,20 @@ export function useDismissVaultEntity() {
   });
 }
 
+export function useDismissVaultConcept() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { slug: string; request?: VaultEntityDismissRequest }) =>
+      dismissVaultConcept(input.slug, input.request),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-entity-browser"] });
+      void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-concept-dismissals"] });
+      void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-explorer"] });
+      publishControlPlaneRefresh(["vault"]);
+    },
+  });
+}
+
 export function useRestoreVaultEntityDismissal() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -310,11 +344,35 @@ export function useRestoreVaultEntityDismissal() {
   });
 }
 
+export function useRestoreVaultConceptDismissal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (slug: string) => restoreVaultConceptDismissal(slug),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-entity-browser"] });
+      void queryClient.invalidateQueries({ queryKey: ["control-plane", "vault-concept-dismissals"] });
+      publishControlPlaneRefresh(["vault"]);
+    },
+  });
+}
+
 export function useStartVaultEntityAutoresearch() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: { slug: string; request?: VaultEntityAutoresearchRequest }) =>
       startVaultEntityAutoresearch(input.slug, input.request),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["control-plane", "autoresearch-objectives"] });
+      publishControlPlaneRefresh(["runs"]);
+    },
+  });
+}
+
+export function useStartVaultConceptAutoresearch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { slug: string; request?: VaultEntityAutoresearchRequest }) =>
+      startVaultConceptAutoresearch(input.slug, input.request),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["control-plane", "autoresearch-objectives"] });
       publishControlPlaneRefresh(["runs"]);

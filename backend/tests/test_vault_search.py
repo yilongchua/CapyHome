@@ -171,6 +171,13 @@ class TestVaultSearcherBasic:
         results = searcher.search("AI industries")
         assert results[0]["category"] == "syntheses"
 
+    def test_path_is_vault_relative(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        _write_page(vault, "entities", "spacex.md", "SpaceX", "SpaceX builds reusable launch vehicles.")
+        searcher = VaultSearcher(vault)
+        results = searcher.search("SpaceX")
+        assert results[0]["path"] == "02_compiled/entities/spacex.md"
+
     def test_score_is_positive(self, tmp_path):
         vault = _make_vault(tmp_path)
         _write_page(vault, "sources", "doc.md", "Test Doc", "Python is a great programming language.")

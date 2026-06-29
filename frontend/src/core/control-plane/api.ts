@@ -273,10 +273,13 @@ export async function getVaultStatus(): Promise<VaultStatusResponse> {
 export async function searchVault(
   query: string,
   limit = 10,
+  categories?: string[],
 ): Promise<VaultSearchResponse> {
-  const response = await fetch(
-    `${getBackendBaseURL()}/api/vault/search?q=${encodeURIComponent(query)}&limit=${limit}`,
-  );
+  const qs = new URLSearchParams({ q: query, limit: String(limit) });
+  for (const category of categories ?? []) {
+    qs.append("category", category);
+  }
+  const response = await fetch(`${getBackendBaseURL()}/api/vault/search?${qs.toString()}`);
   if (!response.ok) {
     await parseError(response, `Failed to search vault: ${response.statusText}`);
   }
@@ -463,7 +466,7 @@ export async function saveVaultFile(request: VaultFileWriteRequest): Promise<{
 }
 
 export async function getVaultEntityBrowser(
-  options?: { top?: number; bottom?: number; criticalMaxDegree?: number },
+  options?: { top?: number; bottom?: number; criticalMaxDegree?: number; focusSlug?: string | null },
 ): Promise<VaultEntityBrowserResponse> {
   const params = new URLSearchParams();
   if (options?.top !== undefined) params.set("top", String(options.top));
@@ -471,6 +474,7 @@ export async function getVaultEntityBrowser(
   if (options?.criticalMaxDegree !== undefined) {
     params.set("critical_max_degree", String(options.criticalMaxDegree));
   }
+  if (options?.focusSlug) params.set("focus_slug", options.focusSlug);
   const qs = params.toString();
   const response = await fetch(
     `${getBackendBaseURL()}/api/vault/entity-browser${qs ? `?${qs}` : ""}`,
@@ -485,6 +489,14 @@ export async function listVaultEntityDismissals(): Promise<VaultEntityDismissals
   const response = await fetch(`${getBackendBaseURL()}/api/vault/entity-dismissals`);
   if (!response.ok) {
     await parseError(response, `Failed to load entity dismissals: ${response.statusText}`);
+  }
+  return response.json() as Promise<VaultEntityDismissalsResponse>;
+}
+
+export async function listVaultConceptDismissals(): Promise<VaultEntityDismissalsResponse> {
+  const response = await fetch(`${getBackendBaseURL()}/api/vault/concept-dismissals`);
+  if (!response.ok) {
+    await parseError(response, `Failed to load concept dismissals: ${response.statusText}`);
   }
   return response.json() as Promise<VaultEntityDismissalsResponse>;
 }
@@ -507,6 +519,24 @@ export async function dismissVaultEntity(
   return response.json() as Promise<VaultEntityDismissResponse>;
 }
 
+export async function dismissVaultConcept(
+  slug: string,
+  request: VaultEntityDismissRequest = {},
+): Promise<VaultEntityDismissResponse> {
+  const response = await fetch(
+    `${getBackendBaseURL()}/api/vault/concepts/${encodeURIComponent(slug)}/dismiss`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    },
+  );
+  if (!response.ok) {
+    await parseError(response, `Failed to dismiss concept: ${response.statusText}`);
+  }
+  return response.json() as Promise<VaultEntityDismissResponse>;
+}
+
 export async function restoreVaultEntityDismissal(
   slug: string,
 ): Promise<VaultEntityRestoreResponse> {
@@ -516,6 +546,19 @@ export async function restoreVaultEntityDismissal(
   );
   if (!response.ok) {
     await parseError(response, `Failed to restore entity dismissal: ${response.statusText}`);
+  }
+  return response.json() as Promise<VaultEntityRestoreResponse>;
+}
+
+export async function restoreVaultConceptDismissal(
+  slug: string,
+): Promise<VaultEntityRestoreResponse> {
+  const response = await fetch(
+    `${getBackendBaseURL()}/api/vault/concept-dismissals/${encodeURIComponent(slug)}/restore`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    await parseError(response, `Failed to restore concept dismissal: ${response.statusText}`);
   }
   return response.json() as Promise<VaultEntityRestoreResponse>;
 }
@@ -534,6 +577,24 @@ export async function startVaultEntityAutoresearch(
   );
   if (!response.ok) {
     await parseError(response, `Failed to start entity autoresearch: ${response.statusText}`);
+  }
+  return response.json() as Promise<VaultEntityAutoresearchResponse>;
+}
+
+export async function startVaultConceptAutoresearch(
+  slug: string,
+  request: VaultEntityAutoresearchRequest = {},
+): Promise<VaultEntityAutoresearchResponse> {
+  const response = await fetch(
+    `${getBackendBaseURL()}/api/vault/concepts/${encodeURIComponent(slug)}/autoresearch`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    },
+  );
+  if (!response.ok) {
+    await parseError(response, `Failed to start concept autoresearch: ${response.statusText}`);
   }
   return response.json() as Promise<VaultEntityAutoresearchResponse>;
 }

@@ -106,6 +106,7 @@ class VaultManifest(BaseModel):
     sufficiency_state: dict[str, Any] = Field(default_factory=dict)
     memory_stats: dict[str, Any] = Field(default_factory=dict)
     entity_dismissals: dict[str, Any] = Field(default_factory=dict)
+    concept_dismissals: dict[str, Any] = Field(default_factory=dict)
     schema_migrated_from: str = "vault-manifest.v4"
     model_config = ConfigDict(extra="allow")
 
