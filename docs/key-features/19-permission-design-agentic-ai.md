@@ -27,6 +27,8 @@ That is why the next useful layer for agents is not simply "more autonomy." It i
 
 Permission design still matters. But for business readers, permission is the mechanism, not the headline. The headline is control over long-running work.
 
+![CapyHome workflow control dashboard](./asset/19-permission-design-agentic-ai/v2/medium-01-hero-workflow-control.png)
+
 ## The Problem With One Big "Go" Button
 
 The typical agent workflow is dangerously binary.
@@ -53,6 +55,8 @@ Good agent systems should answer:
 - How do I stop, resume, export, or correct the run?
 
 Without those answers, "autonomy" is just a business process without controls.
+
+![One mistake can become 500 row-level mistakes](./asset/19-permission-design-agentic-ai/v2/medium-02-one-mistake-500-rows.png)
 
 ## Workflow Is the Natural Shape of Long-Running Agent Work
 
@@ -116,6 +120,8 @@ The important part is not the file format. The important part is the management 
 - Auto Mode can continue the run without changing the contract.
 
 That is what makes long-running agent work governable.
+
+![A workflow.json recipe governs row execution and ledger state](./asset/19-permission-design-agentic-ai/v2/medium-03-workflow-json-ledger.png)
 
 ## The Real Shift: From Prompting to Process Ownership
 
@@ -277,6 +283,8 @@ The durable agent systems will feel less like magic and more like controlled wor
 - Memory that can forget
 - Research trails that can be inspected
 - Explicit publish points
+
+![A controlled workflow runner makes the process visible](./asset/19-permission-design-agentic-ai/v2/medium-04-controlled-workflow-runner.png)
 
 The product should not ask leaders to trust an invisible personality. It should let them trust a visible process.
 
