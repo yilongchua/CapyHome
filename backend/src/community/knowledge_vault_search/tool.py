@@ -31,13 +31,14 @@ def _get_searcher() -> VaultSearcher:
 def query_knowledge_vault_tool(
     query: str,
     categories: list[str] | None = None,
-    limit: int = 5,
+    limit: int = 10,
 ) -> str:
     """Query the local knowledge vault for saved research and compiled knowledge.
 
     Use this tool when the user asks about topics that may have been previously
-    researched and stored in the knowledge vault. Prefer this over web_search
-    when looking for information the user has deliberately collected.
+    researched and stored in the knowledge vault. Check this alongside web_search
+    for topics the user has recently researched or asked about — most vault content
+    is collected automatically from prior searches, not just manually saved.
 
     The search backend combines keyword/BM25 matching with vector search when
     vault vector indexing is enabled and embeddings are available.
@@ -60,10 +61,10 @@ def query_knowledge_vault_tool(
         categories: Optional list of vault sections to restrict the search to.
             Allowed sections are "sources", "entities", "concepts", "syntheses",
             and "queries". Omit to search all sections.
-        limit: Maximum number of results to return (1–20, default 5).
+        limit: Maximum number of results to return (1–30, default 10).
     """
     try:
-        limit = max(1, min(20, int(limit)))
+        limit = max(1, min(30, int(limit)))
 
         if categories is not None:
             invalid = [c for c in categories if c not in VALID_CATEGORIES]

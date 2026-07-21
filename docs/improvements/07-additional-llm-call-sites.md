@@ -21,8 +21,8 @@ Final-sweep coverage of every remaining LLM call site that wasn't in docs 01–0
 | 9 | Autoresearch reflector | `REFLECTOR_PROMPT` | [backend/src/control_plane/autoresearch_loop/reflector.py](../../backend/src/control_plane/autoresearch_loop/reflector.py#L19-L53) | 19–53 |
 | 10 | Autoresearch researcher dispatch | `_build_task_prompt()` | [backend/src/control_plane/autoresearch_loop/researcher.py](../../backend/src/control_plane/autoresearch_loop/researcher.py#L34-L42) | 34–42 |
 | 11 | Autoresearch LLM wrapper | (delegates to caller's prompt) | [backend/src/control_plane/autoresearch_loop/llm.py](../../backend/src/control_plane/autoresearch_loop/llm.py#L60-L72) | 60–72 |
-| 12 | Vault source analysis | `ANALYZE_SOURCE_PROMPT` | [backend/src/control_plane/prompts/vault_analyze.py](../../backend/src/control_plane/prompts/vault_analyze.py#L1-L45) | 1–45 |
-| 13 | Vault page generation | `GENERATE_PAGE_PROMPT` | [backend/src/control_plane/prompts/vault_generate.py](../../backend/src/control_plane/prompts/vault_generate.py#L1-L27) | 1–27 |
+| 12 | Vault source analysis (merged: analysis + evidence_markdown) | `ANALYZE_SOURCE_PROMPT` | [backend/src/control_plane/vault_learning/_prompts.py](../../backend/src/control_plane/vault_learning/_prompts.py) | — |
+| 13 | ~~Vault page generation~~ REMOVED (merged into #12; sections derived in code) | ~~`GENERATE_PAGE_PROMPT`~~ | — | — |
 | 14 | Memory updater LLM call | `MEMORY_UPDATE_PROMPT` (already covered in [01](01-lead-agent-prompts.md)) | [backend/src/agents/memory/updater.py](../../backend/src/agents/memory/updater.py#L260-L271) | 260–271 |
 
 ## Detailed findings
@@ -197,9 +197,9 @@ Return ONLY the title, no quotes, no explanation.
 **Improvements**
 - Add a default timeout and one-retry policy with exponential backoff at this wrapper level so individual prompts don't have to.
 
-### 12. `ANALYZE_SOURCE_PROMPT` — control_plane/prompts/vault_analyze.py 1–45
+### 12. `ANALYZE_SOURCE_PROMPT` — control_plane/vault_learning/_prompts.py
 
-**What it does**: Extracts structured analysis (summary, claims, entities, concepts, tags, open questions, gap queries, synthesis refs) from an ingested source.
+**What it does**: Single merged ingest call. Extracts structured analysis (summary, claims, entities, concepts, tags, synthesis refs) **plus** a curated `evidence_markdown` block from an ingested source. (`open_questions` and `gap_queries` were removed — they fed no search path and the autoresearch loop has its own question taxonomy.)
 
 **Issues**
 - Entity rules are strict and prescriptive, but the boundary with `concepts` is fuzzy ("crystals" = concept, "Black Tourmaline" = entity).
@@ -212,20 +212,9 @@ Return ONLY the title, no quotes, no explanation.
 - Define `synthesis_refs` more concretely: *"Cross-source topic slugs this source would link to under a wikilink. Use existing vault topics when possible."*
 - Add a `language` field to the output so downstream processing knows the source language.
 
-### 13. `GENERATE_PAGE_PROMPT` — control_plane/prompts/vault_generate.py 1–27
+### 13. `GENERATE_PAGE_PROMPT` — REMOVED (merged into #12)
 
-**What it does**: Renders an analysed source into Obsidian-compatible Markdown.
-
-**Issues**
-- "Obsidian-compatible" undefined.
-- Both the full source text *and* the analysis JSON are passed — duplicated tokens.
-- `review_items` semantics undefined.
-
-**Improvements**
-- Define "Obsidian-compatible" with concrete syntax: headers (`##`, `###`), bulleted lists (`-`), wikilinks (`[[...]]`), code fences for code.
-- Drop the source text — the analysis JSON already extracted what's needed.
-- Define `review_items` explicitly: *"Items that need human follow-up — uncertain claims, missing citations, outdated info."*
-- Add an output target length (e.g., `summary_markdown` 100–200 words).
+**Resolved**: This second LLM call was eliminated. It used to re-send the full source text *and* the analysis JSON just to reformat already-extracted fields. The page sections are now derived in code by `_generate_source_sections` (summary ← summary, claims ← key_claims, backlinks ← synthesis_refs), and the one field that carried new content (`evidence_markdown`) is produced directly by #12. `review_items` was dropped along with `open_questions`. Net effect: one fewer model call and ~half the per-source ingest tokens.
 
 ### 14. Memory updater LLM call — agents/memory/updater.py 260–271
 

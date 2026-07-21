@@ -1,6 +1,25 @@
 # Knowledge Vault — Functional Analysis & Improvement Roadmap
 
-_Analysis date: 2026-06-18_
+_Analysis date: 2026-06-18 · Status updated: 2026-06-18_
+
+---
+
+## Implementation Status (2026-06-18)
+
+| Item | Decision | State |
+|------|----------|-------|
+| **K-1** Entity/concept pages aggregate source summaries | Implemented — source summaries written into the page `## Overview` **body**. This is the part that actually moved retrieval (the searcher reads page bodies from disk) | ✅ Done |
+| **S-1** Search index text built from summaries | Implemented **but a no-op for retrieval.** It enriched the manifest `search_index` sidecar (`_index_document`), which nothing reads for search — its only consumer is a `len()` stats counter (`_search_and_summary.py`). Actual search (`VaultSearcher`) BM25s `title + tags + body` read straight from the `.md` files. K-1's body change is what helped; this didn't. | ⚠️ Ineffective |
+| **I-2** Two LLM calls per document | Shipped as **merge + derive-in-code**: one `ANALYZE_SOURCE_PROMPT` call returns analysis + `evidence_markdown`; summary/claims/backlinks derived in `_generate_source_sections` with no model call | ✅ Done |
+| **I-5** `gap_queries` extracted but discarded | **Reversed.** Rather than surface them, `gap_queries` were removed entirely — they fed no search path and the autoresearch loop has its own taxonomy. Backlog writer + `/api/vault/gap-queries` endpoint deleted | ✅ Removed |
+| **open_questions** (part of I-4) | Removed from ingest, source pages, and `_pages.py`; synthesis-scoring/lint coupling neutralized (the `question_closure` term was dropped from `_coverage_progress` and its 0.15 weight redistributed) | ✅ Removed |
+| **S-4** Bump search limit (5→10) | Implemented — default `limit` 5→10 and clamp ceiling 20→30 in `knowledge_vault_search/tool.py` | ✅ Done |
+| **S-5** Tool framing | Implemented — `query_knowledge_vault` docstring rephrased to equal-priority with web_search | ✅ Done |
+| **K-2** Synthesis pages don't synthesize | Not started | ⬜ Open |
+| **K-4 / S-2** depth_score + RRF/freshness | Not started | ⬜ Open |
+| **S-3** Cross-result dedup | Not started | ⬜ Open |
+
+> **Two corrections (2026-06-18):** (1) The original I-5 plan (surface gap_queries) and I-2 plan (one 13-field JSON) were both superseded. (2) Retrieval runs off the compiled `.md` **bodies on disk**, not the manifest `search_index` sidecar — so any "fix the index text" work (S-1; a mooted `evidence_markdown` indexing idea) has no effect. To change what search sees, change the page **body** or the **ranking** in `unified_vault_search.py`. See §6/§7.
 
 ---
 
@@ -282,15 +301,28 @@ Have the `vault-source-researcher` return a structured `novelty_assessment` alon
 
 ## 7. Quick-Win Implementation Order
 
-For maximum impact per day of work:
+Done (2026-06-18):
 
-1. **Fix entity/concept page body** (K-1) — wire source summaries into `_update_reference_page`
-2. **Fix search index text for entities/concepts** (S-1) — build indexed text from source summaries
-3. **Surface gap_queries** (I-5) — write to `03_ops/tasks/backlog/` + new API endpoint
-4. **Bump search limit default** (S-4) — one-line change
-5. **Update tool framing** (S-5) — docstring edit
-6. **Synthesis LLM trigger at 3+ refs** (K-2) — new LLM call in `_update_synthesis_page`
-7. **Merge analysis+generation into one call** (I-2) — refactor `_analysis.py`
-8. **Add depth_score + RRF boost** (K-4 + S-2) — frontmatter + ranking tweak
-9. **Freshness decay** (S-2) — 3-line change in search service
-10. **Cross-result dedup** (S-3) — post-ranking filter in search service
+- [x] **Fix entity/concept page body** (K-1) — source summaries written into the page `## Overview` body (the searcher reads bodies, so this moved retrieval)
+- [x] **Merge analysis+generation into one call** (I-2) — `_analysis.py` now does one LLM call + code-derived sections
+- [x] **Remove `gap_queries` + `open_questions`** (supersedes I-5) — dropped from the LLM contract and all downstream consumers
+- [x] **Bump search limit default** (S-4) — default `limit` 5→10, clamp ceiling 20→30 in `knowledge_vault_search/tool.py`
+- [x] **Update tool framing** (S-5) — `query_knowledge_vault` docstring rephrased to equal-priority with web_search
+- [⚠️] **Fix search index text for entities/concepts** (S-1) — implemented but ineffective; the manifest `search_index` it touched is not read by retrieval (see Implementation Status)
+
+Still open, in suggested order:
+
+1. **Synthesis LLM trigger at 3+ refs** (K-2) — new LLM call in `_update_synthesis_page`; writes a `## Synthesis` section into the page **body**
+2. **Add depth_score + RRF boost** (K-4 + S-2) — frontmatter + ranking tweak in `unified_vault_search.py`
+3. **Freshness decay** (S-2) — score multiplier in `unified_vault_search.py`
+4. **Cross-result dedup** (S-3) — post-ranking filter in search service
+
+### What can still be improved (next, ranked by value/effort)
+
+1. **K-2 synthesis (medium) — now the top item.** The single biggest *quality* gap: synthesis pages still just accumulate dated excerpts, and the searcher returns that raw list as the excerpt. The merge freed an LLM call's worth of budget per source — reinvest part of it here (one cheap call at 3+ refs, written into the page **body** so search picks it up).
+2. **K-4 depth_score (low).** `min(10, len(raw_text)//500)` in source frontmatter, read into `CompiledVaultPage`, applied as `score *= (1 + 0.05*depth_score)` in **both** scoring exits of `unified_vault_search.py` (lexical-only early return and the RRF-fused path). Zero extra LLM cost; helps deep sources outrank keyword-dense fluff.
+3. **I-1 truncation (low).** 20K-char cap still drops conclusions/references from long sources before analysis — now cheaper to revisit since there's only one call consuming the content.
+
+> **Dropped:** the earlier "`evidence_markdown` is generated but not indexed" idea. It *is* indexed — it's written into the source page `## Evidence` body, which both BM25 and the vector index read. No action needed.
+
+> **Architectural note for all future search work:** retrieval reads compiled `.md` **bodies from disk** (`VaultSearcher._load_pages` → BM25 on `title + tags + body`; `VaultVectorIndex` chunks the same bodies). The manifest `search_index` sidecar (`_index_document`) is **not** a retrieval input. To change what search finds, edit the page **body**; to change ranking, edit `unified_vault_search.py`.

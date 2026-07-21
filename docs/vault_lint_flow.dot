@@ -27,7 +27,7 @@ digraph VaultLintFlow {
 
         a0 [label="expire_queries()\n(age out stale queries)", fillcolor="#D6E4F5"];
         a1 [label="Walk compiled_syntheses_dir/*.md\nparse frontmatter + body", fillcolor="#D6E4F5"];
-        a2 [label="Per synthesis: classify\n• stale (last_reviewed_at past window)\n• orphan (no source_refs)\n• missing_backlinks (no open_questions)\n• contradiction ('contradiction' in body)\n• collect open_questions", fillcolor="#D6E4F5"];
+        a2 [label="Per synthesis: classify\n• stale (last_reviewed_at past window)\n• orphan (no source_refs)\n• contradiction ('contradiction' in body)", fillcolor="#D6E4F5"];
         a3 [label="Walk concepts/*.md (1967)\n+ entities/*.md (2161)\nflag orphan (no source_refs)", fillcolor="#F6D6D6"];
         a4 [label="Build report dict\n(counts + lists)", fillcolor="#D6E4F5"];
         a5 [label="WRITE 03_ops/reports/lint/<ts>-lint.json\n+ optional task-review .md", fillcolor="#CDE8CD"];
