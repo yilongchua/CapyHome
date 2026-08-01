@@ -76,14 +76,14 @@ nohup sh -c 'cd backend && BG_JOB_ISOLATED_LOOPS=true NO_COLOR=1 uv run langgrap
 echo "✓ LangGraph server started on localhost:2024"
 
 echo "Starting Gateway API..."
-nohup sh -c 'cd backend && uv run uvicorn src.gateway.app:app --host 0.0.0.0 --port 8001 > ../logs/gateway.log 2>&1' &
-./scripts/wait-for-port.sh 8001 30 "Gateway API" || {
+nohup sh -c 'cd backend && uv run uvicorn src.gateway.app:app --host 0.0.0.0 --port 8009 > ../logs/gateway.log 2>&1' &
+./scripts/wait-for-port.sh 8009 30 "Gateway API" || {
     echo "✗ Gateway API failed to start. Last log output:"
     tail -60 logs/gateway.log
     cleanup_on_failure
     exit 1
 }
-echo "✓ Gateway API started on localhost:8001"
+echo "✓ Gateway API started on localhost:8009"
 
 echo "Starting Frontend..."
 nohup sh -c 'cd frontend && pnpm run dev > ../logs/frontend.log 2>&1' &

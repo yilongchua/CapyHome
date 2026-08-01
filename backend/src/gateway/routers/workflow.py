@@ -424,10 +424,22 @@ def extract_final_ai_text(state: Any) -> str:
 
 def parse_child_result(raw_text: str, workflow: dict[str, Any]) -> tuple[str, dict[str, Any] | None, str | None]:
     text = raw_text.strip()
+    # Strip leading prose before a ```json block
+    if not text.startswith("```") and "```" in text:
+        text = text[text.index("```"):]
     if text.startswith("```"):
-        text = text.strip("`").strip()
+        text = text[3:].strip()
         if text.lower().startswith("json"):
             text = text[4:].strip()
+        # Strip trailing ```
+        if "```" in text:
+            text = text[: text.rindex("```")].strip()
+    # Last resort: find the outermost JSON object in the response
+    if not text.startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end > start:
+            text = text[start : end + 1]
     try:
         parsed = json.loads(text)
     except Exception as exc:
