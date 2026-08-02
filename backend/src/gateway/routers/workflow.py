@@ -31,6 +31,10 @@ WORKFLOW_SQLITE_VIRTUAL_PATH = "/mnt/user-data/workspace/runtime/workflow.sqlite
 _ASSISTANT_ID = "work_agent"
 _DEFAULT_CONSECUTIVE_FAILURES_LIMIT = 5
 _TERMINAL_STATUSES = {"done", "stopped_failed_threshold"}
+# Global ceiling on concurrent workflow child rows. Each child row triggers live
+# search-engine queries through the shared websearch pool, which all egress from a
+# single public IP; bursting past this trips Google/DDG/Brave CAPTCHA + rate-limits.
+_MAX_PARALLEL_LIMIT = 2
 
 
 def _langgraph_url() -> str:
@@ -197,7 +201,7 @@ def normalize_workflow(thread_id: str, workflow: dict[str, Any]) -> dict[str, An
 
     execution = dict(next_workflow.get("execution") or {})
     execution.setdefault("status", "ready")
-    execution["max_parallel"] = max(1, int(execution.get("max_parallel") or 1))
+    execution["max_parallel"] = max(1, min(_MAX_PARALLEL_LIMIT, int(execution.get("max_parallel") or 1)))
     execution["flush_every_completed_rows"] = max(1, int(execution.get("flush_every_completed_rows") or 20))
     execution["flush_all"] = _as_bool(execution.get("flush_all"), default=False)
     execution["add_to_memory"] = _as_bool(execution.get("add_to_memory"), default=False)
