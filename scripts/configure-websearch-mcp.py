@@ -24,12 +24,16 @@ def main() -> int:
             "enabled": enabled,
             "type": "http",
             "url": (
-                "http://host.docker.internal:9000/mcp"
+                "http://localhost:9000/mcp"
+                if runtime == "native"
+                else "http://host.docker.internal:9000/mcp"
                 if runtime == "podman"
                 else "http://websearch-proxy:9000/mcp"
             ),
             "health_url": (
-                "http://host.docker.internal:9000/health"
+                "http://localhost:9000/health"
+                if runtime == "native"
+                else "http://host.docker.internal:9000/health"
                 if runtime == "podman"
                 else "http://websearch-proxy:9000/health"
             ),

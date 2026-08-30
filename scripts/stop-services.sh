@@ -7,7 +7,7 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PORTS=(2026 2024 8001 3000)
+PORTS=(2026 2024 8009 3000)
 SANDBOX_PREFIXES=(capyhome-sandbox capybara-home-sandbox)
 
 pid_command() {

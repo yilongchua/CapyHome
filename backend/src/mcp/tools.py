@@ -72,6 +72,9 @@ async def preview_mcp_server(server_config: McpServerConfig, server_name: str = 
         }
     except TimeoutError:
         return {"ok": False, "tools": [], "error": f"Connection timed out after {_PREVIEW_TIMEOUT_SECONDS}s"}
+    except BaseExceptionGroup as eg:
+        cause = eg.exceptions[0] if eg.exceptions else eg
+        return {"ok": False, "tools": [], "error": str(cause)}
     except Exception as exc:
         return {"ok": False, "tools": [], "error": str(exc)}
 

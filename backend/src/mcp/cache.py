@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import time
 
 from langchain_core.tools import BaseTool
 
@@ -12,6 +13,23 @@ _mcp_tools_cache: list[BaseTool] | None = None
 _cache_initialized = False
 _initialization_lock = asyncio.Lock()
 _config_mtime: float | None = None  # Track config file modification time
+
+# No-poison guard: timestamp of the last load that returned 0 tools while MCP
+# servers were enabled (i.e. a transient load failure). Used to back off so a
+# sustained outage doesn't stall every agent build on a fresh (slow) handshake,
+# while still retrying often enough to self-heal shortly after recovery.
+_last_failed_load_at: float | None = None
+_LOAD_RETRY_COOLDOWN_SECONDS = 15.0
+
+
+def _enabled_mcp_server_count() -> int:
+    """Number of enabled MCP servers, or 0 if it cannot be determined."""
+    try:
+        from src.config.extensions_config import ExtensionsConfig
+
+        return len(ExtensionsConfig.from_file().get_enabled_mcp_servers())
+    except Exception:
+        return 0
 
 
 def _get_config_mtime() -> float | None:
@@ -61,18 +79,38 @@ async def initialize_mcp_tools() -> list[BaseTool]:
     Returns:
         List of LangChain tools from all enabled MCP servers.
     """
-    global _mcp_tools_cache, _cache_initialized, _config_mtime
+    global _mcp_tools_cache, _cache_initialized, _config_mtime, _last_failed_load_at
 
     async with _initialization_lock:
         if _cache_initialized:
             logger.info("MCP tools already initialized")
             return _mcp_tools_cache or []
 
+        # Backoff: if a recent load failed (0 tools while servers enabled), don't
+        # re-run the (potentially slow) handshake on every build. Return empty
+        # without marking initialized so a later build still retries.
+        if _last_failed_load_at is not None and (time.monotonic() - _last_failed_load_at) < _LOAD_RETRY_COOLDOWN_SECONDS:
+            return _mcp_tools_cache or []
+
         from src.mcp.tools import get_mcp_tools
 
         logger.info("Initializing MCP tools...")
-        _mcp_tools_cache = await get_mcp_tools()
+        tools = await get_mcp_tools()
+
+        # No-poison guard: a load that yields 0 tools while MCP servers ARE
+        # enabled is a transient failure (server slow/unreachable), NOT a valid
+        # empty steady state. Do not mark the cache initialized — leave the flag
+        # False so the next get_cached_mcp_tools() retries instead of the whole
+        # process inheriting a poisoned empty toolset until restart/config-touch.
+        if not tools and _enabled_mcp_server_count() > 0:
+            _mcp_tools_cache = []
+            _last_failed_load_at = time.monotonic()
+            logger.warning("MCP tool load returned 0 tools while server(s) enabled; not caching (will retry after %.0fs backoff).", _LOAD_RETRY_COOLDOWN_SECONDS)
+            return []
+
+        _mcp_tools_cache = tools
         _cache_initialized = True
+        _last_failed_load_at = None
         _config_mtime = _get_config_mtime()  # Record config file mtime
         logger.info(f"MCP tools initialized: {len(_mcp_tools_cache)} tool(s) loaded (config mtime: {_config_mtime})")
 
@@ -127,8 +165,9 @@ def reset_mcp_tools_cache() -> None:
 
     This is useful for testing or when you want to reload MCP tools.
     """
-    global _mcp_tools_cache, _cache_initialized, _config_mtime
+    global _mcp_tools_cache, _cache_initialized, _config_mtime, _last_failed_load_at
     _mcp_tools_cache = None
     _cache_initialized = False
     _config_mtime = None
+    _last_failed_load_at = None
     logger.info("MCP tools cache reset")

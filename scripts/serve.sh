@@ -123,8 +123,8 @@ echo "Starting LangGraph server with ${LANGGRAPH_WORKERS} worker job(s)..."
 echo "✓ LangGraph server started on localhost:2024"
 
 echo "Starting Gateway API..."
-(cd backend && uv run uvicorn src.gateway.app:app --host 0.0.0.0 --port 8001 $GATEWAY_EXTRA_FLAGS > ../logs/gateway.log 2>&1) &
-./scripts/wait-for-port.sh 8001 30 "Gateway API" || {
+(cd backend && uv run uvicorn src.gateway.app:app --host 0.0.0.0 --port 8009 $GATEWAY_EXTRA_FLAGS > ../logs/gateway.log 2>&1) &
+./scripts/wait-for-port.sh 8009 30 "Gateway API" || {
     echo "✗ Gateway API failed to start. Last log output:"
     tail -60 logs/gateway.log
     echo ""
@@ -132,7 +132,7 @@ echo "Starting Gateway API..."
     grep -E "Failed to load configuration|Environment variable .* not found|config\.yaml.*not found" logs/gateway.log | tail -5 || true
     cleanup
 }
-echo "✓ Gateway API started on localhost:8001"
+echo "✓ Gateway API started on localhost:8009"
 
 echo "Starting Frontend..."
 (cd frontend && $FRONTEND_CMD > ../logs/frontend.log 2>&1) &

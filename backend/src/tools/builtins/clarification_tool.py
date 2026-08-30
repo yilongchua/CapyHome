@@ -11,7 +11,7 @@ class ClarificationOption(TypedDict, total=False):
     description: str | None
 
 
-@tool("ask_user_for_clarification", parse_docstring=True, return_direct=True)
+@tool("ask_user_for_clarification", parse_docstring=True)
 def ask_user_for_clarification_tool(
     question: str,
     clarification_type: Literal[

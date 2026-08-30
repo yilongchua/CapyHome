@@ -20,9 +20,9 @@ flowchart TD
     HASH -- no --> TRUST{"trust_score<br/>>= threshold?"}
     TRUST -- no --> REJ[/"status: rejected_for_trust"/]
 
-    TRUST -- yes --> ANALY["_analyze_source<br/>LLM (ANALYZE_SOURCE_PROMPT)<br/>or heuristic fallback"]
+    TRUST -- yes --> ANALY["_analyze_source<br/>single LLM call (ANALYZE_SOURCE_PROMPT)<br/>summary/claims/entities/concepts/<br/>tags/synthesis_refs/evidence_markdown<br/>or heuristic fallback"]
     ANALY --> FILTER["_is_quality_entity filter<br/>(drop pronouns, stopwords,<br/>generic adjectives)"]
-    FILTER --> GEN["_generate_source_sections<br/>summary / claims / evidence"]
+    FILTER --> GEN["_generate_source_sections<br/>derive in code (no LLM):<br/>summary / claims / backlinks<br/>+ evidence from analysis"]
 
     GEN --> WRITE_S["Write 02_compiled/sources/<br/>{source_id}.md<br/>+ frontmatter (source_refs,<br/>entity_refs, concept_refs)"]
     WRITE_S --> WRITE_E["For each entity_ref:<br/>_update_reference_page →<br/>02_compiled/entities/{slug}.md"]
