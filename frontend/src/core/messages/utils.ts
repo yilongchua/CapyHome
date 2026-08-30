@@ -259,7 +259,20 @@ export function hasContent(message: Message) {
     return message.content.trim().length > 0;
   }
   if (Array.isArray(message.content)) {
-    return message.content.length > 0;
+    // Provider payloads can include tool-use and thinking blocks alongside
+    // text. Those blocks are rendered by their dedicated UI, not as a blank
+    // assistant response. Only report content when there is something the
+    // message renderer can actually display.
+    return message.content.some((content) => {
+      if (content.type === "text") {
+        return typeof content.text === "string" && content.text.trim().length > 0;
+      }
+      if (content.type === "image_url") {
+        const imageURL = extractURLFromImageURLContent(content.image_url);
+        return typeof imageURL === "string" && imageURL.trim().length > 0;
+      }
+      return false;
+    });
   }
   return false;
 }

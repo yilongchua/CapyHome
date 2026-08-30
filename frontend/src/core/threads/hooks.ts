@@ -580,6 +580,11 @@ export function useThreadStream({
   const pendingTraceEventsRef = useRef<ExecutionTraceEvent[]>([]);
   const flushTimerRef = useRef<number | null>(null);
   const latestMessagesRef = useRef<Message[]>([]);
+  const [completedMessages, setCompletedMessages] = useState<Message[] | null>(null);
+  const serverResponseBaselineRef = useRef<{
+    messageCount: number;
+    knownMessageIds: Set<string>;
+  } | null>(null);
   const firstResponseTimingRef = useRef<{
     threadId: string;
     startedAt: number;
@@ -594,6 +599,7 @@ export function useThreadStream({
     // switching threads so one chat never shows another chat's running signals.
     clearActivityLiveEvents();
     clearTraceLiveEvents();
+    setCompletedMessages(null);
     currentRunIdRef.current = null;
     dispatchThinking({ type: "reset" });
     thinkingSignalEmittedRef.current = false;
@@ -1190,6 +1196,11 @@ export function useThreadStream({
         Array.isArray(stateValues?.messages) && stateValues.messages.length > 0
           ? stateValues.messages
           : latestMessagesRef.current;
+      // A completed run can contain its final assistant message before the
+      // SDK applies the corresponding stream event to `thread.messages`.
+      // Preserve that authoritative state as a display fallback so the reply
+      // is visible immediately instead of requiring a refresh/rejoin.
+      setCompletedMessages(finalMessages.length > 0 ? finalMessages : null);
       if (finishedThreadId && finalMessages.length > 0) {
         setCachedThreadMessages(queryClient, finishedThreadId, finalMessages);
       }
@@ -1237,8 +1248,9 @@ export function useThreadStream({
 
   // Optimistic messages shown before the server stream responds
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
-  // Track message count before sending so we know when server has responded
-  const prevMsgCountRef = useRef(thread.messages.length);
+  // Track the server snapshot before sending. Counts alone are not reliable:
+  // a resumed stream can replace an in-flight message without increasing the
+  // total, leaving the optimistic bubble duplicated on screen.
 
   useEffect(() => {
     return () => {
@@ -1251,17 +1263,31 @@ export function useThreadStream({
 
   useEffect(() => {
     latestMessagesRef.current = thread.messages;
-  }, [thread.messages]);
-
-  // Clear optimistic when server messages arrive (count increases)
-  useEffect(() => {
-    if (
-      optimisticMessages.length > 0 &&
-      thread.messages.length > prevMsgCountRef.current
-    ) {
-      setOptimisticMessages([]);
+    if (thread.messages.length > 0) {
+      const activeThreadId = threadIdRef.current;
+      if (activeThreadId) {
+        setCachedThreadMessages(queryClient, activeThreadId, thread.messages);
+      }
     }
-  }, [thread.messages.length, optimisticMessages.length]);
+  }, [queryClient, thread.messages]);
+
+  // Clear optimistic UI as soon as any server message for this submission
+  // arrives, including a replacement/update that keeps the same count.
+  useEffect(() => {
+    const baseline = serverResponseBaselineRef.current;
+    if (!baseline || optimisticMessages.length === 0) {
+      return;
+    }
+    const receivedServerMessage = thread.messages.some((message, index) =>
+      message.id
+        ? !baseline.knownMessageIds.has(message.id)
+        : index >= baseline.messageCount,
+    );
+    if (receivedServerMessage) {
+      setOptimisticMessages([]);
+      serverResponseBaselineRef.current = null;
+    }
+  }, [optimisticMessages.length, thread.messages]);
 
   // Uploads files, updates optimistic messages with uploaded status, returns UploadedFileInfo[].
   const handleFileUpload = useCallback(
@@ -1335,7 +1361,13 @@ export function useThreadStream({
       isSubmittingRef.current = true;
       setIsSubmittingBusy(true);
       const text = message.text.trim();
-      prevMsgCountRef.current = thread.messages.length;
+      setCompletedMessages(null);
+      serverResponseBaselineRef.current = {
+        messageCount: thread.messages.length,
+        knownMessageIds: new Set(
+          thread.messages.flatMap((current) => (current.id ? [current.id] : [])),
+        ),
+      };
 
       // Show optimistic messages immediately
       const optimisticFiles: FileInMessage[] = (message.files ?? []).map((f) => ({
@@ -1803,13 +1835,15 @@ export function useThreadStream({
       ? getCachedThreadMessages(queryClient, cachedThreadId)
       : undefined;
   const resolvedMessages =
-    thread.messages.length > 0
-      ? thread.messages
-      : (cachedSnapshot?.messages ?? thread.messages);
+    !thread.isLoading && completedMessages && completedMessages.length >= thread.messages.length
+      ? completedMessages
+      : thread.messages.length > 0
+        ? thread.messages
+        : (cachedSnapshot?.messages ?? thread.messages);
   const threadForDisplay =
-    thread.messages.length > 0
+    resolvedMessages === thread.messages
       ? thread
-      : cachedSnapshot
+      : resolvedMessages.length > 0
         ? ({ ...thread, messages: resolvedMessages } as typeof thread)
         : thread;
 
