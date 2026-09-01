@@ -55,7 +55,7 @@ function badgeVariant(status: string) {
   if (["healthy", "configured", "running", "current", "succeeded"].includes(status)) {
     return "secondary" as const;
   }
-  if (["failed", "unhealthy", "missing", "stopped", "unavailable"].includes(status)) {
+  if (["failed", "unhealthy", "missing", "stopped", "unavailable", "unreachable"].includes(status)) {
     return "destructive" as const;
   }
   return "outline" as const;

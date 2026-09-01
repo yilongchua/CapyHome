@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -150,6 +151,40 @@ async def _probe_websearch_health(health_url: str | None) -> bool:
         return False
 
 
+# Live LLM reachability probe for the Setup "LLM Provider" row. Cached per
+# base_url so the 10s status poll does not repeatedly hit paid providers.
+_llm_probe_cache: dict[str, tuple[float, bool, str | None]] = {}
+_LLM_PROBE_TTL = 30.0  # seconds
+
+
+async def _probe_llm_endpoint(base_url: str, api_key: str = "") -> tuple[bool, str | None]:
+    """Live-probe one OpenAI-compatible endpoint's /models. Returns (ok, error)."""
+    if not base_url:
+        return False, "No base URL configured."
+    cached = _llm_probe_cache.get(base_url)
+    if cached and (time.monotonic() - cached[0]) < _LLM_PROBE_TTL:
+        return cached[1], cached[2]
+
+    # Lazy import avoids any router load-order coupling with onboarding.
+    from src.gateway.routers.onboarding import _openai_models_url
+
+    url = _openai_models_url(base_url)
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(url, headers=headers)
+        ok, err = (True, None) if response.is_success else (False, f"HTTP {response.status_code}")
+    except httpx.TimeoutException:
+        ok, err = False, "Connection timed out"
+    except httpx.ConnectError:
+        ok, err = False, "Connection refused — is the server running?"
+    except httpx.HTTPError as exc:
+        ok, err = False, str(exc)
+
+    _llm_probe_cache[base_url] = (time.monotonic(), ok, err)
+    return ok, err
+
+
 def _websearch_config():
     config = get_extensions_config().mcp_servers.get("websearch")
     if not config:
@@ -252,10 +287,32 @@ async def get_setup_status() -> SetupStatusResponse:
 
     try:
         models = get_app_config().models
-        llm_status = SetupComponentStatus(
-            status="configured" if models else "missing",
-            message=None if models else "Configure an LLM provider to start chatting.",
-        )
+        if not models:
+            llm_status = SetupComponentStatus(
+                status="missing",
+                message="Configure an LLM provider to start chatting.",
+            )
+        else:
+            endpoints = {
+                k: e for k, e in get_extensions_config().user_models.items() if e.enabled
+            }
+            if not endpoints:
+                # Models declared (e.g. via config.yaml) but no probeable user endpoint.
+                llm_status = SetupComponentStatus(status="configured")
+            else:
+                failures: list[str] = []
+                reachable = False
+                for e in endpoints.values():  # early-exit on the first live endpoint
+                    ok, err = await _probe_llm_endpoint(e.base_url, e.api_key)
+                    if ok:
+                        reachable = True
+                        break
+                    failures.append(f"{e.display_name} ({e.base_url}) — {err or 'unreachable'}")
+                llm_status = (
+                    SetupComponentStatus(status="configured")
+                    if reachable
+                    else SetupComponentStatus(status="unreachable", message=" · ".join(failures))
+                )
     except Exception as exc:
         llm_status = SetupComponentStatus(status="unhealthy", message=str(exc))
 
