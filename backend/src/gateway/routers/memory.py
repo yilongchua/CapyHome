@@ -7,6 +7,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from src.agents.memory.backend import MemoryScopes, get_memory_backend
 from src.agents.memory.compaction_archive import read_compaction_entries
 from src.agents.memory.store import (
     MEMORY_SCOPE_GLOBAL,
@@ -15,18 +16,7 @@ from src.agents.memory.store import (
     list_memory_versions,
     redact_memory,
 )
-from src.agents.memory.updater import (
-    add_behavior_rule,
-    clear_memory,
-    delete_behavior_rule,
-    delete_fact,
-    forget_thread_facts,
-    get_memory_data,
-    get_memory_version_reference,
-    reload_memory_data,
-    update_behavior_rule,
-    upsert_fact,
-)
+from src.agents.memory.updater import get_memory_version_reference
 from src.config.memory_config import get_memory_config
 
 router = APIRouter(prefix="/api", tags=["memory"])
@@ -95,7 +85,6 @@ class MemoryConfigResponse(BaseModel):
     behavior_rules_enabled: bool
     decay_enabled: bool
     decay_half_life_days: int
-    decay_archive_threshold: float
     recall_top_k: int
 
 
@@ -188,13 +177,18 @@ def _scope_args(scope: MemoryScope, workspace_id: str | None) -> tuple[str, str 
     return normalized, workspace_id
 
 
+def _scopes(scope: MemoryScope, workspace_id: str | None) -> MemoryScopes:
+    """Validate the query params and resolve them to a backend scope target."""
+    normalized, wsid = _scope_args(scope, workspace_id)
+    return MemoryScopes.resolve(normalized, wsid)
+
+
 @router.get("/memory", response_model=MemoryResponse, summary="Get Memory Data")
 async def get_memory(
     scope: MemoryScope = Query(default="global"),
     workspace_id: str | None = Query(default=None),
 ) -> MemoryResponse:
-    normalized_scope, wsid = _scope_args(scope, workspace_id)
-    return MemoryResponse(**get_memory_data(scope=normalized_scope, workspace_id=wsid))
+    return MemoryResponse(**get_memory_backend().get_profile(scopes=_scopes(scope, workspace_id)))
 
 
 @router.post("/memory/reload", response_model=MemoryResponse, summary="Reload Memory Data")
@@ -202,8 +196,7 @@ async def reload_memory(
     scope: MemoryScope = Query(default="global"),
     workspace_id: str | None = Query(default=None),
 ) -> MemoryResponse:
-    normalized_scope, wsid = _scope_args(scope, workspace_id)
-    return MemoryResponse(**reload_memory_data(scope=normalized_scope, workspace_id=wsid))
+    return MemoryResponse(**get_memory_backend().reload_profile(scopes=_scopes(scope, workspace_id)))
 
 
 @router.get("/memory/config", response_model=MemoryConfigResponse, summary="Get Memory Configuration")
@@ -222,7 +215,6 @@ async def get_memory_config_endpoint() -> MemoryConfigResponse:
         behavior_rules_enabled=config.behavior_rules_enabled,
         decay_enabled=config.decay_enabled,
         decay_half_life_days=config.decay_half_life_days,
-        decay_archive_threshold=config.decay_archive_threshold,
         recall_top_k=config.recall_top_k,
     )
 
@@ -234,7 +226,7 @@ async def get_memory_status(
 ) -> MemoryStatusResponse:
     normalized_scope, wsid = _scope_args(scope, workspace_id)
     config = await get_memory_config_endpoint()
-    data = MemoryResponse(**get_memory_data(scope=normalized_scope, workspace_id=wsid))
+    data = MemoryResponse(**get_memory_backend().get_profile(scopes=_scopes(scope, workspace_id)))
     return MemoryStatusResponse(
         config=config,
         data=data,
@@ -309,15 +301,13 @@ async def upsert_fact_endpoint(
     scope: MemoryScope = Query(default="global"),
     workspace_id: str | None = Query(default=None),
 ) -> Fact:
-    normalized_scope, wsid = _scope_args(scope, workspace_id)
-    updated = upsert_fact(
+    updated = get_memory_backend().upsert_fact(
         fact_id=fact_id,
         content=request.content,
         category=request.category,
         confidence=request.confidence,
         source=request.source,
-        scope=normalized_scope,
-        workspace_id=wsid,
+        scopes=_scopes(scope, workspace_id),
     )
     return Fact(**updated)
 
@@ -328,8 +318,7 @@ async def delete_fact_endpoint(
     scope: MemoryScope = Query(default="global"),
     workspace_id: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    normalized_scope, wsid = _scope_args(scope, workspace_id)
-    removed = delete_fact(fact_id=fact_id, scope=normalized_scope, workspace_id=wsid)
+    removed = get_memory_backend().delete_fact(fact_id=fact_id, scopes=_scopes(scope, workspace_id))
     if not removed:
         raise HTTPException(status_code=404, detail=f"Fact '{fact_id}' not found")
     return {"success": True, "id": fact_id}
@@ -341,8 +330,7 @@ async def forget_thread_endpoint(
     scope: MemoryScope = Query(default="workspace"),
     workspace_id: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    normalized_scope, wsid = _scope_args(scope, workspace_id)
-    removed = forget_thread_facts(request.thread_id, scope=normalized_scope, workspace_id=wsid)
+    removed = get_memory_backend().forget_run(request.thread_id, scopes=_scopes(scope, workspace_id))
     return {"success": True, "removed": removed}
 
 
@@ -352,13 +340,11 @@ async def create_behavior_rule_endpoint(
     scope: MemoryScope = Query(default="global"),
     workspace_id: str | None = Query(default=None),
 ) -> BehaviorRule:
-    normalized_scope, wsid = _scope_args(scope, workspace_id)
-    rule = add_behavior_rule(
+    rule = get_memory_backend().add_rule(
         instruction=request.instruction,
         active=request.active,
         source=request.source,
-        scope=normalized_scope,
-        workspace_id=wsid,
+        scopes=_scopes(scope, workspace_id),
     )
     return BehaviorRule(**rule)
 
@@ -370,14 +356,12 @@ async def update_behavior_rule_endpoint(
     scope: MemoryScope = Query(default="global"),
     workspace_id: str | None = Query(default=None),
 ) -> BehaviorRule:
-    normalized_scope, wsid = _scope_args(scope, workspace_id)
     try:
-        rule = update_behavior_rule(
+        rule = get_memory_backend().update_rule(
             rule_id=rule_id,
             instruction=request.instruction,
             active=request.active,
-            scope=normalized_scope,
-            workspace_id=wsid,
+            scopes=_scopes(scope, workspace_id),
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -390,8 +374,7 @@ async def delete_behavior_rule_endpoint(
     scope: MemoryScope = Query(default="global"),
     workspace_id: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    normalized_scope, wsid = _scope_args(scope, workspace_id)
-    deleted = delete_behavior_rule(rule_id=rule_id, scope=normalized_scope, workspace_id=wsid)
+    deleted = get_memory_backend().delete_rule(rule_id=rule_id, scopes=_scopes(scope, workspace_id))
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Rule '{rule_id}' not found")
     return {"success": True, "id": rule_id}
@@ -411,7 +394,7 @@ async def clear_memory_endpoint(
     workspace_id: str | None = Query(default=None),
 ) -> MemoryClearResponse:
     normalized_scope, wsid = _scope_args(scope, workspace_id)
-    cleared = clear_memory(scope=normalized_scope, workspace_id=wsid)
+    cleared = get_memory_backend().delete_scope(scopes=_scopes(scope, workspace_id))
     return MemoryClearResponse(
         scope=normalized_scope,
         scope_id=wsid or "global",

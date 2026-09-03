@@ -37,7 +37,6 @@ class MemoryUpdateQueue:
         self._lock = threading.Lock()
         self._timer: threading.Timer | None = None
         self._processing = False
-        self._scope_locks: dict[tuple[str, str, str], threading.Lock] = {}
 
     def add(self, thread_id: str, messages: list[Any], agent_name: str | None = None, workspace_id: str | None = None) -> None:
         """Add a conversation to the update queue.
@@ -67,7 +66,7 @@ class MemoryUpdateQueue:
             # Reset or start the debounce timer
             self._reset_timer()
 
-        print(f"Memory update queued for thread {thread_id}, queue size: {len(self._queue)}")
+        logger.debug("Memory update queued for thread %s, queue size: %d", thread_id, len(self._queue))
 
     def _reset_timer(self) -> None:
         """Reset the debounce timer."""
@@ -85,7 +84,7 @@ class MemoryUpdateQueue:
         self._timer.daemon = True
         self._timer.start()
 
-        print(f"Memory update timer set for {config.debounce_seconds}s")
+        logger.debug("Memory update timer set for %ss", config.debounce_seconds)
 
     def _process_queue(self) -> None:
         """Process all queued conversation contexts."""
@@ -103,19 +102,18 @@ class MemoryUpdateQueue:
             self._queue.clear()
             self._timer = None
 
-        print(f"Processing {len(contexts_to_process)} queued memory updates")
+        logger.info("Processing %d queued memory updates", len(contexts_to_process))
 
         try:
             for context in contexts_to_process:
                 try:
-                    print(f"Updating memory for thread {context.thread_id}")
-                    success_global, success_workspace = self._update_context_memory(context)
-                    if success_global or success_workspace:
-                        print(f"Memory updated successfully for thread {context.thread_id}")
+                    logger.debug("Updating memory for thread %s", context.thread_id)
+                    if self._update_context_memory(context):
+                        logger.info("Memory updated for thread %s", context.thread_id)
                     else:
-                        print(f"Memory update skipped/failed for thread {context.thread_id}")
-                except Exception as e:
-                    print(f"Error updating memory for thread {context.thread_id}: {e}")
+                        logger.warning("Memory update skipped/failed for thread %s", context.thread_id)
+                except Exception:
+                    logger.exception("Error updating memory for thread %s", context.thread_id)
 
                 # Small delay between updates to avoid rate limiting
                 if len(contexts_to_process) > 1:
@@ -125,40 +123,21 @@ class MemoryUpdateQueue:
             with self._lock:
                 self._processing = False
 
-    def _scope_lock(self, *, agent_name: str | None, scope: str, workspace_id: str | None) -> threading.Lock:
-        key = (agent_name or "_global", scope, workspace_id or "_")
-        with self._lock:
-            lock = self._scope_locks.get(key)
-            if lock is None:
-                lock = threading.Lock()
-                self._scope_locks[key] = lock
-            return lock
+    def _update_context_memory(self, context: ConversationContext) -> bool:
+        """Hand one conversation to the storage backend.
 
-    def _update_context_memory(self, context: ConversationContext) -> tuple[bool, bool]:
-        # Import here to avoid circular dependency.
-        from src.agents.memory.updater import MemoryUpdater
+        Scope fan-out and per-scope write locking are the backend's concern;
+        the queue only owns batching and debounce.
+        """
+        # Imported here to avoid a circular dependency at module load.
+        from src.agents.memory.backend import get_memory_backend
 
-        updater = MemoryUpdater()
-        global_lock = self._scope_lock(agent_name=context.agent_name, scope="global", workspace_id=None)
-        workspace_id = context.workspace_id or context.thread_id
-        workspace_lock = self._scope_lock(agent_name=context.agent_name, scope="workspace", workspace_id=workspace_id)
-
-        with global_lock:
-            success_global = updater.update_memory(
-                messages=context.messages,
-                thread_id=context.thread_id,
-                agent_name=context.agent_name,
-                scope="global",
-            )
-        with workspace_lock:
-            success_workspace = updater.update_memory(
-                messages=context.messages,
-                thread_id=context.thread_id,
-                agent_name=context.agent_name,
-                scope="workspace",
-                workspace_id=workspace_id,
-            )
-        return success_global, success_workspace
+        return get_memory_backend().ingest(
+            context.messages,
+            thread_id=context.thread_id,
+            agent_name=context.agent_name,
+            workspace_id=context.workspace_id or context.thread_id,
+        )
 
     def _cancel_pending(self, thread_id: str) -> None:
         self._queue = [c for c in self._queue if c.thread_id != thread_id]

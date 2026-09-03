@@ -682,9 +682,9 @@ class CapyHomeClient:
         Returns:
             Memory data dict (see src/agents/memory/updater.py for structure).
         """
-        from src.agents.memory.updater import get_memory_data
+        from src.agents.memory.backend import MemoryScopes, get_memory_backend
 
-        return get_memory_data()
+        return get_memory_backend().get_profile(scopes=MemoryScopes.resolve("global"))
 
     def get_model(self, name: str) -> dict | None:
         """Get a specific model's configuration by name.
@@ -929,7 +929,6 @@ class CapyHomeClient:
             "behavior_rules_enabled": getattr(config, "behavior_rules_enabled", True),
             "decay_enabled": getattr(config, "decay_enabled", True),
             "decay_half_life_days": getattr(config, "decay_half_life_days", 60),
-            "decay_archive_threshold": getattr(config, "decay_archive_threshold", 0.1),
             "recall_top_k": getattr(config, "recall_top_k", 5),
         }
 

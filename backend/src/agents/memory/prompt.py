@@ -3,8 +3,12 @@
 import re
 from typing import Any
 
-from src.agents.memory.store import MEMORY_SCOPE_GLOBAL, MEMORY_SCOPE_WORKSPACE
-from src.agents.memory.vector_store import get_memory_vector_store
+from src.agents.memory.backend import (
+    MEMORY_SCOPE_GLOBAL,
+    MEMORY_SCOPE_WORKSPACE,
+    MemoryScopes,
+    get_memory_backend,
+)
 from src.config.memory_config import get_memory_config
 
 try:
@@ -121,34 +125,6 @@ Important Rules:
   Recording upload events causes confusion in subsequent conversations.
 
 Return ONLY valid JSON, no explanation or markdown."""
-
-
-# Prompt template for extracting facts from a single message
-FACT_EXTRACTION_PROMPT = """Extract factual information about the user from this message.
-
-Message:
-{message}
-
-Extract facts in this JSON format:
-{{
-  "facts": [
-    {{ "content": "...", "category": "preference|knowledge|context|behavior|goal", "confidence": 0.0-1.0 }}
-  ]
-}}
-
-Categories:
-- preference: User preferences (likes/dislikes, styles, tools)
-- knowledge: User's expertise or knowledge areas
-- context: Background context (location, job, projects)
-- behavior: Behavioral patterns
-- goal: User's goals or objectives
-
-Rules:
-- Only extract clear, specific facts
-- Confidence should reflect certainty (explicit statement = 0.9+, implied = 0.6-0.8)
-- Skip vague or temporary information
-
-Return ONLY valid JSON."""
 
 
 def _count_tokens(text: str, encoding_name: str = "cl100k_base") -> int:
@@ -286,13 +262,14 @@ def format_memory_for_injection(
     has_relevance_query = bool(current_turn_text.strip())
     facts_for_injection: list[dict[str, Any]] = []
     if has_relevance_query:
-        scopes = [
-            (MEMORY_SCOPE_WORKSPACE, workspace_id),
-            (MEMORY_SCOPE_GLOBAL, "global"),
-        ]
+        scopes = MemoryScopes.resolve(
+            MEMORY_SCOPE_WORKSPACE if workspace_id else MEMORY_SCOPE_GLOBAL,
+            workspace_id,
+            include_global=True,
+        )
         try:
-            facts_for_injection = get_memory_vector_store().query(
-                query=current_turn_text,
+            facts_for_injection = get_memory_backend().search(
+                current_turn_text,
                 scopes=scopes,
                 top_k=max(1, cfg.recall_top_k * 2),
             )

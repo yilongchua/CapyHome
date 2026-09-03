@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -23,6 +24,8 @@ from src.agents.memory.vector_store import get_memory_vector_store
 from src.config.memory_config import get_memory_config
 from src.config.paths import get_paths
 from src.models import ModelRouter, create_chat_model
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now_iso_z() -> str:
@@ -152,7 +155,7 @@ def _load_memory_from_file(
         data.setdefault("facts", [])
         return data
     except (json.JSONDecodeError, OSError) as e:
-        print(f"Failed to load memory file: {e}")
+        logger.warning("Failed to load memory file %s: %s", file_path, e)
         return _create_empty_memory(normalized_scope, scope_id=scope_id)
 
 
@@ -208,10 +211,10 @@ def _save_memory_to_file(
         _memory_cache[cache_key] = (persisted, mtime)
         return True
     except OSError as e:
-        print(f"Failed to save memory file: {e}")
+        logger.error("Failed to save memory file %s: %s", file_path, e)
         return False
     except ValueError as e:
-        print(f"Memory save rejected: {e}")
+        logger.error("Memory save rejected for %s: %s", file_path, e)
         return False
 
 
@@ -306,10 +309,10 @@ class MemoryUpdater:
                 )
             return ok
         except json.JSONDecodeError as e:
-            print(f"Failed to parse LLM response for memory update: {e}")
+            logger.error("Failed to parse LLM response for memory update (thread=%s scope=%s): %s", thread_id, normalized_scope, e)
             return False
-        except Exception as e:
-            print(f"Memory update failed: {e}")
+        except Exception:
+            logger.exception("Memory update failed (thread=%s scope=%s)", thread_id, normalized_scope)
             return False
 
     def _apply_updates(
