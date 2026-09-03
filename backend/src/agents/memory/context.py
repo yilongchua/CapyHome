@@ -84,3 +84,69 @@ def build_memory_context(
     except Exception:
         log.exception("Failed to load memory context")
         return ""
+
+
+def build_subagent_rules_context(
+    thread_id: str | None = None,
+    *,
+    agent_name: str | None = None,
+    logger: logging.Logger | None = None,
+) -> str:
+    """Build a ``<behavior_rules>`` block for a delegated (subagent) run.
+
+    Subagents get **rules only, never facts**. Rules are short, user-authored
+    directives that must apply everywhere — a user who sets "always answer in
+    Dutch" via ``/memory`` reasonably expects delegated work to honour it too.
+    Facts are deliberately excluded: they are retrieved evidence, and injecting
+    them into a research subagent risks passing personal context off as sourced
+    findings. Subagents that should search memory get the ``recall`` tool
+    instead, which is an explicit per-subagent decision.
+
+    Returns an empty string when memory or behavior rules are disabled, when no
+    active rules exist, or on any failure — this must never break delegation.
+    """
+    log = logger or _fallback_logger
+    try:
+        from src.agents.memory.backend import MemoryScopes, get_memory_backend
+        from src.config.memory_config import get_memory_config
+
+        config = get_memory_config()
+        if not config.enabled or not config.injection_enabled or not config.behavior_rules_enabled:
+            return ""
+
+        backend = get_memory_backend()
+        rules: list[dict] = []
+        seen: set[str] = set()
+
+        targets = []
+        if config.workspace_scope_enabled and thread_id:
+            targets.append(MemoryScopes.resolve("workspace", thread_id, agent_name))
+        if config.global_scope_enabled:
+            targets.append(MemoryScopes.resolve("global", None, agent_name))
+
+        for scopes in targets:
+            profile = backend.get_profile(scopes=scopes) or {}
+            for rule in profile.get("behaviorRules") or []:
+                if not isinstance(rule, dict) or not bool(rule.get("active", True)):
+                    continue
+                instruction = str(rule.get("instruction") or "").strip()
+                if not instruction or instruction in seen:
+                    continue
+                seen.add(instruction)
+                rules.append(rule)
+
+        if not rules:
+            return ""
+
+        lines = "\n".join(f"- {str(r.get('instruction')).strip()}" for r in rules[:10])
+        return f"""
+
+<behavior_rules>
+Standing instructions from the user. They apply to your work and your output
+format. They do not license you to broaden your assigned scope.
+{lines}
+</behavior_rules>
+"""
+    except Exception:
+        log.exception("Failed to load subagent behavior rules")
+        return ""
