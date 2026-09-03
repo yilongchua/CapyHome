@@ -26,8 +26,9 @@ Each issue carries a **mem0 verdict** — whether the migration
 | [Q-1](#q-1-one-debounce-timer-for-all-threads) | One debounce timer starves other threads | **Medium** | 🔧 fix during |
 | [Q-2](#q-2-two-extraction-llm-calls-per-turn) | Two extraction LLM calls per turn | **Medium** | ✅ fixed |
 | [U-2](#u-2-fact-truncation-ignores-recency) | Fact truncation ignores recency | **Medium** | ✅ fixed |
+| [U-4](#u-4-transient-session-state-is-stored-as-durable-memory) | 26% of stored facts are transient session state | **High** | ❌ **NOT fixed** |
 | [U-3](#u-3-extraction-fails-silently) | Extraction fails silently via `print` | **Medium** | 🔧 fix during |
-| [M-3](#m-3-subagents-get-no-memory-injection) | Subagents get no memory injection | **Medium** | ⚠️ decide |
+| [M-3](#m-3-subagents-get-no-memory-injection) | Subagents get no memory injection | **Medium** | ✅ **SHIPPED** (rules only) |
 | [M-4](#m-4-recall-is-absent-from-the-research-path) | `recall` absent from the research path | **Medium** | ⚠️ decide |
 | [R-2](#r-2-memory-is-frozen-for-the-whole-run) | Memory frozen for the whole run | **Medium** | ➖ unrelated |
 | [R-3](#r-3-the-narrative-sections-are-unreachable-on-a-normal-turn) | Narrative sections unreachable on a normal turn | **Medium** | ⚠️ decide |
@@ -120,10 +121,15 @@ the subagent definition. No `<memory>` block, no behavior rules.
 delegated runs. A rule like "always answer in Dutch" is honoured by the lead
 agent and ignored by its subagents.
 
-**mem0 verdict:** ⚠️ **decide.** Behavior rules are the strongest case for
-injecting *something* — they are deterministic, short, and the user explicitly
-authored them. Recommend injecting **rules only** (not facts) into subagent
-prompts, which is cheap and has no retrieval cost.
+**✅ SHIPPED 2026-09-03** — `build_subagent_rules_context()` in
+`memory/context.py`, wired into `SubagentExecutor._create_agent`. **Rules only,
+never facts**: rules are user-authored directives that should apply everywhere,
+whereas facts are retrieved evidence whose injection into a research subagent
+would risk personal context being presented as sourced findings (see
+[M-4](#m-4-recall-is-absent-from-the-research-path)). Dedupes across workspace +
+global scopes, skips inactive rules, caps at 10, honours all three kill
+switches, and returns `""` on any failure so delegation cannot break.
+Verified with 13 assertions including "no facts leaked into subagent prompt".
 
 ### M-4: `recall` is absent from the research path
 
@@ -150,11 +156,40 @@ about the user.
 Combined with M-3 (no injection), `knowledge-researcher` operates with **zero**
 memory context by either channel.
 
-**mem0 verdict:** ⚠️ **decide.** This becomes more costly to leave alone once
-retrieval is semantic and actually useful. Cheapest fix: remove `"recall"` from
-`knowledge_researcher.py`'s `disallowed_tools`. Whether the deny was deliberate
-(context-budget protection) or incidental is worth confirming with whoever wrote
-it.
+**⚠️ UPDATE 2026-09-03 — the deny is deliberate, not incidental.**
+`knowledge_researcher.py:23` states it in the subagent's own prompt:
+
+> "Do not use personal-memory recall. Ground the report in retrieved research evidence."
+
+It is enforced in **three** places: that `<scope>` line, omission from the
+`tools` allow-list, and the `disallowed_tools` entry. Note also that
+`comparison-dimension-researcher` grants `recall` explicitly — the two research
+agents have *intentionally opposite* policies, which is a considered distinction
+rather than drift. **Do not simply remove the deny**; it would take two edits
+(allow-list + deny-list) and contradict a documented design decision.
+
+The rationale is sound for a report-producing agent: a research report's claims
+must trace to cited sources, and personal memory is not a source.
+
+**But the deny conflates two different uses of memory:**
+
+| Use | Should it be blocked? |
+|-----|----------------------|
+| Memory as **evidence** in the report's findings | **Yes** — this is what the prompt correctly forbids |
+| Memory as **context** for what to research and how to present it (user is a ship-broking analyst → weight the maritime angle) | Arguably no — this never enters the findings |
+
+A surgical version would grant `recall` while extending the `<scope>` rule to
+"you may use recall to orient your research; never cite it as evidence or let it
+substitute for a source." That is a prompt-design decision with its own
+regression risk, not a one-line fix.
+
+**Partially addressed:** behavior-rule injection ([M-3](#m-3-subagents-get-no-memory-injection),
+shipped) already delivers much of the *context* benefit for all subagents,
+including this one, without any evidence-contamination risk — rules are
+directives, not findings.
+
+**mem0 verdict:** ⚠️ **decide** — now a narrower question than originally framed:
+does `knowledge-researcher` need memory *beyond* behavior rules?
 
 ---
 
@@ -215,6 +250,54 @@ correctly identify stale ids degrades. Near-duplicates accumulate.
 migration — mem0's `ADD / UPDATE / DELETE / NOOP` loop exists for exactly this,
 and sends only semantically-neighbouring memories for the decision rather than
 the whole profile.
+
+### U-4: Transient session state is stored as durable memory
+
+**Discovered by the mem0 spike, 2026-09-03 — not visible from code reading.**
+
+**Evidence:** measured against the live fact base (84 global facts):
+
+```
+transient/session : 22  (26%)
+durable-looking   : 62
+by category       : context 42, behavior 13, knowledge 12, goal 10, preference 7
+```
+
+Examples currently held as permanent memory:
+
+- "Working with addr_fail_reason - Bad Address List.csv containing 17,842 rows"
+- "Defines execution schemas via workflow.json to manage row-level tasks"
+- "Phase 1 URL validation of `Bad_websites.csv` completed using `aiohttp`, resulting in 448 True"
+- "Output CSV path confirmed as /mnt/user-data/workspace/COSCO_Fleet_Review_..."
+
+These are *run artifacts* — filenames, row counts, paths, phase status. They were
+true during one task and are noise forever after.
+
+**Impact — this is why retrieval looks bad regardless of backend.** In the spike,
+these facts dominated the top results for unrelated queries: "where is the user
+based" returned three COSCO workflow facts, because they are the densest cluster
+in the store. A quarter of the fact base is actively competing with real
+preferences for injection slots.
+
+**mem0 verdict:** ❌ **NOT fixed.** mem0 dedupes *near-duplicates*; it has no
+notion of "durable vs. ephemeral". Migrating without addressing this carries the
+pollution across and then embeds it.
+
+The extraction prompt already has a hygiene rule for exactly this failure — but
+it is scoped to `topOfMind` only:
+
+> "Do NOT keep completed one-off requests in topOfMind (finished trip plans,
+> product comparisons, temporary research summaries…)"
+
+**The same rule was never applied to `newFacts`.** That is the fix: extend the
+durability test to fact extraction in the custom extraction prompt
+([G-6](./05-mem0-mapping.md)), and consider a pre-backfill prune so the
+migration does not import 22 known-bad rows.
+
+Note this partly explains [R-3](#r-3-the-narrative-sections-are-unreachable-on-a-normal-turn):
+the prompt invests heavily in narrative hygiene that nothing reads, while the
+facts that *are* read have no hygiene rule at all.
+
 
 ### U-2: Fact truncation ignores recency
 

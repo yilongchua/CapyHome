@@ -35,6 +35,7 @@ of its claims do not match the implementation — see
 | 05 | [mem0 mapping](./05-mem0-mapping.md) | Feature-by-feature: what mem0 replaces, what it does not have, what must be rebuilt |
 | 06 | [Migration plan](./06-migration-plan.md) | Target layout under `.capyhome/memory/`, adapter design, phased cutover, data backfill, rollback |
 | 07 | [Implementation strategy](./07-implementation-strategy.md) | Module design, `MemoryBackend` protocol, config schema, per-file wiring, task DAG, test plan, definition of done |
+| 08 | [mem0 spike findings](./08-mem0-spike-findings.md) | **O-2 answered.** Measured results against the live fact base: Qdrant lock, backfill/query cost, threshold calibration, API corrections to 05/07 |
 | — | [Issue register](./issues_memory.md) | Every verified defect with a mem0 verdict (fixed / fix-during / decide / unrelated) |
 
 ---
