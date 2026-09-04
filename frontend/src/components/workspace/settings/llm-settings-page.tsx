@@ -156,7 +156,7 @@ export function LlmSettingsPage() {
     void queryClient.invalidateQueries({ queryKey: ["models"] });
   }, [queryClient]);
   const { mutate: testEndpoint, data: testResult, isPending: testing, reset: resetTest } = useTestLlmEndpoint();
-  const { mutate: saveEndpoints, isPending: saving } = useSaveLlmEndpoints();
+  const { mutate: saveEndpoints, isPending: saving, isError: saveError, error: saveErrorDetail } = useSaveLlmEndpoints();
 
   function handleProviderChange(p: ProviderType) {
     setProvider(p);
@@ -541,6 +541,13 @@ export function LlmSettingsPage() {
           </Button>
         )}
       </div>
+
+      {/* Save error */}
+      {saveError && (
+        <div className="text-destructive mb-3 text-sm">
+          {saveErrorDetail instanceof Error ? saveErrorDetail.message : t.settings.llm.connectionFailed}
+        </div>
+      )}
 
       {/* Test result: discovered models */}
       {testResult && !testResult.ok && (
