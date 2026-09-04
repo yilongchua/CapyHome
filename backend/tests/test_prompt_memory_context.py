@@ -19,6 +19,20 @@ def _memory_payload(summary: str) -> dict:
     }
 
 
+def _patch_backend_search(monkeypatch, results: list[dict]) -> None:
+    """Point the injection path's memory backend at a fixed result set.
+
+    ``format_memory_for_injection`` retrieves through ``MemoryBackend.search``
+    rather than the SQLite index directly, so tests stub the backend seam.
+    """
+
+    class _Backend:
+        def search(self, query, *, scopes, top_k):  # noqa: ARG002
+            return results
+
+    monkeypatch.setattr("src.agents.memory.prompt.get_memory_backend", lambda: _Backend())
+
+
 def _patch_prompt_dependencies(monkeypatch, *, thread_id: str, memory_config: SimpleNamespace) -> list[tuple[str, str | None]]:
     calls: list[tuple[str, str | None]] = []
 
@@ -115,11 +129,7 @@ def test_memory_injection_suppresses_irrelevant_fallback_facts(monkeypatch):
         lambda: SimpleNamespace(recall_top_k=5, injection_relevance_threshold=0.5),
     )
 
-    class _VectorStore:
-        def query(self, **kwargs):  # noqa: ARG002
-            return []
-
-    monkeypatch.setattr("src.agents.memory.prompt.get_memory_vector_store", lambda: _VectorStore())
+    _patch_backend_search(monkeypatch, [])
     memory_data = {
         "user": {"workContext": {"summary": "User works on maritime law research."}},
         "history": {"recentMonths": {"summary": "User planned trips and researched legal filings."}},
@@ -143,18 +153,17 @@ def test_memory_injection_keeps_relevant_vector_fact(monkeypatch):
         lambda: SimpleNamespace(recall_top_k=5, injection_relevance_threshold=0.25),
     )
 
-    class _VectorStore:
-        def query(self, **kwargs):  # noqa: ARG002
-            return [
-                {
-                    "content": "User is comparing renting and buying in Sydney.",
-                    "category": "context",
-                    "confidence": 0.9,
-                    "score": 0.61,
-                }
-            ]
-
-    monkeypatch.setattr("src.agents.memory.prompt.get_memory_vector_store", lambda: _VectorStore())
+    _patch_backend_search(
+        monkeypatch,
+        [
+            {
+                "content": "User is comparing renting and buying in Sydney.",
+                "category": "context",
+                "confidence": 0.9,
+                "score": 0.61,
+            }
+        ],
+    )
     memory_data = {
         "user": {"workContext": {"summary": "User works on unrelated projects."}},
         "history": {},
@@ -176,18 +185,17 @@ def test_memory_injection_filters_high_confidence_unrelated_vector_fact(monkeypa
         lambda: SimpleNamespace(recall_top_k=5, injection_relevance_threshold=0.25),
     )
 
-    class _VectorStore:
-        def query(self, **kwargs):  # noqa: ARG002
-            return [
-                {
-                    "content": "User is tracking astronomy gear and telescope reviews.",
-                    "category": "preference",
-                    "confidence": 0.99,
-                    "score": 0.35,
-                }
-            ]
-
-    monkeypatch.setattr("src.agents.memory.prompt.get_memory_vector_store", lambda: _VectorStore())
+    _patch_backend_search(
+        monkeypatch,
+        [
+            {
+                "content": "User is tracking astronomy gear and telescope reviews.",
+                "category": "preference",
+                "confidence": 0.99,
+                "score": 0.35,
+            }
+        ],
+    )
 
     rendered = memory_prompt_module.format_memory_for_injection(
         {"facts": [], "behaviorRules": []},
@@ -203,18 +211,17 @@ def test_memory_injection_keeps_location_fact_for_my_city_query(monkeypatch):
         lambda: SimpleNamespace(recall_top_k=5, injection_relevance_threshold=0.25),
     )
 
-    class _VectorStore:
-        def query(self, **kwargs):  # noqa: ARG002
-            return [
-                {
-                    "content": "User is evaluating relocation options from Singapore to London, Dubai, and Sydney.",
-                    "category": "context",
-                    "confidence": 0.9,
-                    "score": 0.32,
-                }
-            ]
-
-    monkeypatch.setattr("src.agents.memory.prompt.get_memory_vector_store", lambda: _VectorStore())
+    _patch_backend_search(
+        monkeypatch,
+        [
+            {
+                "content": "User is evaluating relocation options from Singapore to London, Dubai, and Sydney.",
+                "category": "context",
+                "confidence": 0.9,
+                "score": 0.32,
+            }
+        ],
+    )
 
     rendered = memory_prompt_module.format_memory_for_injection(
         {"facts": [], "behaviorRules": []},

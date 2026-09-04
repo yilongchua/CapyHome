@@ -62,6 +62,10 @@ export async function saveLlmEndpoints(userModels: Record<string, UserLlmEndpoin
       body: JSON.stringify({ userModels }),
     },
   );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Failed to save LLM endpoints (${response.status})`);
+  }
   return response.json() as Promise<LlmEndpointsData>;
 }
 
@@ -99,6 +103,10 @@ export async function saveEmbeddingEndpoints(
       body: JSON.stringify({ userEmbeddingModels }),
     },
   );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Failed to save embedding endpoints (${response.status})`);
+  }
   return response.json() as Promise<EmbeddingEndpointsData>;
 }
 

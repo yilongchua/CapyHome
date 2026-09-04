@@ -171,61 +171,14 @@ CRITICAL_REMINDERS_SECTION_TEMPLATE = """<critical_reminders>
 
 
 def _get_memory_context(agent_name: str | None = None, *, current_turn_text: str = "") -> str:
-    """Get memory context for injection into system prompt.
+    """Build the ``<memory>`` block for this agent's system prompt.
 
-    Args:
-        agent_name: If provided, loads per-agent memory. If None, loads global memory.
-
-    Returns:
-        Formatted memory context string wrapped in XML tags, or empty string if disabled.
+    Thin wrapper over :func:`src.agents.memory.context.build_memory_context` so
+    failures are logged under this module's logger. See that module for details.
     """
-    try:
-        from langgraph.config import get_config
+    from src.agents.memory.context import build_memory_context
 
-        from src.agents.memory import format_memory_for_injection, get_memory_data
-        from src.config.memory_config import get_memory_config
-
-        config = get_memory_config()
-        if not config.enabled or not config.injection_enabled:
-            return ""
-
-        cfg = get_config()
-        configurable = cfg.get("configurable", {}) if isinstance(cfg, dict) else {}
-        workspace_id = str(configurable.get("thread_id") or "") or None
-
-        memory_data = get_memory_data(agent_name, scope="global") if config.global_scope_enabled else {}
-        workspace_memory_data = None
-        if config.workspace_scope_enabled and workspace_id:
-            workspace_memory_data = get_memory_data(
-                agent_name,
-                scope="workspace",
-                workspace_id=workspace_id,
-            )
-
-        current_turn_text = current_turn_text.strip() or str(
-            configurable.get("current_turn_text")
-            or configurable.get("original_user_request")
-            or configurable.get("user_prompt")
-            or ""
-        ).strip()
-        memory_content = format_memory_for_injection(
-            memory_data,
-            max_tokens=config.max_injection_tokens,
-            current_turn_text=current_turn_text,
-            workspace_memory_data=workspace_memory_data,
-            workspace_id=workspace_id,
-        )
-
-        if not memory_content.strip():
-            return ""
-
-        return f"""<memory>
-{memory_content}
-</memory>
-"""
-    except Exception:
-        logger.exception("Failed to load memory context")
-        return ""
+    return build_memory_context(agent_name, current_turn_text=current_turn_text, logger=logger)
 
 
 def get_skills_prompt_section(available_skills: set[str] | None = None) -> str:

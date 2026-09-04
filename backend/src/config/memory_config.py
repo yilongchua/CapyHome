@@ -1,11 +1,23 @@
 """Configuration for memory mechanism."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
 class MemoryConfig(BaseModel):
     """Configuration for global memory mechanism."""
 
+    backend: Literal["legacy", "mem0", "dual"] = Field(
+        default="legacy",
+        description=(
+            "Storage backend for long-term memory. "
+            "`legacy` uses memory.json + the SQLite lexical index. "
+            "`mem0` uses the self-hosted mem0 store under {base_dir}/memory/mem0. "
+            "`dual` writes both during migration. "
+            "See docs/memory_migration/."
+        ),
+    )
     enabled: bool = Field(
         default=True,
         description="Whether to enable memory mechanism",
@@ -76,12 +88,6 @@ class MemoryConfig(BaseModel):
         ge=7,
         le=365,
         description="Half-life in days used for temporal decay of fact relevance.",
-    )
-    decay_archive_threshold: float = Field(
-        default=0.1,
-        ge=0.0,
-        le=1.0,
-        description="Facts below this relevance score become archival candidates.",
     )
     recall_top_k: int = Field(
         default=5,

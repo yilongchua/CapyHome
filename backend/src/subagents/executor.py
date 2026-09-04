@@ -229,11 +229,20 @@ class SubagentExecutor:
             PermissionMiddleware(),  # Enforce arg-sensitive permission rules inside delegated runs.
         ]
 
+        # Standing user behavior rules apply to delegated runs too. Rules only —
+        # never facts; see build_subagent_rules_context for the reasoning.
+        from src.agents.memory.context import build_subagent_rules_context
+
+        system_prompt = self.config.system_prompt + build_subagent_rules_context(
+            self.thread_id,
+            logger=logger,
+        )
+
         return create_agent(
             model=model,
             tools=self.tools,
             middleware=middlewares,
-            system_prompt=self.config.system_prompt,
+            system_prompt=system_prompt,
             state_schema=ThreadState,
         )
 
